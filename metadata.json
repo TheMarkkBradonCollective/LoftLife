@@ -1,0 +1,6 @@
+{
+  "name": "Loftline",
+  "description": "An interactive 3D animated room builder and avatar hangout where you customize your character, decorate your loft on a tactile grid, and walk around interacting with furniture.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
