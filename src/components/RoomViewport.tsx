@@ -34,6 +34,8 @@ import {
   isMainWorldPosWalkable,
   resolveCityCameraScale,
 } from '../game/worldBuilder';
+import { createTransitBusMesh, createTransitStopMarker } from '../game/transitBuilder';
+import { touchInput } from '../game/touchInput';
 import type {
   ActiveResident,
   AvatarConfig,
@@ -45,6 +47,48 @@ import type {
   ViewMode,
   WorldLocation,
 } from '../game/types';
+import type { RemotePlayer, TransitLine, TransitVehicle } from '../net/realtime';
+
+/** One live avatar for another connected player. */
+interface RemoteRigEntry {
+  rig: AvatarRig;
+  signature: string;
+  target: { x: number; y: number; z: number; yaw: number };
+  emote: EmoteType;
+  moving: boolean;
+  phase: number;
+}
+
+const EMOTE_SET = new Set<string>(['idle', 'walk', 'sit', 'wave', 'dance', 'cheer', 'jump']);
+
+/** Floating name label above a remote player. */
+function createNameTag(text: string): THREE.Sprite {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.font = 'bold 30px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = text.slice(0, 18);
+    const width = Math.min(248, ctx.measureText(label).width + 30);
+    ctx.fillStyle = 'rgba(5, 12, 7, 0.72)';
+    ctx.beginPath();
+    ctx.roundRect((256 - width) / 2, 10, width, 44, 14);
+    ctx.fill();
+    ctx.fillStyle = '#8eff78';
+    ctx.fillText(label, 128, 34);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false })
+  );
+  sprite.scale.set(1.5, 0.375, 1);
+  sprite.position.y = 2.05;
+  return sprite;
+}
 
 export interface CameraPresetRequest {
   id: number;
@@ -73,7 +117,14 @@ interface RoomViewportProps {
   movingUid: string | null;
   cameraPreset: CameraPresetRequest | null;
   modalOpen?: boolean;
+  remotePlayers?: RemotePlayer[];
   playerPoseRef?: React.MutableRefObject<{ x: number; z: number; yaw: number }>;
+  transitLines?: TransitLine[];
+  transitVehicles?: TransitVehicle[];
+  ridingVehicle?: { x: number; y?: number; z: number; heading: number } | null;
+  ridingLabel?: string | null;
+  onBoardTransit?: (lineId: string, stopId: string) => void;
+  onExitTransit?: () => void;
   onChangeLocation: (next: WorldLocation) => void;
   onSelectItem: (uid: string | null) => void;
   onPlaceItem: (candidate: Omit<PlacedItem, 'uid'>) => void;
@@ -173,7 +224,14 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   movingUid,
   cameraPreset,
   modalOpen = false,
+  remotePlayers = [],
   playerPoseRef,
+  transitLines = [],
+  transitVehicles = [],
+  ridingVehicle = null,
+  ridingLabel = null,
+  onBoardTransit,
+  onExitTransit,
   onChangeLocation,
   onSelectItem,
   onPlaceItem,
@@ -221,7 +279,14 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     placingColor,
     movingUid,
     modalOpen,
+    remotePlayers,
     playerPoseRef,
+    transitLines,
+    transitVehicles,
+    ridingVehicle,
+    ridingLabel,
+    onBoardTransit,
+    onExitTransit,
     onChangeLocation,
     onSelectItem,
     onPlaceItem,
@@ -259,7 +324,14 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     placingColor,
     movingUid,
     modalOpen,
+    remotePlayers,
     playerPoseRef,
+    transitLines,
+    transitVehicles,
+    ridingVehicle,
+    ridingLabel,
+    onBoardTransit,
+    onExitTransit,
     onChangeLocation,
     onSelectItem,
     onPlaceItem,
@@ -299,6 +371,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     popAnimations: Map<string, number>;
     avatarRig: AvatarRig;
     residentNpcRig: AvatarRig;
+    remoteRigs: Map<string, RemoteRigEntry>;
     roomHandles: ReturnType<typeof buildRoomArchitecture>;
     lobbyHandles: ReturnType<typeof buildHotelLobby>;
     hallwayHandles: ReturnType<typeof buildHotelHallway>;
@@ -518,6 +591,13 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     worldContainer.add(mainWorld.worldGroup);
     scene.add(worldContainer);
 
+    // Rideable LoftLine vehicles + stop markers (server-owned positions).
+    const transitGroup = new THREE.Group();
+    transitGroup.name = 'loftline';
+    scene.add(transitGroup);
+    const transitMeshes = new Map<string, THREE.Group>();
+    const stopMarkers = new Map<string, THREE.Group>();
+
     // Visibility sync on boot
     roomContainer.visible =
       propsRef.current.location === 'room' || propsRef.current.location === 'resident_room';
@@ -561,6 +641,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       popAnimations: new Map<string, number>(),
       avatarRig,
       residentNpcRig,
+      remoteRigs: new Map<string, RemoteRigEntry>(),
       roomHandles,
       lobbyHandles,
       hallwayHandles,
@@ -752,6 +833,17 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       if (loc === 'room' && curMode === 'edit') return null;
 
       const av = handles.avatarState;
+
+      // Riding: the only contextual action is stepping off at the next stop.
+      if (propsRef.current.ridingVehicle) {
+        return {
+          label: `Press E · Step off ${propsRef.current.ridingLabel ?? 'the LoftLine'}`,
+          execute: () => {
+            sfx.playClick();
+            propsRef.current.onExitTransit?.();
+          },
+        };
+      }
 
       if (av.seatedUid) {
         return {
@@ -1049,6 +1141,20 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
               sfx.playClick();
             },
           };
+        }
+      }
+      // LoftLine stops: board the server-driven bus.
+      for (const line of propsRef.current.transitLines ?? []) {
+        for (const stop of line.stops) {
+          if (Math.hypot(av.x - stop.x, av.z - stop.z) < 6) {
+            return {
+              label: `Press E · Board ${line.label} at ${stop.name}`,
+              execute: () => {
+                sfx.playClick();
+                propsRef.current.onBoardTransit?.(line.id, stop.id);
+              },
+            };
+          }
         }
       }
       return null;
@@ -1947,6 +2053,52 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     let lastStreetLabel = '';
 
+    /** Keep rendered buses/stops in sync with the latest server state. */
+    function syncTransit() {
+      const inCity = propsRef.current.location === 'world';
+      const vehicles = inCity ? propsRef.current.transitVehicles ?? [] : [];
+      const seen = new Set<string>();
+      for (const vehicle of vehicles) {
+        seen.add(vehicle.id);
+        let mesh = transitMeshes.get(vehicle.id);
+        if (!mesh) {
+          mesh = createTransitBusMesh();
+          transitGroup.add(mesh);
+          transitMeshes.set(vehicle.id, mesh);
+        }
+        mesh.position.set(vehicle.x, 0.02, vehicle.z);
+        mesh.rotation.y = vehicle.heading;
+      }
+      for (const [id, mesh] of [...transitMeshes]) {
+        if (seen.has(id)) continue;
+        transitGroup.remove(mesh);
+        transitMeshes.delete(id);
+      }
+
+      const wantedStops = new Set<string>();
+      if (inCity) {
+        for (const line of propsRef.current.transitLines ?? []) {
+          for (const stop of line.stops) {
+            const key = `${line.id}:${stop.id}`;
+            wantedStops.add(key);
+            let marker = stopMarkers.get(key);
+            if (!marker) {
+              marker = createTransitStopMarker();
+              transitGroup.add(marker);
+              stopMarkers.set(key, marker);
+            }
+            marker.position.set(stop.x, 0, stop.z);
+          }
+        }
+      }
+      for (const [key, marker] of [...stopMarkers]) {
+        if (wantedStops.has(key)) continue;
+        transitGroup.remove(marker);
+        stopMarkers.delete(key);
+      }
+      transitGroup.visible = inCity;
+    }
+
     function tick() {
       if (disposed) return;
       const delta = Math.min(clock.getDelta(), 0.08);
@@ -1961,9 +2113,51 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       const canWalk =
         !propsRef.current.modalOpen && (currentLoc !== 'room' || currentMode === 'walk');
       let isMoving = false;
-      const sprinting = Boolean(keys['ShiftLeft'] || keys['ShiftRight']);
+      const sprinting = Boolean(keys['ShiftLeft'] || keys['ShiftRight'] || touchInput.sprint);
       const prevAvX = av.x;
       const prevAvZ = av.z;
+      const ride = propsRef.current.ridingVehicle;
+
+      // Touch input shares the keyboard code path.
+      if (touchInput.interact) {
+        touchInput.interact = false;
+        if (!propsRef.current.modalOpen) getNearbyAction()?.execute();
+      }
+      if (touchInput.jump) {
+        touchInput.jump = false;
+        if (canWalk && av.jumpY <= 0.001) {
+          if (av.seatedUid) standUpFromSeat();
+          av.jumpVel = 4.4;
+          sfx.playClick();
+        }
+      }
+      if (touchInput.lookDx !== 0 || touchInput.lookDy !== 0) {
+        if (currentView === 'play') {
+          handles.playCam.lastManualLookTime = performance.now();
+          handles.playCam.yaw -= touchInput.lookDx;
+          handles.playCam.pitch = THREE.MathUtils.clamp(
+            handles.playCam.pitch + touchInput.lookDy,
+            -0.22,
+            1.02
+          );
+        }
+        touchInput.lookDx = 0;
+        touchInput.lookDy = 0;
+      }
+
+      // The server owns the bus; ease the avatar onto its seat.
+      if (ride) {
+        const follow = 1 - Math.exp(-14 * delta);
+        av.x += (ride.x - av.x) * follow;
+        av.y += ((ride.y ?? 0.34) - av.y) * follow;
+        av.z += (ride.z - av.z) * follow;
+        av.yaw += shortestAngleDiff(av.yaw, ride.heading) * (1 - Math.exp(-10 * delta));
+        av.path = [];
+        av.pendingSeat = null;
+        av.pendingPortal = null;
+        av.pendingHallDoor = null;
+        av.pendingNpcId = null;
+      }
 
       // Auto-unstuck if avatar overlaps any couch/furniture/obstacle while standing
       if (canWalk && !av.seatedUid && !checkWalkableForLoc(av.x, av.z, currentLoc, currentItems)) {
@@ -1972,14 +2166,16 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         av.z = safe.z;
       }
 
-      // 1. Movement (WASD + Click Path)
-      if (canWalk) {
+      // 1. Movement (WASD + touch stick + Click Path)
+      if (canWalk && !ride) {
         let moveX = 0;
         let moveZ = 0;
         if (keys['KeyW'] || keys['ArrowUp']) moveZ -= 1;
         if (keys['KeyS'] || keys['ArrowDown']) moveZ += 1;
         if (keys['KeyA'] || keys['ArrowLeft']) moveX -= 1;
         if (keys['KeyD'] || keys['ArrowRight']) moveX += 1;
+        moveX += touchInput.moveX;
+        moveZ += touchInput.moveZ;
 
         if (moveX !== 0 || moveZ !== 0) {
           av.path = [];
@@ -2192,7 +2388,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       }
 
       // Smoothly match ground elevation in Main City (street vs sidewalk/plaza)
-      if (currentLoc === 'world' && !av.seatedUid) {
+      if (currentLoc === 'world' && !av.seatedUid && !ride) {
         const groundY = getCityGroundY(av.x, av.z);
         av.y = THREE.MathUtils.lerp(av.y, groundY, 1 - Math.exp(-18 * delta));
       }
@@ -2489,6 +2685,16 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       const animElapsed = isMoving && sprinting ? elapsed * 1.35 : elapsed;
       avatarRig.updateAnimation(effectiveEmote, isMoving, animElapsed, delta, av.jumpY);
 
+      // Remote players: interpolate toward their last server position.
+      for (const entry of handles.remoteRigs.values()) {
+        _vec3.set(entry.target.x, entry.target.y, entry.target.z);
+        entry.rig.root.position.lerp(_vec3, 1 - Math.exp(-12 * delta));
+        entry.rig.root.rotation.y +=
+          shortestAngleDiff(entry.rig.root.rotation.y, entry.target.yaw) *
+          (1 - Math.exp(-10 * delta));
+        entry.rig.updateAnimation(entry.emote, entry.moving, elapsed + entry.phase, delta, 0);
+      }
+
       if (rippleLife > 0) {
         rippleLife = Math.max(0, rippleLife - delta * 1.9);
         const s = 1 + (1 - rippleLife) * 1.4;
@@ -2546,6 +2752,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         mainWorld.updateWorld(elapsed, delta, av.x, av.z, propsRef.current.mood);
       }
 
+      syncTransit();
       renderer.render(scene, camera);
       if (isSoftwareGl) afterDraw(tick);
       else frameId = requestAnimationFrame(tick);
@@ -2881,6 +3088,55 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       h.fillLight.intensity = 0.25;
     }
   }, [activeMood]);
+
+  // Sync remote multiplayer avatars against the latest presence snapshot.
+  useEffect(() => {
+    const h = sceneHandlesRef.current;
+    if (!h) return;
+    const incoming = new Map((remotePlayers ?? []).map((player) => [player.connId, player]));
+
+    for (const [connId, entry] of [...h.remoteRigs]) {
+      if (incoming.has(connId)) continue;
+      h.scene.remove(entry.rig.root);
+      entry.rig.root.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (mesh.geometry) mesh.geometry.dispose();
+      });
+      h.remoteRigs.delete(connId);
+    }
+
+    for (const [connId, player] of incoming) {
+      const signature = JSON.stringify(player.avatar ?? null);
+      let entry = h.remoteRigs.get(connId);
+      if (!entry) {
+        const rig = createAvatarRig(player.avatar ?? propsRef.current.avatarConfig);
+        rig.root.add(createNameTag(player.name || player.handle));
+        rig.root.position.set(player.x, player.y, player.z);
+        h.scene.add(rig.root);
+        entry = {
+          rig,
+          signature,
+          target: { x: player.x, y: player.y, z: player.z, yaw: player.yaw },
+          emote: 'idle',
+          moving: false,
+          phase: Math.random() * 6,
+        };
+        h.remoteRigs.set(connId, entry);
+      } else if (entry.signature !== signature) {
+        if (player.avatar) entry.rig.rebuildAppearance(player.avatar);
+        entry.signature = signature;
+      }
+
+      const moved = Math.hypot(player.x - entry.target.x, player.z - entry.target.z) > 0.03;
+      entry.target = { x: player.x, y: player.y, z: player.z, yaw: player.yaw };
+      entry.moving = moved || player.emote === 'walk';
+      entry.emote = (EMOTE_SET.has(player.emote)
+        ? player.emote
+        : entry.moving
+        ? 'walk'
+        : 'idle') as EmoteType;
+    }
+  }, [remotePlayers]);
 
   // Sync Avatar Appearance
   useEffect(() => {

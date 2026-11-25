@@ -34,6 +34,19 @@ export default defineConfig(() => {
       },
     },
     server: {
+      // The API + realtime gateway runs separately (npm run server). Proxying
+      // keeps the browser on one origin, so cookies/WebSockets stay same-site.
+      proxy: {
+        '/api': {
+          target: process.env.LOFTLIFE_API_URL ?? 'http://127.0.0.1:8787',
+          changeOrigin: true,
+        },
+        '/ws': {
+          target: process.env.LOFTLIFE_API_URL ?? 'http://127.0.0.1:8787',
+          ws: true,
+          changeOrigin: true,
+        },
+      },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
