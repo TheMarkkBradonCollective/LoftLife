@@ -1,0 +1,19 @@
+name = "loftlife"
+main = "src/cloudflare/worker.ts"
+compatibility_date = "2026-03-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+
+[[durable_objects.bindings]]
+name = "WORLD_SHARD"
+class_name = "WorldShardDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["WorldShardDurableObject"]
+
+# Secret configuration (set via `wrangler secret put DATABASE_URL` and `SESSION_SECRET`):
+# DATABASE_URL = "postgresql://..." (Neon PostgreSQL pooled/serverless connection string)

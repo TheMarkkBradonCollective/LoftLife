@@ -45,11 +45,20 @@ import {
   Footprints,
   X,
 } from 'lucide-react';
+import { AccountModal } from './components/AccountModal';
 import { AvatarModal } from './components/AvatarModal';
 import { CityMapModal } from './components/CityMapModal';
 import { ElevatorPanelModal } from './components/ElevatorPanelModal';
 import { HotelDoorTerminalModal } from './components/HotelDoorTerminalModal';
 import { type CameraPresetRequest, RoomViewport } from './components/RoomViewport';
+import {
+  fetchSession,
+  loginAccount,
+  logoutAccount,
+  openWorldSocket,
+  registerAccount,
+  saveCloudState,
+} from './lib/api';
 import { sfx } from './game/audio';
 import {
   DEFAULT_AVATAR,
@@ -65,6 +74,7 @@ import {
 } from './game/catalog';
 import { getEffectiveSize, isValidPlacement, SNAP_STEP, snapGrid } from './game/gridMath';
 import type {
+  AccountProfile,
   ActiveResident,
   AvatarConfig,
   EmoteType,
@@ -72,10 +82,13 @@ import type {
   FurnitureCategory,
   GameMode,
   LightingMood,
+  PersistedPlayerState,
   PlacedItem,
+  RoomAccessMode,
   RoomSurfaceConfig,
   ViewMode,
   WallStyleId,
+  WalletSummary,
   WorldLocation,
 } from './game/types';
 
@@ -218,6 +231,17 @@ export default function App() {
   const [placingColor, setPlacingColor] = useState<string>('#e6dfd3');
   const [movingUid, setMovingUid] = useState<string | null>(null);
 
+  // Account & Persistent Cloud State (Phase 2)
+  const [account, setAccount] = useState<AccountProfile | null>(null);
+  const [wallet, setWallet] = useState<WalletSummary | null>(null);
+  const [accessMode, setAccessMode] = useState<RoomAccessMode>('friends');
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [cloudSavePending, setCloudSavePending] = useState(false);
+  const [onlineCount, setOnlineCount] = useState<number>(0);
+  const skipCloudSyncRef = useRef(true);
+  const wsRef = useRef<WebSocket | null>(null);
+
   // UI Chrome state
   const [dockCollapsed, setDockCollapsed] = useState(false);
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
@@ -228,7 +252,64 @@ export default function App() {
   const [cameraToggle, setCameraToggle] = useState<'overview' | 'closeup'>('overview');
   const playerPoseRef = useRef({ x: 0, z: 0, yaw: 0 });
 
-  // Persist to localStorage
+  const applyPersistedState = useCallback((state: PersistedPlayerState) => {
+    skipCloudSyncRef.current = true;
+    setAccount(state.account);
+    setWallet(state.wallet);
+    setAvatarConfig(state.avatar);
+    setRoomName(state.roomName);
+    setAccessMode(state.accessMode);
+    setSurfaces(state.surfaces);
+    setMood(state.mood);
+    setItems(state.items);
+    setHallwayFloor(state.account.floor);
+  }, []);
+
+  // Restore persisted server session on boot
+  useEffect(() => {
+    let active = true;
+    fetchSession()
+      .then((res) => {
+        if (!active) return;
+        if (res?.state) {
+          applyPersistedState(res.state);
+          setOnlineCount(res.onlineCount);
+        } else {
+          setAccountModalOpen(true);
+        }
+      })
+      .finally(() => {
+        if (active) setAuthChecked(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [applyPersistedState]);
+
+  // Authenticated WebSocket presence connection
+  useEffect(() => {
+    if (!account) {
+      wsRef.current?.close();
+      wsRef.current = null;
+      setOnlineCount(0);
+      return;
+    }
+    const ws = openWorldSocket((count) => setOnlineCount(count));
+    wsRef.current = ws;
+    return () => {
+      ws?.close();
+      if (wsRef.current === ws) wsRef.current = null;
+    };
+  }, [account?.id]);
+
+  useEffect(() => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'presence:location', location }));
+    }
+  }, [location]);
+
+  // Persist to localStorage (guest backup)
   useEffect(() => {
     try {
       const payload: SavedState = {
@@ -243,6 +324,35 @@ export default function App() {
       // Ignore storage quota errors
     }
   }, [items, surfaces, mood, avatarConfig, roomName]);
+
+  // Debounced server persistence when signed in
+  useEffect(() => {
+    if (!account) return;
+    if (skipCloudSyncRef.current) {
+      skipCloudSyncRef.current = false;
+      return;
+    }
+    setCloudSavePending(true);
+    const timer = window.setTimeout(() => {
+      void saveCloudState({
+        avatar: avatarConfig,
+        roomName,
+        accessMode,
+        surfaces,
+        mood,
+        items,
+      })
+        .then((res) => {
+          setWallet(res.state.wallet);
+          setOnlineCount(res.onlineCount);
+        })
+        .catch(() => {
+          // Keep editing fluid; retry on next edit
+        })
+        .finally(() => setCloudSavePending(false));
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [account, avatarConfig, roomName, accessMode, surfaces, mood, items]);
 
   const showHint = useCallback((text: string | null) => {
     setWalkHint(text);
@@ -635,7 +745,11 @@ export default function App() {
   const hudPanelClass =
     'bg-[#0b100d]/95 text-slate-100 border-[#39ff14]/30 neon-panel-glow';
 
-  const anyModalOpen = avatarModalOpen || cityMapOpen || doorTerminalOpen || elevatorModalOpen;
+  const anyModalOpen =
+    avatarModalOpen || cityMapOpen || doorTerminalOpen || elevatorModalOpen || accountModalOpen;
+
+  const activeSuiteNumber = account?.suiteNumber ?? PLAYER_SUITE_NUMBER;
+  const activeSuiteFloor = account?.floor ?? PLAYER_SUITE_FLOOR;
 
   const locationTitle =
     location === 'world'
@@ -646,7 +760,7 @@ export default function App() {
       ? `Floor ${hallwayFloor} Hallway`
       : location === 'resident_room' && activeResident
       ? `${activeResident.name}'s Suite ${activeResident.roomNumber}`
-      : `Suite ${PLAYER_SUITE_NUMBER} · ${roomName}`;
+      : `Suite ${activeSuiteNumber} · ${roomName}`;
 
   const locationSub =
     location === 'world'
@@ -657,7 +771,7 @@ export default function App() {
       ? `Suites ${hallwayFloor}01–${hallwayFloor}04`
       : location === 'resident_room' && activeResident
       ? `Floor ${activeResident.floor} · Guest Visit`
-      : `Floor ${PLAYER_SUITE_FLOOR} · ${items.length} items`;
+      : `Floor ${activeSuiteFloor} · ${items.length} items`;
 
   return (
     <div className="relative w-screen h-screen overflow-hidden select-none">
@@ -710,8 +824,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Top-Left Brand & Hotel / City Summary */}
-      <div className="fixed top-4 left-4 z-20 pointer-events-auto">
+      {/* Top-Left Brand, Location & Resident Account */}
+      <div className="fixed top-4 left-4 z-20 flex flex-wrap items-center gap-2 pointer-events-auto">
         <div className={`px-4 py-2.5 rounded-xl border flex items-center gap-3 ${hudPanelClass}`}>
           <span className="font-display text-base font-bold tracking-tight text-[#39ff14] whitespace-nowrap shrink-0">
             LoftLife
@@ -727,6 +841,41 @@ export default function App() {
             <span className="font-mono-tabular text-slate-300">{locationSub}</span>
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            sfx.playClick();
+            setAccountModalOpen(true);
+          }}
+          className={`px-3.5 py-2.5 rounded-xl border text-xs font-semibold flex items-center gap-2 transition-colors whitespace-nowrap shrink-0 ${
+            account
+              ? `${hudPanelClass} hover:border-[#39ff14]/60`
+              : 'bg-[#39ff14] text-[#051205] border-[#39ff14] hover:bg-[#5bff3b] neon-btn-glow'
+          }`}
+        >
+          <span
+            className={`w-2 h-2 rounded-full ${
+              !account
+                ? 'bg-[#051205]'
+                : cloudSavePending
+                ? 'bg-amber-400 animate-pulse'
+                : 'bg-[#39ff14]'
+            }`}
+          />
+          {account ? (
+            <>
+              <span>@{account.username}</span>
+              {onlineCount > 0 && (
+                <span className="text-[11px] font-mono-tabular text-slate-400">
+                  · {onlineCount} online
+                </span>
+              )}
+            </>
+          ) : (
+            <span>{authChecked ? 'Sign In / Save' : 'Loading...'}</span>
+          )}
+        </button>
       </div>
 
       {/* Top-Right Compact Mode & Utility Bar */}
@@ -1545,6 +1694,74 @@ export default function App() {
         targetVisitResident={targetVisitResident}
         onArriveFloor={handleArriveFloor}
         onClose={() => setElevatorModalOpen(false)}
+      />
+
+      {/* Persistent Resident Account Portal */}
+      <AccountModal
+        open={accountModalOpen}
+        canDismiss={true}
+        account={account}
+        wallet={wallet}
+        roomName={roomName}
+        accessMode={accessMode}
+        hasLocalRoomToImport={Boolean(localStorage.getItem(STORAGE_KEY))}
+        localSnapshot={{
+          avatar: avatarConfig,
+          roomName,
+          surfaces,
+          mood,
+          items,
+        }}
+        onRegister={async ({ username, email, displayName, password, importLocal }) => {
+          const res = await registerAccount({
+            username,
+            email,
+            displayName,
+            password,
+            importState: importLocal
+              ? {
+                  avatar: avatarConfig,
+                  roomName,
+                  surfaces,
+                  mood,
+                  items,
+                }
+              : undefined,
+          });
+          applyPersistedState(res.state);
+          setOnlineCount(res.onlineCount);
+          setAccountModalOpen(false);
+          showHint(`Welcome @${res.state.account.username} · Suite ${res.state.account.suiteNumber} saved!`);
+        }}
+        onLogin={async ({ identifier, password }) => {
+          const res = await loginAccount({ identifier, password });
+          applyPersistedState(res.state);
+          setOnlineCount(res.onlineCount);
+          setAccountModalOpen(false);
+          showHint(`Signed in as @${res.state.account.username} · Suite ${res.state.account.suiteNumber}`);
+        }}
+        onLogout={async () => {
+          await logoutAccount();
+          setAccount(null);
+          setWallet(null);
+          setOnlineCount(0);
+          setAccountModalOpen(false);
+          showHint('Signed out · Local guest mode active');
+        }}
+        onUpdateAccountSettings={async (patch) => {
+          const res = await saveCloudState({
+            displayName: patch.displayName,
+            avatar: avatarConfig,
+            roomName: patch.roomName,
+            accessMode: patch.accessMode,
+            surfaces,
+            mood,
+            items,
+          });
+          applyPersistedState(res.state);
+          setOnlineCount(res.onlineCount);
+        }}
+        onClose={() => setAccountModalOpen(false)}
       />
     </div>
   );
