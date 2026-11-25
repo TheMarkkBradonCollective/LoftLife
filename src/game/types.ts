@@ -103,3 +103,43 @@ export interface ActiveResident {
   items: PlacedItem[];
 }
 
+export type UserRole = 'player' | 'moderator' | 'admin';
+
+export type RoomAccessMode = 'public' | 'friends' | 'invite' | 'private';
+
+export interface WalletSummary {
+  yuanzi: number;
+  tongbao: number;
+  updatedAt: string;
+}
+
+export interface AccountProfile {
+  id: string;
+  username: string;
+  displayName: string;
+  email: string;
+  role: UserRole;
+  suiteNumber: string;
+  floor: number;
+  createdAt: string;
+  lastLoginAt: string | null;
+}
+
+export interface PersistedPlayerState {
+  account: AccountProfile;
+  wallet: WalletSummary;
+  avatar: AvatarConfig;
+  roomName: string;
+  accessMode: RoomAccessMode;
+  surfaces: RoomSurfaceConfig;
+  mood: LightingMood;
+  items: PlacedItem[];
+  updatedAt: string;
+}
+
+export interface AuthSessionResponse {
+  state: PersistedPlayerState;
+  storageEngine: 'neon' | 'sqlite';
+  onlineCount: number;
+  sessionToken?: string;
+}

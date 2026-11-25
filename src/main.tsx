@@ -1,5 +1,6 @@
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
+import {ErrorBoundary} from './components/ErrorBoundary.tsx';
 import './index.css';
 import {AuthGate} from './components/AuthGate';
 import {SessionProvider, useSession} from './session';
@@ -21,7 +22,9 @@ function Root() {
 }
 
 createRoot(document.getElementById('root')!).render(
-  <SessionProvider>
-    <Root />
-  </SessionProvider>
+  <ErrorBoundary>
+    <SessionProvider>
+      <Root />
+    </SessionProvider>
+  </ErrorBoundary>
 );
