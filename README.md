@@ -27,7 +27,7 @@ Other scripts:
 | `npm run dev` | Vite only (no backend — the app falls back to offline mode) |
 | `npm run server` | API + realtime gateway on `:8787`; also serves `dist/` if built |
 | `npm run build` | Production build to `dist/` |
-| `npm test` | 19 integration tests: HTTP API, permissions, economy, parties, voice signalling, transit seats, and real WebSocket clients |
+| `npm test` | 24 integration tests: HTTP API, permissions, economy, parties, voice signalling, transit seats, Cloudflare-issued identity, and real WebSocket clients |
 | `npm run lint` | `tsc --noEmit` |
 
 ### Environment variables
@@ -41,9 +41,31 @@ All optional; sensible defaults are used.
 | `LOFTLIFE_INSTANCE_CAPACITY` | `40` | Players per city instance before a new one opens |
 | `LOFTLIFE_AUTH_RATE_MAX` | `12` | Auth attempts per minute per IP |
 | `LOFTLIFE_API_URL` | `http://127.0.0.1:8787` | Dev proxy target for `/api` and `/ws` |
+| `LOFTLIFE_SESSION_SECRET` | unset | Optional. HMAC key (≥ 32 chars) for tokens minted by the Cloudflare edge; must match the Worker's secret |
+| `DATABASE_URL` | unset | Optional. Neon pooled connection string — read by the Cloudflare Worker, never by the game server |
+| `GAME_ORIGIN` | `http://127.0.0.1:8787` | Optional. Where the Worker proxies `/api/*` and `/ws` |
 
-**No secrets or API keys are required.** Passwords are hashed with scrypt, session tokens are stored
-only as SHA-256 digests, and nothing sensitive belongs in source control.
+**No secrets or API keys are required for local play.** Passwords are hashed with scrypt, session
+tokens are stored only as SHA-256 digests, and nothing sensitive belongs in source control.
+
+### Optional: Cloudflare edge + Neon identity
+
+The Worker in `src/cloudflare/worker.ts` can front the app: it serves `dist/`, handles
+register/login/logout against Neon Postgres, and proxies the game API and realtime socket to the
+Node server. The Node server trusts the Worker's signed token with the same secret.
+
+```bash
+npm run build
+npx wrangler secret put DATABASE_URL                 # Neon pooled connection string
+npx wrangler secret put LOFTLIFE_SESSION_SECRET      # same value as the Node env var
+export LOFTLIFE_SESSION_SECRET="$(openssl rand -hex 32)"   # for the Node server
+npx wrangler dev --local                             # verify locally first
+```
+
+Set `GAME_ORIGIN` in `wrangler.toml` to wherever the game server runs. Without `DATABASE_URL` the
+edge answers auth requests with `503 unconfigured`; local email/password accounts on the Node server
+keep working either way. See [ARCHITECTURE §8](docs/ARCHITECTURE.md) for the token format, ownership
+split and the pieces that still need a live Neon sign-in test.
 
 ---
 

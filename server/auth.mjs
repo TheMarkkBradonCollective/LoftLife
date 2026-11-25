@@ -9,25 +9,16 @@ import crypto from 'node:crypto';
 import { db, newId, now, audit, tx } from './db.mjs';
 import { ApiError, badRequest, conflict, unauthorized, tooMany } from './errors.mjs';
 import { CLOTHING_SHOP } from './economy.mjs';
+import { EDGE_TOKEN_PREFIX, edgeUserForToken } from './edge-auth.mjs';
 import { STARTER_SUITE } from './starter.mjs';
-import { sanitizeAvatar } from './validate.mjs';
+import { DEFAULT_AVATAR, sanitizeAvatar } from './validate.mjs';
+
+export { DEFAULT_AVATAR };
 
 const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 64, maxmem: 64 * 1024 * 1024 };
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const HANDLE_RE = /^[a-z0-9_]{3,20}$/;
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@.]+(\.[^\s@.]+)+$/;
-
-export const DEFAULT_AVATAR = {
-  name: 'Newcomer',
-  skinTone: '#e8b48f',
-  hairStyle: 'bob',
-  hairColor: '#2f2119',
-  topStyle: 'tee',
-  topColor: '#e6dfd3',
-  bottomColor: '#2b3a4a',
-  shoeColor: '#1b1b1b',
-  accessory: 'none',
-};
 
 export function hashPassword(password) {
   const salt = crypto.randomBytes(16);
@@ -70,6 +61,16 @@ export function revokeSession(token) {
 
 export function userForToken(token) {
   if (!token) return null;
+  // Tokens minted by the Cloudflare edge are verified by signature and linked
+  // to a local account on first use; no session row exists for them locally.
+  if (String(token).startsWith(EDGE_TOKEN_PREFIX)) {
+    const edgeUser = edgeUserForToken(String(token));
+    if (!edgeUser) throw unauthorized('Session expired or invalid');
+    if (edgeUser.suspended_until && edgeUser.suspended_until > now()) {
+      throw new ApiError(403, 'suspended', 'This account is suspended');
+    }
+    return edgeUser;
+  }
   const row = db
     .prepare(
       `SELECT u.*, s.expires_at FROM sessions s

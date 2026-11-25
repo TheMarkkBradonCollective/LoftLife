@@ -147,8 +147,8 @@ sequenced in [ROADMAP.md](ROADMAP.md).
 The following §5/§6 items were implemented afterwards and are no longer open: proximity voice
 (WebRTC signalling relay, push-to-talk, distance bands), rideable LoftLine transit with server-assigned
 seats, parties with cross-instance group chat, mobile touch controls, wardrobe gating in the avatar
-studio, and code splitting of the 3D viewport. The suite grew from 16 to 19 integration tests
-(parties, voice signalling, transit). Verified with `tsc`, `npm test`, `npm run build` and a live
+studio, and code splitting of the 3D viewport. The suite grew from 16 to 24 integration tests
+(parties, voice signalling, transit, and Cloudflare-issued identity accepted by the game server). Verified with `tsc`, `npm test`, `npm run build` and a live
 browser session (account creation, city entry, stop prompt, boarding and server-driven riding).
 Still open from §5/§6: server-side collision re-simulation, custom uploaded assets, Unity/Windows/
 Android clients, CI and load testing. See [ROADMAP.md](ROADMAP.md) for current status.

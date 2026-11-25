@@ -16,7 +16,7 @@ Status legend: **Done** (implemented and verified) · **Partial** (real function
 | 7 | Main City, transportation, vehicles, interactive locations | **Done** — city, ambient traffic, two rideable LoftLine routes with server-assigned seats |
 | 8 | Economy: Yuanzi, Tongbao, wallets, transactions, shops | **Partial** — wallets, ledger, purchases, daily reward. No earned income loop from activities, no player trading |
 | 9 | Cross-platform (browser / Windows / Android, Unity 6) | **Partial** — the web client is responsive with dedicated touch controls; the protocol is documented for a Unity client, which is not started |
-| 10 | Testing and launch preparation | **Partial** — 19 integration tests, code splitting; no CI, no load testing |
+| 10 | Testing and launch preparation | **Partial** — 24 integration tests, code splitting, Cloudflare Worker + Neon identity path; no CI, no load testing, live-Neon sign-in not yet verified |
 
 ## Deliberately not done, because it needs a decision
 

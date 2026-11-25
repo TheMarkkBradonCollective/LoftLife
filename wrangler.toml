@@ -3,17 +3,16 @@ main = "src/cloudflare/worker.ts"
 compatibility_date = "2026-03-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Static client build served by the edge.
 [assets]
 directory = "./dist"
 binding = "ASSETS"
 
-[[durable_objects.bindings]]
-name = "WORLD_SHARD"
-class_name = "WorldShardDurableObject"
+[vars]
+# Where the Node game/realtime server lives (rooms, economy, presence, transit).
+# The Worker proxies /api/* and /ws there after handling identity itself.
+GAME_ORIGIN = "http://127.0.0.1:8787"
 
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["WorldShardDurableObject"]
-
-# Secret configuration (set via `wrangler secret put DATABASE_URL` and `SESSION_SECRET`):
-# DATABASE_URL = "postgresql://..." (Neon PostgreSQL pooled/serverless connection string)
+# Secrets (never commit values):
+#   wrangler secret put DATABASE_URL                 # Neon pooled connection string
+#   wrangler secret put LOFTLIFE_SESSION_SECRET      # same value the Node server uses

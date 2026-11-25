@@ -9,6 +9,19 @@ import { isKnownFurniture } from './economy.mjs';
 export const HAIR_STYLES = ['bob', 'afro', 'ponytail', 'sidepart', 'buns', 'spiky'];
 export const TOP_STYLES = ['hoodie', 'blazer', 'tee', 'turtleneck'];
 export const ACCESSORIES = ['none', 'glasses', 'headphones', 'beanie'];
+
+/** Neutral starting look, shared by registration, edge accounts and tests. */
+export const DEFAULT_AVATAR = {
+  name: 'Newcomer',
+  skinTone: '#e8b48f',
+  hairStyle: 'bob',
+  hairColor: '#2f2119',
+  topStyle: 'tee',
+  topColor: '#e6dfd3',
+  bottomColor: '#2b3a2a',
+  shoeColor: '#1b1b1b',
+  accessory: 'none',
+};
 export const FLOOR_STYLES = ['oak_parquet', 'walnut_herringbone', 'terrazzo', 'concrete', 'boucle_carpet'];
 export const WALL_STYLES = [
   'warm_chalk',

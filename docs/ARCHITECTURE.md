@@ -15,6 +15,9 @@ In development Vite proxies `/api` and `/ws` to `:8787` so the browser only ever
 no CORS, no cross-site cookies, and WebSockets stay same-site. In production the same Express
 process serves `dist/` and the API on one port behind a TLS terminator.
 
+An optional Cloudflare Worker can sit in front of both: it serves the built client, owns account
+creation and sign-in against Neon, and proxies `/api/*` and `/ws` to the game server. See §8.
+
 **Why this shape:** the prototype already used Vite + React + Three.js, and the server had to run
 without paid services or native modules. `node:sqlite` (Node ≥ 22.5) gives real SQL, transactions and
 WAL durability with zero build steps, while the HTTP/WS surface stays language-agnostic so a Unity 6
@@ -160,3 +163,75 @@ A Unity client therefore needs no server rewrite: implement the same `/api` call
 message set, keep the same bearer token, and render the same authoritative world state. Shared
 *content* (furniture ids, prices, grid rules) should move to a shared JSON manifest the server owns,
 which is the first step in Phase 9 and also benefits the browser client.
+
+## 8. Cloud identity: Cloudflare + Neon + authentication
+
+The Cloudflare Worker is the identity edge. It stores accounts in Neon Postgres, hashes passwords
+with PBKDF2-SHA256 (Web Crypto), and mints HMAC-signed session tokens. The Node game server verifies
+the same token with the same secret, so a player signs in once and every game endpoint, WebSocket and
+world instance accepts that identity without a database round-trip.
+
+```
+Browser ──► Cloudflare Worker ──► Neon Postgres     ll_accounts, ll_sessions
+                    │
+                    └── proxy /api/*, /ws ──► Node game server ──► SQLite
+                                                  │
+                                                  └── verifies the edge token (HMAC)
+                                                      and provisions the local account
+```
+
+### Token format
+
+`llt1.<base64url(payload)>.<base64url(HMAC-SHA256)>`, where the payload is
+`{sub, handle, role, name, sid, iat, exp}` and `exp` is in seconds. The signature covers
+`llt1.<payload>`, so neither the identity nor the expiry can be altered by the client. `sid` is a
+session id that the Worker stores (hashed) in `ll_sessions` for revocation at the edge.
+
+### Who owns what
+
+| Concern | Owner | Notes |
+| --- | --- | --- |
+| Password hash, email, handle, role | Cloudflare Worker → Neon | `ll_accounts`; handle/email lowercased and unique |
+| Session revocation | Cloudflare Worker → Neon | `ll_sessions.jti_hash`; logout deletes the row |
+| Profile, wallet, inventory, suite, worlds, social graph | Node game server → SQLite | created on first authenticated request, keyed by the same account id |
+| Realtime, presence, parties, voice signalling, transit | Node game server | `/ws` is proxied by the Worker |
+
+`server/edge-auth.mjs` verifies the token (`verifyEdgeToken`) and provisions the local account on
+first use (`ensureEdgeUser`): profile, 500 元子 / 25 通宝 welcome grant with ledger entries, the
+furnished suite 402, and the starting wardrobe. Account ids are the Neon user ids, so the two stores
+never disagree about who a player is.
+
+### Configuration
+
+| Name | Where | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | Worker secret | Neon pooled connection string (`wrangler secret put DATABASE_URL`) |
+| `LOFTLIFE_SESSION_SECRET` | Worker secret **and** Node env | HMAC key, ≥ 32 characters, identical on both |
+| `GAME_ORIGIN` | `wrangler.toml` `[vars]` | Node server origin the Worker proxies to |
+
+Without `DATABASE_URL` the Worker answers `503 unconfigured` on auth routes and `/api/health`
+reports `storageEngine: "unconfigured"`. Without `LOFTLIFE_SESSION_SECRET` the Node server rejects
+every `llt1.` token, so a missing secret fails closed instead of trusting an unsigned identity.
+
+### Verified, and not verified
+
+Verified locally in workerd (`wrangler dev`): the Worker serves the built SPA, proxies `/api/shop`
+to the game server, rejects cross-origin auth POSTs with 403, and reports the missing database as a
+503 rather than crashing. Node-side: 5 integration tests cover password hashing, token signature and
+expiry, provisioning on first use, rejection of tampered/expired/foreign-signed tokens, and that
+local email/password accounts keep working.
+
+Not verified: register/login against a live Neon database (no Neon credentials are configured in
+this environment, and none belong in source control). The SQL is standard Postgres and the path is
+exercised by the same tests with the Node driver, but a real `wrangler secret put DATABASE_URL`
+followed by a sign-in is still required before calling it production-ready.
+
+### Known limits
+
+- The Worker checks `ll_sessions`; the Node server verifies the signature only. A token revoked at
+  the edge stays valid for game endpoints until it expires (14 days). Lower the TTL or add a
+  revocation check on state-changing routes if that matters.
+- The Worker proxies WebSockets; some networks terminate long-lived upgrades at the edge. The Node
+  server remains the authoritative realtime host and can be exposed directly if needed.
+- Neon is the account store, not the world store: rooms, inventories and social state stay in the
+  game server's SQLite until that layer is ported.
