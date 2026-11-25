@@ -48,6 +48,7 @@ export interface MainWorldHandles {
   worldGroup: THREE.Group;
   groundRaycastPlane: THREE.Mesh;
   loftPortalGroup: THREE.Group;
+  intercomGroup: THREE.Group;
   loftDoorLeftPivot: THREE.Group;
   loftDoorRightPivot: THREE.Group;
   loftDoorEntryPos: { x: number; z: number };
@@ -64,6 +65,8 @@ export interface MainWorldHandles {
     mood: LightingMood
   ) => void;
   togglePartyMode: () => boolean;
+  setMainDoorUnlocked: (unlocked: boolean) => void;
+  isMainDoorUnlocked: () => boolean;
 }
 
 interface MeshAccumulator {
@@ -556,111 +559,193 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     });
   });
 
-  // Walk-Through Loft Building Entrance Pavilion on North edge of Plaza Block
+  // Multi-Story Grand Hotel Exterior Tower & Walk-Through Entrance on North edge of Plaza
   const loftPortalGroup = new THREE.Group();
   loftPortalGroup.position.set(loftDoorPos.x, 0.12, loftDoorPos.z);
   loftPortalGroup.userData.isLoftPortal = true;
 
-  const brickMat = new THREE.MeshStandardMaterial({ color: 0x9e5947, roughness: 0.78 });
-  const timberMat = new THREE.MeshStandardMaterial({ color: 0x4f3524, roughness: 0.52 });
-  const awningMat = new THREE.MeshStandardMaterial({ color: 0x2f4f44, roughness: 0.75 });
+  const limestoneMat = new THREE.MeshStandardMaterial({ color: 0xded4c6, roughness: 0.72 });
+  const brickMat = new THREE.MeshStandardMaterial({ color: 0x8f5243, roughness: 0.78 });
+  const timberMat = new THREE.MeshStandardMaterial({ color: 0x3b2a1e, roughness: 0.45 });
+  const awningMat = new THREE.MeshStandardMaterial({ color: 0x1e352f, roughness: 0.65 });
   const brassMat = new THREE.MeshStandardMaterial({
     color: 0xd8b45a,
-    roughness: 0.25,
-    metalness: 0.85,
+    roughness: 0.24,
+    metalness: 0.88,
   });
 
-  // Left & Right facade piers leaving a real 1.6m wide openable lobby doorway!
-  for (const px of [-1.55, 1.55]) {
-    const pier = new THREE.Mesh(new THREE.BoxGeometry(1.5, 4.2, 1.3), brickMat);
-    pier.position.set(px, 2.1, -0.5);
+  // Ground-floor left & right grand piers leaving a wide 1.8m openable lobby doorway!
+  for (const px of [-2.45, 2.45]) {
+    const pier = new THREE.Mesh(new THREE.BoxGeometry(3.1, 3.6, 3.2), limestoneMat);
+    pier.position.set(px, 1.8, -1.5);
     pier.castShadow = true;
     pier.receiveShadow = true;
     loftPortalGroup.add(pier);
   }
-  // Upper building facade above doorway
-  const header = new THREE.Mesh(new THREE.BoxGeometry(4.6, 1.9, 1.3), brickMat);
-  header.position.set(0, 3.25, -0.5);
-  header.castShadow = true;
-  loftPortalGroup.add(header);
+  // Upper Hotel Tower (Floors 2-4 + Rooftop Crown)
+  const hotelUpper = new THREE.Mesh(new THREE.BoxGeometry(8.2, 11.4, 3.4), brickMat);
+  hotelUpper.position.set(0, 9.2, -1.6);
+  hotelUpper.castShadow = true;
+  hotelUpper.receiveShadow = true;
+  loftPortalGroup.add(hotelUpper);
 
-  // Dark warm interior lobby vestibule behind doors
+  const hotelCornice = new THREE.Mesh(new THREE.BoxGeometry(8.6, 0.55, 3.7), limestoneMat);
+  hotelCornice.position.set(0, 15.05, -1.6);
+  loftPortalGroup.add(hotelCornice);
+
+  // Warm illuminated hotel suite windows across Floors 2-4
+  const suiteWinMat = new THREE.MeshStandardMaterial({
+    color: 0xffe8b8,
+    emissive: 0xffc878,
+    emissiveIntensity: 0.45,
+    roughness: 0.2,
+  });
+  for (let floor = 0; floor < 3; floor++) {
+    for (const wx of [-2.8, -1.0, 1.0, 2.8]) {
+      const win = new THREE.Mesh(new THREE.BoxGeometry(1.15, 1.65, 0.1), suiteWinMat);
+      win.position.set(wx, 5.2 + floor * 3.3, 0.1);
+      loftPortalGroup.add(win);
+    }
+  }
+
+  // Grand Hotel Marquee Sign above entrance canopy
+  const marqueeCanvas = document.createElement('canvas');
+  marqueeCanvas.width = 512;
+  marqueeCanvas.height = 96;
+  const mctx = marqueeCanvas.getContext('2d')!;
+  mctx.fillStyle = '#090d0b';
+  mctx.fillRect(0, 0, 512, 96);
+  mctx.strokeStyle = '#39ff14';
+  mctx.lineWidth = 6;
+  mctx.strokeRect(5, 5, 502, 86);
+  mctx.fillStyle = '#39ff14';
+  mctx.font = 'bold 34px sans-serif';
+  mctx.textAlign = 'center';
+  mctx.fillText('LOFTLIFE GRAND HOTEL', 256, 58);
+  const marqueeTex = new THREE.CanvasTexture(marqueeCanvas);
+  marqueeTex.colorSpace = THREE.SRGBColorSpace;
+  marqueeTex.anisotropy = maxAnisotropy;
+
+  const marqueeMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(4.4, 0.8, 0.25),
+    new THREE.MeshStandardMaterial({ map: marqueeTex, roughness: 0.35 })
+  );
+  marqueeMesh.position.set(0, 3.3, 0.32);
+  loftPortalGroup.add(marqueeMesh);
+
+  // Warm interior lobby vestibule glow behind entrance doors
   const lobbyBack = new THREE.Mesh(
-    new THREE.BoxGeometry(1.75, 2.35, 0.15),
+    new THREE.BoxGeometry(2.05, 2.55, 0.15),
     new THREE.MeshStandardMaterial({
       color: 0xffe4b8,
       emissive: 0xffc570,
-      emissiveIntensity: 0.55,
+      emissiveIntensity: 0.65,
       roughness: 0.5,
     })
   );
-  lobbyBack.position.set(0, 1.18, -1.05);
+  lobbyBack.position.set(0, 1.28, -1.25);
   loftPortalGroup.add(lobbyBack);
 
   // Openable Glass Double Doors (Left & Right Pivots)
   const doorGlassMat = new THREE.MeshPhysicalMaterial({
     color: 0xdff2ff,
-    roughness: 0.12,
+    roughness: 0.1,
     metalness: 0.1,
     transparent: true,
     opacity: 0.55,
   });
   const loftDoorLeftPivot = new THREE.Group();
-  loftDoorLeftPivot.position.set(-0.78, 0, 0.08);
-  const leftFrame = new THREE.Mesh(new THREE.BoxGeometry(0.76, 2.25, 0.08), timberMat);
-  leftFrame.position.set(0.38, 1.125, 0);
+  loftDoorLeftPivot.position.set(-0.9, 0, 0.08);
+  const leftFrame = new THREE.Mesh(new THREE.BoxGeometry(0.88, 2.4, 0.08), timberMat);
+  leftFrame.position.set(0.44, 1.2, 0);
   loftDoorLeftPivot.add(leftFrame);
-  const leftGlass = new THREE.Mesh(new THREE.BoxGeometry(0.56, 1.8, 0.1), doorGlassMat);
-  leftGlass.position.set(0.38, 1.16, 0);
+  const leftGlass = new THREE.Mesh(new THREE.BoxGeometry(0.66, 1.95, 0.1), doorGlassMat);
+  leftGlass.position.set(0.44, 1.22, 0);
   loftDoorLeftPivot.add(leftGlass);
-  const leftHandle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.35, 0.12), brassMat);
-  leftHandle.position.set(0.68, 1.05, 0.04);
+  const leftHandle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.42, 0.12), brassMat);
+  leftHandle.position.set(0.78, 1.08, 0.05);
   loftDoorLeftPivot.add(leftHandle);
   loftPortalGroup.add(loftDoorLeftPivot);
 
   const loftDoorRightPivot = new THREE.Group();
-  loftDoorRightPivot.position.set(0.78, 0, 0.08);
-  const rightFrame = new THREE.Mesh(new THREE.BoxGeometry(0.76, 2.25, 0.08), timberMat);
-  rightFrame.position.set(-0.38, 1.125, 0);
+  loftDoorRightPivot.position.set(0.9, 0, 0.08);
+  const rightFrame = new THREE.Mesh(new THREE.BoxGeometry(0.88, 2.4, 0.08), timberMat);
+  rightFrame.position.set(-0.44, 1.2, 0);
   loftDoorRightPivot.add(rightFrame);
-  const rightGlass = new THREE.Mesh(new THREE.BoxGeometry(0.56, 1.8, 0.1), doorGlassMat);
-  rightGlass.position.set(-0.38, 1.16, 0);
+  const rightGlass = new THREE.Mesh(new THREE.BoxGeometry(0.66, 1.95, 0.1), doorGlassMat);
+  rightGlass.position.set(-0.44, 1.22, 0);
   loftDoorRightPivot.add(rightGlass);
-  const rightHandle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.35, 0.12), brassMat);
-  rightHandle.position.set(-0.68, 1.05, 0.04);
+  const rightHandle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.42, 0.12), brassMat);
+  rightHandle.position.set(-0.78, 1.08, 0.05);
   loftDoorRightPivot.add(rightHandle);
   loftPortalGroup.add(loftDoorRightPivot);
 
-  // Canopy Awning & Glowing Threshold Mat
-  const awning = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.14, 1.15), awningMat);
-  awning.position.set(0, 2.48, 0.56);
-  awning.rotation.x = 0.15;
+  // Brass & Obsidian Keycard + Guest Directory Intercom Pedestal right beside Main Doors
+  const intercomGroup = new THREE.Group();
+  intercomGroup.position.set(1.38, 0, 0.58);
+  intercomGroup.userData.isHotelIntercom = true;
+
+  const kioskPost = new THREE.Mesh(
+    new THREE.BoxGeometry(0.24, 1.18, 0.18),
+    new THREE.MeshStandardMaterial({ color: 0x1e222a, roughness: 0.32, metalness: 0.72 })
+  );
+  kioskPost.position.y = 0.59;
+  kioskPost.castShadow = true;
+  intercomGroup.add(kioskPost);
+
+  const kioskScreen = new THREE.Mesh(
+    new THREE.BoxGeometry(0.19, 0.24, 0.03),
+    new THREE.MeshStandardMaterial({
+      color: 0x39ff14,
+      emissive: 0x39ff14,
+      emissiveIntensity: 0.85,
+      roughness: 0.2,
+    })
+  );
+  kioskScreen.position.set(0, 1.0, 0.095);
+  intercomGroup.add(kioskScreen);
+
+  const mainDoorLedMat = new THREE.MeshStandardMaterial({
+    color: 0xf59e0b,
+    emissive: 0xf59e0b,
+    emissiveIntensity: 1.5,
+    roughness: 0.2,
+  });
+  const kioskLed = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.04, 0.04), mainDoorLedMat);
+  kioskLed.position.set(0, 1.15, 0.095);
+  intercomGroup.add(kioskLed);
+  loftPortalGroup.add(intercomGroup);
+
+  // Canopy Awning & Red Carpet Runner
+  const awning = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.16, 1.55), awningMat);
+  awning.position.set(0, 2.68, 0.72);
+  awning.rotation.x = 0.1;
   loftPortalGroup.add(awning);
 
   const entryMat = new THREE.Mesh(
-    new THREE.BoxGeometry(1.55, 0.03, 0.9),
+    new THREE.BoxGeometry(1.8, 0.03, 1.4),
     new THREE.MeshStandardMaterial({
-      color: 0x34d399,
-      emissive: 0x10b981,
-      emissiveIntensity: 0.45,
+      color: 0x991b1b,
+      roughness: 0.9,
       polygonOffset: true,
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -1,
     })
   );
-  entryMat.position.set(0, 0.018, 0.62);
+  entryMat.position.set(0, 0.018, 0.78);
   loftPortalGroup.add(entryMat);
 
   worldGroup.add(loftPortalGroup);
-  // Collide only with left & right brick piers so center doorway is genuinely walk-through!
-  obstacles.push({ type: 'box', x: loftDoorPos.x - 1.55, z: loftDoorPos.z - 0.5, hw: 0.85, hd: 0.72 });
-  obstacles.push({ type: 'box', x: loftDoorPos.x + 1.55, z: loftDoorPos.z - 0.5, hw: 0.85, hd: 0.72 });
+  // Collide with left & right hotel facade piers & intercom pedestal so doorway is walk-through when unlocked!
+  obstacles.push({ type: 'box', x: loftDoorPos.x - 2.45, z: loftDoorPos.z - 1.5, hw: 1.58, hd: 1.65 });
+  obstacles.push({ type: 'box', x: loftDoorPos.x + 2.45, z: loftDoorPos.z - 1.5, hw: 1.58, hd: 1.65 });
+  obstacles.push({ type: 'box', x: loftDoorPos.x + 1.38, z: loftDoorPos.z + 0.58, hw: 0.22, hd: 0.22 });
 
   // Dance Pad & DJ Booth in Plaza Corner
   const djX = loftCenter.x + 4.4;
   const djZ = loftCenter.z - 1.2;
   const danceTiles: THREE.MeshStandardMaterial[] = [];
-  const danceColors = [0xf472b6, 0x38bdf8, 0xa78bfa, 0x34d399, 0xfbbf24];
+  const danceColors = [0x39ff14, 0x00ff7f, 0x9eff14, 0x16e05b, 0x6bff3b];
   for (let gx = -1; gx <= 1; gx++) {
     for (let gz = -1; gz <= 1; gz++) {
       const mat = new THREE.MeshStandardMaterial({
@@ -684,16 +769,16 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
   djDeckGroup.userData.isDjDeck = true;
   const booth = new THREE.Mesh(
     new THREE.BoxGeometry(1.4, 0.94, 0.58),
-    new THREE.MeshStandardMaterial({ color: 0x262934, roughness: 0.42, metalness: 0.35 })
+    new THREE.MeshStandardMaterial({ color: 0x121814, roughness: 0.42, metalness: 0.35 })
   );
   booth.position.y = 0.47;
   djDeckGroup.add(booth);
   const speakerGlow = new THREE.Mesh(
     new THREE.BoxGeometry(1.1, 0.14, 0.05),
     new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      emissive: 0x38bdf8,
-      emissiveIntensity: 1.3,
+      color: 0x39ff14,
+      emissive: 0x39ff14,
+      emissiveIntensity: 1.4,
     })
   );
   speakerGlow.position.set(0, 0.54, 0.3);
@@ -850,7 +935,18 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     return partyMode;
   }
 
-  const loftDoorEntryPos = { x: loftDoorPos.x, z: loftDoorPos.z + 1.55 };
+  let mainDoorUnlocked = false;
+  function setMainDoorUnlocked(unlocked: boolean) {
+    mainDoorUnlocked = unlocked;
+    const hex = unlocked ? 0x10b981 : 0xf59e0b;
+    mainDoorLedMat.color.setHex(hex);
+    mainDoorLedMat.emissive.setHex(hex);
+  }
+  function isMainDoorUnlocked() {
+    return mainDoorUnlocked;
+  }
+
+  const loftDoorEntryPos = { x: loftDoorPos.x, z: loftDoorPos.z + 1.85 };
   const loftDoorThresholdPos = { x: loftDoorPos.x, z: loftDoorPos.z - 0.15 };
 
   function updateWorld(
@@ -883,13 +979,14 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
       ? 0.9 + Math.abs(Math.sin(elapsed * 6)) * 0.9
       : 0.15;
 
-    // 3. Streetlamps glow
+    // 3. Streetlamps & Hotel Suite Windows glow
     const nightBoost = mood === 'night' ? 1 : mood === 'golden' ? 0.5 : 0;
     lampGlobeMat.emissiveIntensity = 0.25 + nightBoost * 1.6;
+    suiteWinMat.emissiveIntensity = 0.35 + nightBoost * 0.9;
 
-    // 4. Auto-swing Loft Building Double Doors when player approaches!
+    // 4. Auto-swing Hotel Main Double Doors only when UNLOCKED & player approaches!
     const doorDist = Math.hypot(playerX - loftDoorPos.x, playerZ - loftDoorPos.z);
-    const targetDoorAngle = doorDist < 2.25 ? 1.25 : 0;
+    const targetDoorAngle = mainDoorUnlocked && doorDist < 2.6 ? 1.25 : 0;
     const dk = 1 - Math.exp(-9 * delta);
     loftDoorLeftPivot.rotation.y = THREE.MathUtils.lerp(
       loftDoorLeftPivot.rotation.y,
@@ -948,6 +1045,7 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     worldGroup,
     groundRaycastPlane,
     loftPortalGroup,
+    intercomGroup,
     loftDoorLeftPivot,
     loftDoorRightPivot,
     loftDoorEntryPos,
@@ -958,6 +1056,8 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     obstacles,
     updateWorld,
     togglePartyMode,
+    setMainDoorUnlocked,
+    isMainDoorUnlocked,
   };
 }
 
@@ -965,12 +1065,22 @@ export function isMainWorldPosWalkable(
   x: number,
   z: number,
   obstacles: WorldObstacle[],
-  radius = 0.28
+  radius = 0.28,
+  mainDoorOpen = true
 ): boolean {
   const u = worldToU(x, z);
-  const { bounds, blocks } = CITY_LAYOUT;
+  const { bounds, blocks, loftDoorPos } = CITY_LAYOUT;
 
   if (u < bounds.uMin || u > bounds.uMax || z < bounds.zMin || z > bounds.zMax) {
+    return false;
+  }
+
+  if (
+    !mainDoorOpen &&
+    z < loftDoorPos.z + 0.5 &&
+    z > loftDoorPos.z - 2.5 &&
+    Math.abs(x - loftDoorPos.x) < 1.15
+  ) {
     return false;
   }
 

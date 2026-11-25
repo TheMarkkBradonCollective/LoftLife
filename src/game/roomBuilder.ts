@@ -1,7 +1,9 @@
 import * as THREE from 'three';
-import { GRID_SIZE, WALL_STYLES } from './catalog';
+import { GRID_SIZE, PLAYER_SUITE_NUMBER, WALL_STYLES } from './catalog';
 import { createFloorTexture } from './textures';
 import type { FloorStyleId, LightingMood, WallStyleId } from './types';
+
+export const SUITE_DOOR_Z = 5.0; // West wall doorway center Z (opening 4.5..5.5)
 
 export interface RoomEnvironmentHandles {
   roomGroup: THREE.Group;
@@ -17,6 +19,30 @@ export interface RoomEnvironmentHandles {
   updateSurfaces: (floor: FloorStyleId, wall: WallStyleId, maxAnisotropy: number) => void;
   updateMoodBackdrop: (mood: LightingMood) => void;
   setGridVisible: (visible: boolean) => void;
+  setDoorUnlocked: (unlocked: boolean) => void;
+  setRoomBadge: (suiteNumber: string, maxAnisotropy: number) => void;
+}
+
+function createSuitePlaqueTexture(suiteNumber: string): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#0c120f';
+  ctx.fillRect(0, 0, 256, 128);
+  ctx.strokeStyle = '#39ff14';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(6, 6, 244, 116);
+  ctx.fillStyle = '#39ff14';
+  ctx.font = 'bold 26px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('SUITE', 128, 44);
+  ctx.fillStyle = '#f2fff5';
+  ctx.font = 'bold 54px sans-serif';
+  ctx.fillText(suiteNumber, 128, 102);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 export function buildRoomArchitecture(
@@ -25,20 +51,21 @@ export function buildRoomArchitecture(
   maxAnisotropy: number
 ): RoomEnvironmentHandles {
   const roomGroup = new THREE.Group();
+  const half = GRID_SIZE / 2; // 7m
 
-  // Architectural outer slab
-  const slabGeo = new THREE.BoxGeometry(GRID_SIZE + 0.44, 0.36, GRID_SIZE + 0.44);
+  // Architectural outer hotel penthouse slab
+  const slabGeo = new THREE.BoxGeometry(GRID_SIZE + 0.54, 0.42, GRID_SIZE + 0.54);
   const slabMat = new THREE.MeshStandardMaterial({
-    color: 0x262932,
+    color: 0x22252e,
     roughness: 0.72,
     metalness: 0.08,
   });
   const slab = new THREE.Mesh(slabGeo, slabMat);
-  slab.position.set(-0.1, -0.185, -0.1);
+  slab.position.set(-0.12, -0.215, -0.12);
   slab.receiveShadow = true;
   roomGroup.add(slab);
 
-  // Subtle floor top surface (10 x 10 at y = 0)
+  // Subtle floor top surface (14 x 14 at y = 0)
   const floorTopMat = new THREE.MeshStandardMaterial({
     map: createFloorTexture(initialFloor, maxAnisotropy),
     roughness: initialFloor === 'boucle_carpet' ? 0.92 : 0.48,
@@ -80,25 +107,24 @@ export function buildRoomArchitecture(
     metalness: 0.65,
   });
 
-  const wallHeight = 3.2;
-  const wallThick = 0.22;
+  const wallHeight = 3.45;
+  const wallThick = 0.24;
 
-  // --- North Wall (z = -5.11) ---
+  // --- North Wall (z = -7.12) ---
   const northWall = new THREE.Mesh(
     new THREE.BoxGeometry(GRID_SIZE + wallThick, wallHeight, wallThick),
     wallMat
   );
-  northWall.position.set(-wallThick / 2, wallHeight / 2, -GRID_SIZE / 2 - wallThick / 2);
+  northWall.position.set(-wallThick / 2, wallHeight / 2, -half - wallThick / 2);
   northWall.castShadow = true;
   northWall.receiveShadow = true;
   roomGroup.add(northWall);
 
-  // North baseboard
   const northBaseboard = new THREE.Mesh(
-    new THREE.BoxGeometry(GRID_SIZE, 0.14, 0.03),
+    new THREE.BoxGeometry(GRID_SIZE, 0.16, 0.03),
     trimMat
   );
-  northBaseboard.position.set(0, 0.07, -GRID_SIZE / 2 + 0.015);
+  northBaseboard.position.set(0, 0.08, -half + 0.015);
   northBaseboard.receiveShadow = true;
   roomGroup.add(northBaseboard);
 
@@ -106,102 +132,108 @@ export function buildRoomArchitecture(
     new THREE.PlaneGeometry(GRID_SIZE, wallHeight),
     new THREE.MeshBasicMaterial({ visible: false })
   );
-  northWallRaycastPlane.position.set(0, wallHeight / 2, -GRID_SIZE / 2 + 0.01);
+  northWallRaycastPlane.position.set(0, wallHeight / 2, -half + 0.01);
   roomGroup.add(northWallRaycastPlane);
 
-  // --- West Wall (x = -5.11) with Panoramic Window ---
-  // Window opening spans z in [-3.0, +2.0] (tiles 2..7), y in [0.7, 2.65]
-  // 1. Left solid pier (z: -5 to -3, length 2)
+  // --- West Wall (x = -7.12) with Grand Hotel Panoramic Window (z: -4..+3) & Suite Door (z: 4.5..5.5) ---
+  // 1. North solid pier (z: -7 to -4, length 3.0)
   const westPierNorth = new THREE.Mesh(
-    new THREE.BoxGeometry(wallThick, wallHeight, 2.0),
+    new THREE.BoxGeometry(wallThick, wallHeight, 3.0),
     wallMat
   );
-  westPierNorth.position.set(-GRID_SIZE / 2 - wallThick / 2, wallHeight / 2, -4.0);
+  westPierNorth.position.set(-half - wallThick / 2, wallHeight / 2, -5.5);
   westPierNorth.castShadow = true;
   westPierNorth.receiveShadow = true;
   roomGroup.add(westPierNorth);
 
-  // 2. Right solid piers split around Walk-Through Exit Door (opening z: 3.0..4.0, y: 0..2.28)
+  // 2. Pier between window & suite door (z: 3.0 to 4.5, length 1.5)
   const westPierDoorNorth = new THREE.Mesh(
-    new THREE.BoxGeometry(wallThick, wallHeight, 1.0),
+    new THREE.BoxGeometry(wallThick, wallHeight, 1.5),
     wallMat
   );
-  westPierDoorNorth.position.set(-GRID_SIZE / 2 - wallThick / 2, wallHeight / 2, 2.5);
+  westPierDoorNorth.position.set(-half - wallThick / 2, wallHeight / 2, 3.75);
   westPierDoorNorth.castShadow = true;
   westPierDoorNorth.receiveShadow = true;
   roomGroup.add(westPierDoorNorth);
 
+  // 3. South pier beside suite door (z: 5.5 to 7.0, length 1.5)
   const westPierDoorSouth = new THREE.Mesh(
-    new THREE.BoxGeometry(wallThick, wallHeight, 1.0),
+    new THREE.BoxGeometry(wallThick, wallHeight, 1.5),
     wallMat
   );
-  westPierDoorSouth.position.set(-GRID_SIZE / 2 - wallThick / 2, wallHeight / 2, 4.5);
+  westPierDoorSouth.position.set(-half - wallThick / 2, wallHeight / 2, 6.25);
   westPierDoorSouth.castShadow = true;
   westPierDoorSouth.receiveShadow = true;
   roomGroup.add(westPierDoorSouth);
 
+  // 4. Header above suite door (y: 2.28..3.45, z: 4.5..5.5)
   const westDoorHeader = new THREE.Mesh(
     new THREE.BoxGeometry(wallThick, wallHeight - 2.28, 1.0),
     wallMat
   );
-  westDoorHeader.position.set(-GRID_SIZE / 2 - wallThick / 2, 2.28 + (wallHeight - 2.28) / 2, 3.5);
+  westDoorHeader.position.set(
+    -half - wallThick / 2,
+    2.28 + (wallHeight - 2.28) / 2,
+    SUITE_DOOR_Z
+  );
   westDoorHeader.castShadow = true;
   westDoorHeader.receiveShadow = true;
   roomGroup.add(westDoorHeader);
 
-  // 3. Under-window sill wall (z: -3 to +2, length 5, height 0.7)
+  // 5. Under-window sill wall (z: -4 to +3, length 7.0, height 0.7)
   const westBottom = new THREE.Mesh(
-    new THREE.BoxGeometry(wallThick, 0.7, 5.0),
+    new THREE.BoxGeometry(wallThick, 0.7, 7.0),
     wallMat
   );
-  westBottom.position.set(-GRID_SIZE / 2 - wallThick / 2, 0.35, -0.5);
+  westBottom.position.set(-half - wallThick / 2, 0.35, -0.5);
   westBottom.castShadow = true;
   westBottom.receiveShadow = true;
   roomGroup.add(westBottom);
 
-  // 4. Above-window header (z: -3 to +2, length 5, y: 2.65..3.2, height 0.55)
+  // 6. Above-window header (z: -4 to +3, length 7.0, y: 2.85..3.45)
   const westTop = new THREE.Mesh(
-    new THREE.BoxGeometry(wallThick, 0.55, 5.0),
+    new THREE.BoxGeometry(wallThick, 0.6, 7.0),
     wallMat
   );
-  westTop.position.set(-GRID_SIZE / 2 - wallThick / 2, 2.925, -0.5);
+  westTop.position.set(-half - wallThick / 2, 3.15, -0.5);
   westTop.castShadow = true;
   westTop.receiveShadow = true;
   roomGroup.add(westTop);
 
-  // West baseboard
-  const westBaseboard = new THREE.Mesh(
-    new THREE.BoxGeometry(0.03, 0.14, GRID_SIZE),
+  // West baseboard (split cleanly around door opening)
+  const westBaseboardNorth = new THREE.Mesh(
+    new THREE.BoxGeometry(0.03, 0.16, 11.5),
     trimMat
   );
-  westBaseboard.position.set(-GRID_SIZE / 2 + 0.015, 0.07, 0);
-  westBaseboard.receiveShadow = true;
-  roomGroup.add(westBaseboard);
+  westBaseboardNorth.position.set(-half + 0.015, 0.08, -1.25);
+  roomGroup.add(westBaseboardNorth);
 
-  // Window Sill & Sleek Industrial Mullions
-  const sill = new THREE.Mesh(
-    new THREE.BoxGeometry(0.3, 0.05, 5.08),
+  const westBaseboardSouth = new THREE.Mesh(
+    new THREE.BoxGeometry(0.03, 0.16, 1.5),
     trimMat
   );
-  sill.position.set(-GRID_SIZE / 2 - 0.06, 0.71, -0.5);
+  westBaseboardSouth.position.set(-half + 0.015, 0.08, 6.25);
+  roomGroup.add(westBaseboardSouth);
+
+  // Panoramic Window Sill & Mullions
+  const sill = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.05, 7.08), trimMat);
+  sill.position.set(-half - 0.06, 0.71, -0.5);
   sill.receiveShadow = true;
   roomGroup.add(sill);
 
-  // Mullions around & across window
-  for (const mz of [-3.0, -1.35, 0.35, 2.0]) {
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.95, 0.06), windowFrameMat);
-    post.position.set(-GRID_SIZE / 2 - 0.1, 1.68, mz);
+  for (const mz of [-4.0, -2.25, -0.5, 1.25, 3.0]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.15, 0.06), windowFrameMat);
+    post.position.set(-half - 0.1, 1.78, mz);
     roomGroup.add(post);
   }
-  for (const my of [0.74, 2.63]) {
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 5.06), windowFrameMat);
-    rail.position.set(-GRID_SIZE / 2 - 0.1, my, -0.5);
+  for (const my of [0.74, 2.83]) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 7.06), windowFrameMat);
+    rail.position.set(-half - 0.1, my, -0.5);
     roomGroup.add(rail);
   }
 
-  // Subtle glass pane
   const glassPane = new THREE.Mesh(
-    new THREE.PlaneGeometry(5.0, 1.9),
+    new THREE.PlaneGeometry(7.0, 2.1),
     new THREE.MeshPhysicalMaterial({
       color: 0xdff2ff,
       roughness: 0.08,
@@ -213,29 +245,28 @@ export function buildRoomArchitecture(
     })
   );
   glassPane.rotation.y = Math.PI / 2;
-  glassPane.position.set(-GRID_SIZE / 2 - 0.1, 1.68, -0.5);
+  glassPane.position.set(-half - 0.1, 1.78, -0.5);
   roomGroup.add(glassPane);
 
-  // Exterior Sky & Horizon Glow behind Window
+  // Exterior Sky & City Horizon outside hotel window
   const windowSkyMat = new THREE.MeshBasicMaterial({ color: 0xbfe2ff });
-  const skyPanel = new THREE.Mesh(new THREE.PlaneGeometry(5.3, 2.2), windowSkyMat);
+  const skyPanel = new THREE.Mesh(new THREE.PlaneGeometry(7.4, 2.4), windowSkyMat);
   skyPanel.rotation.y = Math.PI / 2;
-  skyPanel.position.set(-GRID_SIZE / 2 - 0.38, 1.68, -0.5);
+  skyPanel.position.set(-half - 0.42, 1.78, -0.5);
   roomGroup.add(skyPanel);
 
   const windowSunMat = new THREE.MeshBasicMaterial({ color: 0xfff5d6 });
-  const sunDisc = new THREE.Mesh(new THREE.CircleGeometry(0.36, 24), windowSunMat);
+  const sunDisc = new THREE.Mesh(new THREE.CircleGeometry(0.42, 24), windowSunMat);
   sunDisc.rotation.y = Math.PI / 2;
-  sunDisc.position.set(-GRID_SIZE / 2 - 0.35, 2.08, -1.8);
+  sunDisc.position.set(-half - 0.39, 2.24, -2.2);
   roomGroup.add(sunDisc);
 
-  // Distant soft city silhouettes outside window
   const cityMat = new THREE.MeshBasicMaterial({ color: 0x8ea7c2 });
-  for (let b = 0; b < 6; b++) {
-    const bh = 0.35 + ((b * 37) % 5) * 0.14;
-    const bldg = new THREE.Mesh(new THREE.PlaneGeometry(0.75, bh), cityMat);
+  for (let b = 0; b < 8; b++) {
+    const bh = 0.42 + ((b * 37) % 5) * 0.16;
+    const bldg = new THREE.Mesh(new THREE.PlaneGeometry(0.82, bh), cityMat);
     bldg.rotation.y = Math.PI / 2;
-    bldg.position.set(-GRID_SIZE / 2 - 0.34, 0.72 + bh / 2, -2.5 + b * 0.82);
+    bldg.position.set(-half - 0.37, 0.72 + bh / 2, -3.4 + b * 0.85);
     roomGroup.add(bldg);
   }
 
@@ -244,23 +275,23 @@ export function buildRoomArchitecture(
     new THREE.MeshBasicMaterial({ visible: false })
   );
   westWallRaycastPlane.rotation.y = Math.PI / 2;
-  westWallRaycastPlane.position.set(-GRID_SIZE / 2 + 0.01, wallHeight / 2, 0);
+  westWallRaycastPlane.position.set(-half + 0.01, wallHeight / 2, 0);
   roomGroup.add(westWallRaycastPlane);
 
-  // --- Interactive Loft Exit Door (West wall at z = 3.5, tile gz = 8) ---
+  // --- Hotel Suite Entry Door & Keycard Lock (West wall at z = 5.0) ---
   const exitDoorGroup = new THREE.Group();
-  exitDoorGroup.position.set(-GRID_SIZE / 2 + 0.02, 0, 3.5);
+  exitDoorGroup.position.set(-half + 0.02, 0, SUITE_DOOR_Z);
   exitDoorGroup.userData.isExitDoor = true;
 
   const doorFrameMat = new THREE.MeshStandardMaterial({
-    color: 0x2b2d36,
-    roughness: 0.42,
-    metalness: 0.35,
+    color: 0x262932,
+    roughness: 0.4,
+    metalness: 0.45,
   });
   const doorWoodMat = new THREE.MeshStandardMaterial({
-    color: 0x8a5a38,
-    roughness: 0.45,
-    metalness: 0.05,
+    color: 0x5c3a24,
+    roughness: 0.42,
+    metalness: 0.06,
   });
   const doorBrassMat = new THREE.MeshStandardMaterial({
     color: 0xd8b45a,
@@ -268,94 +299,102 @@ export function buildRoomArchitecture(
     metalness: 0.88,
   });
 
-  // Door outer jambs & header
   for (const dz of [-0.52, 0.52]) {
-    const jamb = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.28, 0.08), doorFrameMat);
+    const jamb = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.28, 0.08), doorFrameMat);
     jamb.position.set(0, 1.14, dz);
     jamb.castShadow = true;
     exitDoorGroup.add(jamb);
   }
-  const doorHeader = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, 1.12), doorFrameMat);
+  const doorHeader = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 1.12), doorFrameMat);
   doorHeader.position.set(0, 2.28, 0);
   exitDoorGroup.add(doorHeader);
 
-  // Hinged Door Leaf Pivot (hinged at z = -0.46)
+  // Hinged Suite Door Leaf
   const doorLeafPivot = new THREE.Group();
   doorLeafPivot.position.set(0.01, 0, -0.46);
 
-  const doorPanel = new THREE.Mesh(new THREE.BoxGeometry(0.055, 2.22, 0.92), doorWoodMat);
+  const doorPanel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 2.22, 0.92), doorWoodMat);
   doorPanel.position.set(0, 1.11, 0.46);
   doorPanel.castShadow = true;
   doorLeafPivot.add(doorPanel);
 
-  // Upper frosted glass transom window on door
-  const doorGlass = new THREE.Mesh(
-    new THREE.BoxGeometry(0.065, 0.42, 0.62),
-    new THREE.MeshStandardMaterial({
-      color: 0xe6f4ff,
-      emissive: 0x99c8ff,
-      emissiveIntensity: 0.28,
-      roughness: 0.2,
-    })
-  );
-  doorGlass.position.set(0, 1.72, 0.46);
-  doorLeafPivot.add(doorGlass);
+  // Brass inlay trim on luxury hotel door
+  const trimBar = new THREE.Mesh(new THREE.BoxGeometry(0.065, 1.75, 0.04), doorBrassMat);
+  trimBar.position.set(0, 1.12, 0.22);
+  doorLeafPivot.add(trimBar);
 
   // Brass lever handle
-  const escutcheon = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, 0.045), doorBrassMat);
+  const escutcheon = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.16, 0.05), doorBrassMat);
   escutcheon.position.set(0.01, 1.02, 0.82);
   doorLeafPivot.add(escutcheon);
 
-  const lever = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.022, 0.13), doorBrassMat);
+  const lever = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.022, 0.14), doorBrassMat);
   lever.position.set(0.045, 1.03, 0.77);
   doorLeafPivot.add(lever);
 
   exitDoorGroup.add(doorLeafPivot);
 
-  // Warm threshold light & subtle welcome mat inside doorway
+  // Suite Number Brass Plaque beside Door
+  let plaqueTex = createSuitePlaqueTexture(PLAYER_SUITE_NUMBER);
+  plaqueTex.anisotropy = maxAnisotropy;
+  const plaqueMat = new THREE.MeshStandardMaterial({
+    map: plaqueTex,
+    roughness: 0.35,
+    metalness: 0.35,
+  });
+  const plaqueMesh = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.22, 0.44), plaqueMat);
+  plaqueMesh.position.set(0.03, 1.65, -0.78);
+  exitDoorGroup.add(plaqueMesh);
+
+  // Wall-mounted Keycard Pad & Status LED next to handle (z = +0.68)
+  const readerBody = new THREE.Mesh(
+    new THREE.BoxGeometry(0.05, 0.2, 0.12),
+    new THREE.MeshStandardMaterial({ color: 0x1a1d24, roughness: 0.3, metalness: 0.75 })
+  );
+  readerBody.position.set(0.03, 1.15, 0.68);
+  exitDoorGroup.add(readerBody);
+
+  const keycardLedMat = new THREE.MeshStandardMaterial({
+    color: 0xf59e0b,
+    emissive: 0xf59e0b,
+    emissiveIntensity: 1.4,
+    roughness: 0.2,
+  });
+  const readerLed = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.035, 0.075), keycardLedMat);
+  readerLed.position.set(0.035, 1.21, 0.68);
+  exitDoorGroup.add(readerLed);
+
+  // Subtle Hotel Entry Runner Mat inside door
   const doormat = new THREE.Mesh(
-    new THREE.BoxGeometry(0.62, 0.02, 0.92),
+    new THREE.BoxGeometry(0.75, 0.02, 1.1),
     new THREE.MeshStandardMaterial({
-      color: 0xc48b5a,
-      roughness: 0.95,
+      color: 0x7c2d2d,
+      roughness: 0.92,
       polygonOffset: true,
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -1,
     })
   );
-  doormat.position.set(0.42, 0.012, 0);
+  doormat.position.set(0.48, 0.012, 0);
   doormat.receiveShadow = true;
   exitDoorGroup.add(doormat);
-
-  // Glowing exit sign bar above frame
-  const exitBeacon = new THREE.Mesh(
-    new THREE.BoxGeometry(0.04, 0.06, 0.34),
-    new THREE.MeshStandardMaterial({
-      color: 0x34d399,
-      emissive: 0x10b981,
-      emissiveIntensity: 1.1,
-      roughness: 0.3,
-    })
-  );
-  exitBeacon.position.set(0.05, 2.38, 0);
-  exitDoorGroup.add(exitBeacon);
 
   roomGroup.add(exitDoorGroup);
 
   // Top Coping Cap along cutaway walls
-  const capMat = new THREE.MeshStandardMaterial({ color: 0x262932, roughness: 0.65 });
+  const capMat = new THREE.MeshStandardMaterial({ color: 0x22252e, roughness: 0.65 });
   const northCap = new THREE.Mesh(
     new THREE.BoxGeometry(GRID_SIZE + wallThick + 0.04, 0.06, wallThick + 0.04),
     capMat
   );
-  northCap.position.set(-wallThick / 2, wallHeight + 0.03, -GRID_SIZE / 2 - wallThick / 2);
+  northCap.position.set(-wallThick / 2, wallHeight + 0.03, -half - wallThick / 2);
   roomGroup.add(northCap);
 
   const westCap = new THREE.Mesh(
     new THREE.BoxGeometry(wallThick + 0.04, 0.06, GRID_SIZE + wallThick + 0.04),
     capMat
   );
-  westCap.position.set(-GRID_SIZE / 2 - wallThick / 2, wallHeight + 0.03, -wallThick / 2);
+  westCap.position.set(-half - wallThick / 2, wallHeight + 0.03, -wallThick / 2);
   roomGroup.add(westCap);
 
   // --- Edit Mode Architectural Floor Grid ---
@@ -370,11 +409,11 @@ export function buildRoomArchitecture(
   });
   const pts: THREE.Vector3[] = [];
   for (let i = 0; i <= GRID_SIZE; i++) {
-    const p = -GRID_SIZE / 2 + i;
-    pts.push(new THREE.Vector3(p, 0.014, -GRID_SIZE / 2));
-    pts.push(new THREE.Vector3(p, 0.014, GRID_SIZE / 2));
-    pts.push(new THREE.Vector3(-GRID_SIZE / 2, 0.014, p));
-    pts.push(new THREE.Vector3(GRID_SIZE / 2, 0.014, p));
+    const p = -half + i;
+    pts.push(new THREE.Vector3(p, 0.014, -half));
+    pts.push(new THREE.Vector3(p, 0.014, half));
+    pts.push(new THREE.Vector3(-half, 0.014, p));
+    pts.push(new THREE.Vector3(half, 0.014, p));
   }
   const gridGeo = new THREE.BufferGeometry().setFromPoints(pts);
   const gridLines = new THREE.LineSegments(gridGeo, lineMat);
@@ -417,6 +456,21 @@ export function buildRoomArchitecture(
     gridOverlay.visible = visible;
   }
 
+  function setDoorUnlocked(unlocked: boolean) {
+    const hex = unlocked ? 0x39ff14 : 0xf59e0b;
+    keycardLedMat.color.setHex(hex);
+    keycardLedMat.emissive.setHex(hex);
+  }
+
+  function setRoomBadge(suiteNumber: string, anisotropy: number) {
+    const nextTex = createSuitePlaqueTexture(suiteNumber);
+    nextTex.anisotropy = anisotropy;
+    plaqueMat.map = nextTex;
+    plaqueMat.needsUpdate = true;
+    if (plaqueTex) plaqueTex.dispose();
+    plaqueTex = nextTex;
+  }
+
   return {
     roomGroup,
     floorTopMesh,
@@ -431,5 +485,7 @@ export function buildRoomArchitecture(
     updateSurfaces,
     updateMoodBackdrop,
     setGridVisible,
+    setDoorUnlocked,
+    setRoomBadge,
   };
 }

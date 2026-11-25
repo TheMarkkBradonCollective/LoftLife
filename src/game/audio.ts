@@ -119,6 +119,61 @@ class SoundEffects {
     osc.start(now);
     osc.stop(now + 0.05);
   }
+
+  playKeycardBeep() {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [880, 1174.66].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + i * 0.075);
+      gain.gain.setValueAtTime(0.08, now + i * 0.075);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.075 + 0.1);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + i * 0.075);
+      osc.stop(now + i * 0.075 + 0.11);
+    });
+  }
+
+  playIntercomRing() {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [659.25, 880, 659.25, 880].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now + i * 0.11);
+      gain.gain.setValueAtTime(0.075, now + i * 0.11);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.11 + 0.12);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + i * 0.11);
+      osc.stop(now + i * 0.11 + 0.13);
+    });
+  }
+
+  playElevatorDing() {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [783.99, 1046.5].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + i * 0.16);
+      gain.gain.setValueAtTime(0.1, now + i * 0.16);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.16 + 0.45);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + i * 0.16);
+      osc.stop(now + i * 0.16 + 0.46);
+    });
+  }
 }
 
 export const sfx = new SoundEffects();
+

@@ -4,7 +4,12 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createAvatarRig, type AvatarRig } from '../game/avatar';
 import { sfx } from '../game/audio';
-import { getCatalogItem, GRID_SIZE } from '../game/catalog';
+import {
+  getCatalogItem,
+  GRID_SIZE,
+  HOTEL_RESIDENTS,
+  PLAYER_SUITE_NUMBER,
+} from '../game/catalog';
 import { buildFurnitureGroup, updateFurnitureAnimations } from '../game/furniture';
 import {
   findPath,
@@ -20,13 +25,15 @@ import {
   uzToWorldX,
   worldToU,
 } from '../game/cityLayout';
-import { buildRoomArchitecture } from '../game/roomBuilder';
+import { buildHotelHallway, buildHotelLobby } from '../game/hotelBuilder';
+import { buildRoomArchitecture, SUITE_DOOR_Z } from '../game/roomBuilder';
 import {
   buildMainWorld,
   getCityGroundY,
   isMainWorldPosWalkable,
 } from '../game/worldBuilder';
 import type {
+  ActiveResident,
   AvatarConfig,
   EmoteType,
   GameMode,
@@ -44,6 +51,11 @@ export interface CameraPresetRequest {
 
 interface RoomViewportProps {
   location: WorldLocation;
+  hallwayFloor: number;
+  unlockedRooms: string[];
+  mainDoorUnlocked: boolean;
+  roomDoorUnlocked: boolean;
+  activeResident: ActiveResident | null;
   viewMode: ViewMode;
   mode: GameMode;
   items: PlacedItem[];
@@ -58,6 +70,7 @@ interface RoomViewportProps {
   placingColor: string;
   movingUid: string | null;
   cameraPreset: CameraPresetRequest | null;
+  modalOpen?: boolean;
   playerPoseRef?: React.MutableRefObject<{ x: number; z: number; yaw: number }>;
   onChangeLocation: (next: WorldLocation) => void;
   onSelectItem: (uid: string | null) => void;
@@ -76,11 +89,17 @@ interface RoomViewportProps {
   onPointerLockChange?: (locked: boolean) => void;
   onProximityPrompt?: (label: string | null) => void;
   onCityStreetChange?: (label: string) => void;
+  onOpenDoorTerminal: () => void;
+  onOpenElevator: () => void;
+  onUnlockRoomDoor: () => void;
+  onUnlockHallwayDoor: (roomNumber: string) => void;
+  onEnterSuiteFromHallway: (roomNumber: string) => void;
 }
 
 const _vec3 = new THREE.Vector3();
 const _vec3B = new THREE.Vector3();
 const _lookTarget = new THREE.Vector3();
+const RESIDENT_NPC_POS = { x: 1.2, z: -1.6 };
 
 function shortestAngleDiff(a: number, b: number): number {
   let diff = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI;
@@ -132,6 +151,11 @@ function buildPlazaPath(
 
 export const RoomViewport: React.FC<RoomViewportProps> = ({
   location,
+  hallwayFloor,
+  unlockedRooms,
+  mainDoorUnlocked,
+  roomDoorUnlocked,
+  activeResident,
   viewMode,
   mode,
   items,
@@ -146,6 +170,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   placingColor,
   movingUid,
   cameraPreset,
+  modalOpen = false,
   playerPoseRef,
   onChangeLocation,
   onSelectItem,
@@ -158,17 +183,34 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   onPointerLockChange,
   onProximityPrompt,
   onCityStreetChange,
+  onOpenDoorTerminal,
+  onOpenElevator,
+  onUnlockRoomDoor,
+  onUnlockHallwayDoor,
+  onEnterSuiteFromHallway,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [webglError, setWebglError] = useState(false);
 
+  const activeItems =
+    location === 'resident_room' && activeResident ? activeResident.items : items;
+  const activeSurfaces =
+    location === 'resident_room' && activeResident ? activeResident.surfaces : surfaces;
+  const activeMood =
+    location === 'resident_room' && activeResident ? activeResident.mood : mood;
+
   const propsRef = useRef({
     location,
+    hallwayFloor,
+    unlockedRooms,
+    mainDoorUnlocked,
+    roomDoorUnlocked,
+    activeResident,
     viewMode,
     mode,
-    items,
-    surfaces,
-    mood,
+    items: activeItems,
+    surfaces: activeSurfaces,
+    mood: activeMood,
     avatarConfig,
     activeEmote,
     selectedUid,
@@ -176,6 +218,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     placingRotation,
     placingColor,
     movingUid,
+    modalOpen,
     playerPoseRef,
     onChangeLocation,
     onSelectItem,
@@ -188,14 +231,24 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onPointerLockChange,
     onProximityPrompt,
     onCityStreetChange,
+    onOpenDoorTerminal,
+    onOpenElevator,
+    onUnlockRoomDoor,
+    onUnlockHallwayDoor,
+    onEnterSuiteFromHallway,
   });
   propsRef.current = {
     location,
+    hallwayFloor,
+    unlockedRooms,
+    mainDoorUnlocked,
+    roomDoorUnlocked,
+    activeResident,
     viewMode,
     mode,
-    items,
-    surfaces,
-    mood,
+    items: activeItems,
+    surfaces: activeSurfaces,
+    mood: activeMood,
     avatarConfig,
     activeEmote,
     selectedUid,
@@ -203,6 +256,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     placingRotation,
     placingColor,
     movingUid,
+    modalOpen,
     playerPoseRef,
     onChangeLocation,
     onSelectItem,
@@ -215,7 +269,17 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onPointerLockChange,
     onProximityPrompt,
     onCityStreetChange,
+    onOpenDoorTerminal,
+    onOpenElevator,
+    onUnlockRoomDoor,
+    onUnlockHallwayDoor,
+    onEnterSuiteFromHallway,
   };
+
+  const prevLocationRef = useRef<{ loc: WorldLocation; roomNumber: string | null }>({
+    loc: location,
+    roomNumber: activeResident?.roomNumber ?? null,
+  });
 
   const sceneHandlesRef = useRef<{
     scene: THREE.Scene;
@@ -225,12 +289,17 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     maxAnisotropy: number;
     isSoftwareGl: boolean;
     roomContainer: THREE.Group;
+    lobbyContainer: THREE.Group;
+    hallwayContainer: THREE.Group;
     worldContainer: THREE.Group;
     furnitureRoot: THREE.Group;
     furnitureMap: Map<string, THREE.Group>;
     popAnimations: Map<string, number>;
     avatarRig: AvatarRig;
+    residentNpcRig: AvatarRig;
     roomHandles: ReturnType<typeof buildRoomArchitecture>;
+    lobbyHandles: ReturnType<typeof buildHotelLobby>;
+    hallwayHandles: ReturnType<typeof buildHotelHallway>;
     mainWorld: ReturnType<typeof buildMainWorld>;
     keyLight: THREE.DirectionalLight;
     hemiLight: THREE.HemisphereLight;
@@ -265,7 +334,14 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         seatPos: { x: number; y: number; z: number };
         facingYaw: number;
       } | null;
-      pendingPortal: 'toWorld' | 'toRoom' | null;
+      pendingPortal:
+        | 'toWorld'
+        | 'toLobby'
+        | 'toHallway'
+        | 'openDoorTerminal'
+        | 'openElevator'
+        | null;
+      pendingHallDoor: string | null;
       pendingNpcId: string | null;
       seatedUid: string | null;
       jumpVel: number;
@@ -273,6 +349,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       stepTimer: number;
       doorSwingTimer: number;
       portalCooldown: number;
+      residentGreetTimer: number;
     };
   } | null>(null);
 
@@ -331,7 +408,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color('#dfe8f2');
-    scene.fog = new THREE.Fog('#dfe8f2', 26, 62);
+    scene.fog = new THREE.Fog('#dfe8f2', 32, 72);
 
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -343,15 +420,15 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       0.1,
       450
     );
-    camera.position.set(11.2, 9.6, 11.2);
+    camera.position.set(14.5, 12.0, 14.5);
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = !isSoftwareGl;
     controls.dampingFactor = 0.06;
-    controls.target.set(0, 0.75, 0);
+    controls.target.set(0, 0.85, 0);
     controls.minDistance = 5.0;
-    controls.maxDistance = 24;
-    controls.minPolarAngle = 0.28;
+    controls.maxDistance = 30;
+    controls.minPolarAngle = 0.25;
     controls.maxPolarAngle = Math.PI / 2 - 0.1;
     controls.minAzimuthAngle = -0.18;
     controls.maxAzimuthAngle = Math.PI / 2 + 0.18;
@@ -361,12 +438,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     scene.add(hemiLight);
 
     const keyLight = new THREE.DirectionalLight(0xfff4e0, 1.9);
-    keyLight.position.set(-10, 14, 6);
+    keyLight.position.set(-12, 16, 8);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.set(2048, 2048);
     keyLight.shadow.camera.near = 1;
-    keyLight.shadow.camera.far = 65;
-    const d = 14;
+    keyLight.shadow.camera.far = 70;
+    const d = 16;
     keyLight.shadow.camera.left = -d;
     keyLight.shadow.camera.right = d;
     keyLight.shadow.camera.top = d;
@@ -377,9 +454,10 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     scene.add(keyLight.target);
 
     const fillLight = new THREE.DirectionalLight(0xbcd6ff, 0.52);
-    fillLight.position.set(9, 7, -8);
+    fillLight.position.set(10, 8, -9);
     scene.add(fillLight);
 
+    // 1. Hotel Suite Container (14x14m room + furniture + resident NPC)
     const roomContainer = new THREE.Group();
     scene.add(roomContainer);
 
@@ -393,22 +471,53 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     const furnitureRoot = new THREE.Group();
     roomContainer.add(furnitureRoot);
 
+    const residentNpcRig = createAvatarRig(HOTEL_RESIDENTS[0].avatar);
+    residentNpcRig.root.position.set(RESIDENT_NPC_POS.x, 0, RESIDENT_NPC_POS.z);
+    residentNpcRig.root.userData.isResidentNpc = true;
+    residentNpcRig.root.visible = false;
+    roomContainer.add(residentNpcRig.root);
+
     const boxEdges = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 0.08, 1));
     const selectionBox = new THREE.LineSegments(
       boxEdges,
-      new THREE.LineBasicMaterial({ color: 0x3b82f6 })
+      new THREE.LineBasicMaterial({ color: 0x39ff14 })
     );
     selectionBox.visible = false;
     roomContainer.add(selectionBox);
 
-    const worldContainer = new THREE.Group();
-    worldContainer.visible = propsRef.current.location === 'world';
-    roomContainer.visible = propsRef.current.location === 'room';
-    scene.add(worldContainer);
+    // 2. Hotel Main Lobby Container
+    const lobbyContainer = new THREE.Group();
+    const lobbyHandles = buildHotelLobby(maxAnisotropy);
+    lobbyContainer.add(lobbyHandles.lobbyGroup);
+    scene.add(lobbyContainer);
 
+    // 3. Hotel Upper Floor Hallway Container
+    const hallwayContainer = new THREE.Group();
+    const hallwayHandles = buildHotelHallway(maxAnisotropy);
+    hallwayHandles.setFloorState(
+      propsRef.current.hallwayFloor,
+      new Set(propsRef.current.unlockedRooms),
+      HOTEL_RESIDENTS,
+      propsRef.current.avatarConfig.name,
+      maxAnisotropy
+    );
+    hallwayContainer.add(hallwayHandles.hallwayGroup);
+    scene.add(hallwayContainer);
+
+    // 4. Main City Outdoor Container
+    const worldContainer = new THREE.Group();
     const mainWorld = buildMainWorld(maxAnisotropy, isSoftwareGl);
     worldContainer.add(mainWorld.worldGroup);
+    scene.add(worldContainer);
 
+    // Visibility sync on boot
+    roomContainer.visible =
+      propsRef.current.location === 'room' || propsRef.current.location === 'resident_room';
+    lobbyContainer.visible = propsRef.current.location === 'lobby';
+    hallwayContainer.visible = propsRef.current.location === 'hallway';
+    worldContainer.visible = propsRef.current.location === 'world';
+
+    // 5. Player Avatar
     const avatarRig = createAvatarRig(propsRef.current.avatarConfig);
     avatarRig.root.position.set(0.5, 0, 1.8);
     scene.add(avatarRig.root);
@@ -416,7 +525,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     const rippleMesh = new THREE.Mesh(
       new THREE.RingGeometry(0.18, 0.27, 28),
       new THREE.MeshBasicMaterial({
-        color: 0x10b981,
+        color: 0x39ff14,
         transparent: true,
         opacity: 0,
         side: THREE.DoubleSide,
@@ -436,12 +545,17 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       maxAnisotropy,
       isSoftwareGl,
       roomContainer,
+      lobbyContainer,
+      hallwayContainer,
       worldContainer,
       furnitureRoot,
       furnitureMap: new Map<string, THREE.Group>(),
       popAnimations: new Map<string, number>(),
       avatarRig,
+      residentNpcRig,
       roomHandles,
+      lobbyHandles,
+      hallwayHandles,
       mainWorld,
       keyLight,
       hemiLight,
@@ -471,7 +585,14 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           seatPos: { x: number; y: number; z: number };
           facingYaw: number;
         } | null,
-        pendingPortal: null as 'toWorld' | 'toRoom' | null,
+        pendingPortal: null as
+          | 'toWorld'
+          | 'toLobby'
+          | 'toHallway'
+          | 'openDoorTerminal'
+          | 'openElevator'
+          | null,
+        pendingHallDoor: null as string | null,
         pendingNpcId: null as string | null,
         seatedUid: null as string | null,
         jumpVel: 0,
@@ -479,6 +600,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         stepTimer: 0,
         doorSwingTimer: 0,
         portalCooldown: 0,
+        residentGreetTimer: 0,
       },
     };
     sceneHandlesRef.current = handles;
@@ -487,11 +609,28 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       handles.cameraAnim.active = false;
     });
 
-    // Proximity evaluation for Play View 'E' interaction
+    const releaseCursorForModal = () => {
+      if (document.pointerLockElement === renderer.domElement) {
+        document.exitPointerLock?.();
+      }
+      for (const k of Object.keys(keys)) keys[k] = false;
+    };
+
+    // Unified proximity action evaluation (runs in Isometric Walk & Play View!)
     let lastPrompt: string | null = null;
     function getNearbyAction(): { label: string; execute: () => void } | null {
-      const { location: loc, viewMode: vm, items: list } = propsRef.current;
-      if (vm !== 'play') return null;
+      const {
+        location: loc,
+        mode: curMode,
+        items: list,
+        roomDoorUnlocked: suiteUnlocked,
+        mainDoorUnlocked: hotelDoorUnlocked,
+        activeResident: resident,
+      } = propsRef.current;
+
+      if (propsRef.current.modalOpen) return null;
+      if (loc === 'room' && curMode === 'edit') return null;
+
       const av = handles.avatarState;
 
       if (av.seatedUid) {
@@ -506,16 +645,47 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         };
       }
 
-      if (loc === 'room') {
-        if (Math.hypot(av.x - -4.35, av.z - 3.5) < 1.55) {
+      // 1. Inside Player Suite (402) or Resident Suite
+      if (loc === 'room' || loc === 'resident_room') {
+        if (Math.hypot(av.x - -6.4, av.z - SUITE_DOOR_Z) < 1.75) {
+          if (loc === 'room' && !suiteUnlocked) {
+            return {
+              label: `Press E · Enter Keycard (Suite ${PLAYER_SUITE_NUMBER})`,
+              execute: () => {
+                sfx.playKeycardBeep();
+                av.doorSwingTimer = 2.0;
+                propsRef.current.onUnlockRoomDoor();
+                propsRef.current.onWalkHint?.(
+                  `Keycard accepted · Suite ${PLAYER_SUITE_NUMBER} door unlocked! Walk out to Hallway`
+                );
+              },
+            };
+          }
           return {
-            label: 'Press E · Exit to Main World',
+            label: `Walk Through or Press E · Exit to Floor Hallway`,
             execute: () => {
               sfx.playToggle(true);
-              propsRef.current.onChangeLocation('world');
+              propsRef.current.onChangeLocation('hallway');
             },
           };
         }
+
+        if (
+          loc === 'resident_room' &&
+          resident &&
+          Math.hypot(av.x - RESIDENT_NPC_POS.x, av.z - RESIDENT_NPC_POS.z) < 2.2
+        ) {
+          return {
+            label: `Press E · Talk to ${resident.name}`,
+            execute: () => {
+              av.residentGreetTimer = 4.0;
+              propsRef.current.onEmoteChange('wave');
+              propsRef.current.onNpcChat?.(resident.name, resident.greeting);
+              sfx.playEmote();
+            },
+          };
+        }
+
         let bestDist = 1.65;
         let bestItem: PlacedItem | null = null;
         for (const it of list) {
@@ -534,11 +704,15 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             return {
               label: `Press E · ${bestItem.active ? 'Turn Off' : 'Turn On'} ${cat.name}`,
               execute: () => {
-                sfx.playToggle(!bestItem!.active);
-                propsRef.current.onToggleInteractive(bestItem!.uid);
-                propsRef.current.onWalkHint?.(
-                  `${cat.name} turned ${!bestItem!.active ? 'on' : 'off'}`
-                );
+                if (loc === 'room') {
+                  sfx.playToggle(!bestItem!.active);
+                  propsRef.current.onToggleInteractive(bestItem!.uid);
+                  propsRef.current.onWalkHint?.(
+                    `${cat.name} turned ${!bestItem!.active ? 'on' : 'off'}`
+                  );
+                } else {
+                  propsRef.current.onWalkHint?.(`${resident?.name || 'Resident'}'s ${cat.name}`);
+                }
               },
             };
           }
@@ -564,18 +738,153 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         return null;
       }
 
-      // Main World proximity actions
+      // 2. Inside Hotel Hallway (Floors 2, 3, 4)
+      if (loc === 'hallway') {
+        if (
+          Math.hypot(av.x - hallwayHandles.elevatorPos.x, av.z - hallwayHandles.elevatorPos.z) <
+          1.95
+        ) {
+          return {
+            label: 'Press E · Ride Elevator',
+            execute: () => {
+              releaseCursorForModal();
+              sfx.playElevatorDing();
+              propsRef.current.onOpenElevator();
+            },
+          };
+        }
+
+        for (const d of hallwayHandles.doors) {
+          if (Math.hypot(av.x - d.x, av.z - d.z) < 1.7) {
+            if (d.unlocked) {
+              const ownerLabel = d.isPlayerSuite
+                ? `Your Suite ${d.roomNumber}`
+                : `${d.resident?.name}'s Suite ${d.roomNumber}`;
+              return {
+                label: `Walk Through or Press E · Enter ${ownerLabel}`,
+                execute: () => {
+                  sfx.playToggle(true);
+                  propsRef.current.onEnterSuiteFromHallway(d.roomNumber);
+                },
+              };
+            }
+            if (d.isPlayerSuite) {
+              return {
+                label: `Press E · Enter Keycard (Suite ${d.roomNumber})`,
+                execute: () => {
+                  sfx.playKeycardBeep();
+                  propsRef.current.onUnlockHallwayDoor(d.roomNumber);
+                  propsRef.current.onWalkHint?.(
+                    `Keycard accepted · Walk through to enter Suite ${d.roomNumber}`
+                  );
+                },
+              };
+            }
+            if (d.resident) {
+              const targetRes = d.resident;
+              return {
+                label: `Press E · Ring ${targetRes.name} (Suite ${d.roomNumber})`,
+                execute: () => {
+                  sfx.playIntercomRing();
+                  propsRef.current.onWalkHint?.(
+                    `Ringing ${targetRes.name} in Suite ${d.roomNumber}...`
+                  );
+                  window.setTimeout(() => {
+                    sfx.playKeycardBeep();
+                    propsRef.current.onUnlockHallwayDoor(d.roomNumber);
+                    propsRef.current.onNpcChat?.(
+                      targetRes.name,
+                      `Come on in! Suite ${d.roomNumber} is unlocked now.`
+                    );
+                  }, 550);
+                },
+              };
+            }
+            return {
+              label: `Suite ${d.roomNumber} · Vacant Room`,
+              execute: () => {
+                sfx.playRemove();
+                propsRef.current.onWalkHint?.(`Suite ${d.roomNumber} is currently vacant`);
+              },
+            };
+          }
+        }
+        return null;
+      }
+
+      // 3. Inside Main Hotel Lobby
+      if (loc === 'lobby') {
+        if (
+          Math.hypot(av.x - lobbyHandles.elevatorPos.x, av.z - lobbyHandles.elevatorPos.z) < 2.05
+        ) {
+          return {
+            label: 'Press E · Ride Elevator',
+            execute: () => {
+              releaseCursorForModal();
+              sfx.playElevatorDing();
+              propsRef.current.onOpenElevator();
+            },
+          };
+        }
+        if (
+          Math.hypot(av.x - lobbyHandles.streetDoorPos.x, av.z - lobbyHandles.streetDoorPos.z) <
+          1.95
+        ) {
+          return {
+            label: 'Walk Through or Press E · Exit to Main City',
+            execute: () => {
+              sfx.playToggle(true);
+              propsRef.current.onChangeLocation('world');
+            },
+          };
+        }
+        for (const npc of lobbyHandles.npcs) {
+          if (Math.hypot(av.x - (npc.x + 2.0), av.z - npc.z) < 2.15) {
+            return {
+              label: `Press E · Talk to ${npc.name}`,
+              execute: () => {
+                npc.greetTimer = 4.0;
+                av.yaw = Math.atan2(npc.x - av.x, npc.z - av.z);
+                propsRef.current.onEmoteChange('wave');
+                propsRef.current.onNpcChat?.(npc.name, npc.greeting);
+                sfx.playEmote();
+              },
+            };
+          }
+        }
+        for (const s of lobbyHandles.seats) {
+          if (Math.hypot(av.x - s.seatPos.x, av.z - s.seatPos.z) < 1.95) {
+            return {
+              label: `Press E · Sit on ${s.label}`,
+              execute: () => {
+                av.path = [];
+                av.x = s.seatPos.x;
+                av.y = s.seatPos.y - 0.35;
+                av.z = s.seatPos.z;
+                av.yaw = s.facingYaw;
+                av.seatedUid = s.id;
+                propsRef.current.onEmoteChange('sit');
+                sfx.playClick();
+              },
+            };
+          }
+        }
+        return null;
+      }
+
+      // 4. Outdoor Main City ('world')
       if (
-        Math.hypot(
-          av.x - mainWorld.loftDoorEntryPos.x,
-          av.z - mainWorld.loftDoorEntryPos.z
-        ) < 2.2
+        Math.hypot(av.x - mainWorld.loftDoorEntryPos.x, av.z - mainWorld.loftDoorEntryPos.z) <
+        2.5
       ) {
         return {
-          label: 'Press E or Walk Through · Enter My Loft',
+          label: hotelDoorUnlocked
+            ? 'Walk Through · Enter Main Lobby (E · Intercom)'
+            : 'Press E · Enter Keycard or Ring Active User',
           execute: () => {
-            sfx.playToggle(true);
-            propsRef.current.onChangeLocation('room');
+            releaseCursorForModal();
+            sfx.playClick();
+            propsRef.current.onOpenDoorTerminal();
           },
         };
       }
@@ -632,6 +941,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     const keys: Record<string, boolean> = {};
     const onKeyDown = (e: KeyboardEvent) => {
+      if (propsRef.current.modalOpen) return;
       if (
         document.activeElement &&
         ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)
@@ -640,7 +950,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       }
       keys[e.code] = true;
 
-      if (e.code === 'KeyE' && propsRef.current.viewMode === 'play') {
+      if (e.code === 'KeyE') {
         const action = getNearbyAction();
         if (action) {
           e.preventDefault();
@@ -650,7 +960,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
       if (
         e.code === 'Space' &&
-        (propsRef.current.mode === 'walk' || propsRef.current.location === 'world')
+        (propsRef.current.mode === 'walk' || propsRef.current.location !== 'room')
       ) {
         e.preventDefault();
         const av = handles.avatarState;
@@ -668,8 +978,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     const onKeyUp = (e: KeyboardEvent) => {
       keys[e.code] = false;
     };
+    const onWindowBlur = () => {
+      for (const k of Object.keys(keys)) keys[k] = false;
+    };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onWindowBlur);
 
     const onPointerLockChange = () => {
       const locked = document.pointerLockElement === renderer.domElement;
@@ -786,7 +1100,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       handles.ghostGroup.position.set(t.x, t.y + 0.01, t.z);
       handles.ghostGroup.rotation.y = t.rotY;
 
-      const tint = valid ? 0x34d399 : 0xf87171;
+      const tint = valid ? 0x39ff14 : 0xf87171;
       handles.ghostGroup.traverse((obj) => {
         if ((obj as THREE.Mesh).isMesh) {
           const mat = (obj as THREE.Mesh).material as THREE.MeshStandardMaterial;
@@ -806,6 +1120,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     };
 
     const onPointerMove = (e: PointerEvent) => {
+      if (propsRef.current.modalOpen) return;
       if (propsRef.current.viewMode === 'play') {
         const isLocked = document.pointerLockElement === renderer.domElement;
         if (isLocked || draggingLook) {
@@ -834,6 +1149,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     const onPointerUp = (e: PointerEvent) => {
       draggingLook = false;
+      if (propsRef.current.modalOpen) return;
       const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
       if (dist > 6) return;
 
@@ -864,25 +1180,49 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
       updateNDC(e.clientX, e.clientY);
       raycaster.setFromCamera(pointerNDC, camera);
+      const av = handles.avatarState;
 
-      // ---------------- MAIN WORLD INTERACTIONS ----------------
+      // ---------------- 1. MAIN WORLD INTERACTIONS ----------------
       if (loc === 'world') {
-        const av = handles.avatarState;
-
         const portalHits = raycaster.intersectObject(mainWorld.loftPortalGroup, true);
         if (portalHits.length > 0) {
           av.seatedUid = null;
           av.pendingSeat = null;
           av.pendingNpcId = null;
-          av.path = buildPlazaPath(
-            av.x,
-            av.z,
-            mainWorld.loftDoorThresholdPos.x,
-            mainWorld.loftDoorThresholdPos.z
-          );
-          av.pendingPortal = 'toRoom';
+          av.pendingHallDoor = null;
+
+          const unlocked = propsRef.current.mainDoorUnlocked;
+          const nearDoor =
+            Math.hypot(av.x - mainWorld.loftDoorEntryPos.x, av.z - mainWorld.loftDoorEntryPos.z) <
+            2.6;
+
+          if (!unlocked && nearDoor) {
+            releaseCursorForModal();
+            sfx.playClick();
+            propsRef.current.onOpenDoorTerminal();
+            return;
+          }
+
+          if (unlocked) {
+            av.path = buildPlazaPath(
+              av.x,
+              av.z,
+              mainWorld.loftDoorThresholdPos.x,
+              mainWorld.loftDoorThresholdPos.z
+            );
+            av.pendingPortal = 'toLobby';
+            propsRef.current.onWalkHint?.('Walking through Hotel Main Doors...');
+          } else {
+            av.path = buildPlazaPath(
+              av.x,
+              av.z,
+              mainWorld.loftDoorEntryPos.x,
+              mainWorld.loftDoorEntryPos.z
+            );
+            av.pendingPortal = 'openDoorTerminal';
+            propsRef.current.onWalkHint?.('Walking to Hotel Main Entrance Intercom...');
+          }
           propsRef.current.onEmoteChange('walk');
-          propsRef.current.onWalkHint?.('Walking through Loft doors...');
           sfx.playClick();
           return;
         }
@@ -967,8 +1307,162 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         return;
       }
 
-      // ---------------- MY LOFT (ROOM) EDIT MODE ----------------
-      if (m === 'edit') {
+      // ---------------- 2. HOTEL LOBBY INTERACTIONS ----------------
+      if (loc === 'lobby') {
+        const elevHits = raycaster.intersectObject(lobbyHandles.elevatorGroup, true);
+        if (elevHits.length > 0) {
+          av.seatedUid = null;
+          av.pendingSeat = null;
+          av.y = 0;
+          if (Math.hypot(av.x - 0, av.z - -6.7) < 1.35) {
+            releaseCursorForModal();
+            sfx.playElevatorDing();
+            propsRef.current.onOpenElevator();
+          } else {
+            av.path = [{ x: 0, z: -6.7 }];
+            av.pendingPortal = 'openElevator';
+            propsRef.current.onEmoteChange('walk');
+            propsRef.current.onWalkHint?.('Walking to Lobby Elevator...');
+            sfx.playClick();
+          }
+          return;
+        }
+
+        const streetDoorHits = raycaster.intersectObject(lobbyHandles.streetDoorGroup, true);
+        if (streetDoorHits.length > 0) {
+          av.seatedUid = null;
+          av.pendingSeat = null;
+          av.y = 0;
+          av.path = [
+            { x: 0, z: 6.9 },
+            { x: 0, z: 7.7 },
+          ];
+          av.pendingPortal = 'toWorld';
+          propsRef.current.onEmoteChange('walk');
+          propsRef.current.onWalkHint?.('Walking out to M St & 15th St...');
+          sfx.playClick();
+          return;
+        }
+
+        const npcHits = raycaster.intersectObjects(
+          lobbyHandles.npcs.map((n) => n.rig.root),
+          true
+        );
+        if (npcHits.length > 0) {
+          const morgan = lobbyHandles.npcs[0];
+          av.seatedUid = null;
+          av.pendingSeat = null;
+          av.pendingPortal = null;
+          av.y = 0;
+          av.path = [{ x: -4.15, z: -1.2 }];
+          morgan.greetTimer = 4.0;
+          propsRef.current.onEmoteChange('walk');
+          propsRef.current.onNpcChat?.(morgan.name, morgan.greeting);
+          sfx.playEmote();
+          return;
+        }
+
+        const seatHits = raycaster.intersectObjects(
+          lobbyHandles.seats.map((s) => s.mesh),
+          true
+        );
+        if (seatHits.length > 0) {
+          const s = lobbyHandles.seats[0];
+          av.seatedUid = null;
+          av.pendingPortal = null;
+          av.y = 0;
+          av.path = [{ x: s.approachPos.x, z: s.approachPos.z }];
+          av.pendingSeat = {
+            uid: s.id,
+            seatPos: s.seatPos,
+            facingYaw: s.facingYaw,
+          };
+          propsRef.current.onEmoteChange('walk');
+          sfx.playClick();
+          return;
+        }
+
+        const floorHits = raycaster.intersectObject(lobbyHandles.groundRaycastPlane);
+        if (floorHits.length > 0) {
+          const pt = floorHits[0].point;
+          if (lobbyHandles.isWalkable(pt.x, pt.z)) {
+            av.seatedUid = null;
+            av.pendingSeat = null;
+            av.pendingPortal = null;
+            av.y = 0;
+            av.path = [{ x: pt.x, z: pt.z }];
+            propsRef.current.onEmoteChange('walk');
+            rippleMesh.position.set(pt.x, 0.03, pt.z);
+            rippleLife = 1.0;
+            sfx.playClick();
+          }
+        }
+        return;
+      }
+
+      // ---------------- 3. HOTEL HALLWAY INTERACTIONS ----------------
+      if (loc === 'hallway') {
+        const elevHits = raycaster.intersectObject(hallwayHandles.elevatorGroup, true);
+        if (elevHits.length > 0) {
+          av.seatedUid = null;
+          av.pendingHallDoor = null;
+          av.y = 0;
+          if (Math.hypot(av.x - -10.7, av.z - 0) < 1.35) {
+            releaseCursorForModal();
+            sfx.playElevatorDing();
+            propsRef.current.onOpenElevator();
+          } else {
+            av.path = [{ x: -10.7, z: 0 }];
+            av.pendingPortal = 'openElevator';
+            propsRef.current.onEmoteChange('walk');
+            propsRef.current.onWalkHint?.('Walking to Elevator...');
+            sfx.playClick();
+          }
+          return;
+        }
+
+        const doorHits = raycaster.intersectObjects(
+          hallwayHandles.doors.map((d) => d.doorGroup),
+          true
+        );
+        if (doorHits.length > 0) {
+          let obj: THREE.Object3D | null = doorHits[0].object;
+          while (obj && obj.userData.hallDoorIndex === undefined) obj = obj.parent;
+          const idx = obj?.userData.hallDoorIndex as number | undefined;
+          const slot = idx !== undefined ? hallwayHandles.doors[idx] : undefined;
+          if (slot) {
+            av.seatedUid = null;
+            av.pendingPortal = null;
+            av.y = 0;
+            av.path = [{ x: slot.x, z: -2.2 }];
+            av.pendingHallDoor = slot.roomNumber;
+            propsRef.current.onEmoteChange('walk');
+            propsRef.current.onWalkHint?.(`Walking to Suite ${slot.roomNumber}...`);
+            sfx.playClick();
+            return;
+          }
+        }
+
+        const floorHits = raycaster.intersectObject(hallwayHandles.groundRaycastPlane);
+        if (floorHits.length > 0) {
+          const pt = floorHits[0].point;
+          if (hallwayHandles.isWalkable(pt.x, pt.z)) {
+            av.seatedUid = null;
+            av.pendingPortal = null;
+            av.pendingHallDoor = null;
+            av.y = 0;
+            av.path = [{ x: pt.x, z: pt.z }];
+            propsRef.current.onEmoteChange('walk');
+            rippleMesh.position.set(pt.x, 0.03, pt.z);
+            rippleLife = 1.0;
+            sfx.playClick();
+          }
+        }
+        return;
+      }
+
+      // ---------------- 4. HOTEL SUITE EDIT MODE ----------------
+      if (loc === 'room' && m === 'edit') {
         if (pId) {
           updateGhostAtPointer(e.clientX, e.clientY);
           const { valid, gx, gz, wall } = handles.ghostState;
@@ -1026,26 +1520,61 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         return;
       }
 
-      // ---------------- MY LOFT (ROOM) WALK MODE ----------------
+      // ---------------- 5. HOTEL SUITE WALK MODE (OWN OR RESIDENT) ----------------
+      if (loc === 'resident_room' && propsRef.current.activeResident) {
+        const resHits = raycaster.intersectObject(residentNpcRig.root, true);
+        if (resHits.length > 0) {
+          av.residentGreetTimer = 4.0;
+          propsRef.current.onEmoteChange('wave');
+          propsRef.current.onNpcChat?.(
+            propsRef.current.activeResident.name,
+            propsRef.current.activeResident.greeting
+          );
+          sfx.playEmote();
+          return;
+        }
+      }
+
       const doorHits = raycaster.intersectObject(roomHandles.exitDoorGroup, true);
       if (doorHits.length > 0) {
-        const av = handles.avatarState;
         av.seatedUid = null;
         av.pendingSeat = null;
         av.pendingNpcId = null;
         av.y = 0;
-        const path = findPath(av.x, av.z, -4.25, 3.5, list);
+
+        const nearSuiteDoor = Math.hypot(av.x - -6.4, av.z - SUITE_DOOR_Z) < 1.85;
+        if (loc === 'room' && !propsRef.current.roomDoorUnlocked && nearSuiteDoor) {
+          sfx.playKeycardBeep();
+          av.doorSwingTimer = 1.8;
+          propsRef.current.onUnlockRoomDoor();
+          propsRef.current.onWalkHint?.(
+            `Keycard entered · Suite ${PLAYER_SUITE_NUMBER} unlocked!`
+          );
+          return;
+        }
+
+        if (loc === 'room' && !propsRef.current.roomDoorUnlocked) {
+          const path = findPath(av.x, av.z, -6.15, SUITE_DOOR_Z, list);
+          av.path = path.length > 0 ? path : [{ x: -6.15, z: SUITE_DOOR_Z }];
+          av.pendingPortal = 'toHallway';
+          propsRef.current.onEmoteChange('walk');
+          propsRef.current.onWalkHint?.('Walking to Suite Door to tap Keycard...');
+          sfx.playClick();
+          return;
+        }
+
+        const path = findPath(av.x, av.z, -6.15, SUITE_DOOR_Z, list);
         av.path =
           path.length > 0
-            ? [...path, { x: -4.9, z: 3.5 }]
+            ? [...path, { x: -7.05, z: SUITE_DOOR_Z }]
             : [
-                { x: -4.25, z: 3.5 },
-                { x: -4.9, z: 3.5 },
+                { x: -6.15, z: SUITE_DOOR_Z },
+                { x: -7.05, z: SUITE_DOOR_Z },
               ];
-        av.pendingPortal = 'toWorld';
-        av.doorSwingTimer = 1.2;
+        av.pendingPortal = 'toHallway';
+        av.doorSwingTimer = 1.4;
         propsRef.current.onEmoteChange('walk');
-        propsRef.current.onWalkHint?.('Walking out to Main City...');
+        propsRef.current.onWalkHint?.(`Stepping out to Floor Hallway...`);
         sfx.playToggle(true);
         return;
       }
@@ -1061,17 +1590,18 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           const cat = item ? getCatalogItem(item.catalogId) : undefined;
           if (item && cat) {
             if (cat.interactive) {
-              sfx.playToggle(!item.active);
-              propsRef.current.onToggleInteractive(item.uid);
-              propsRef.current.onWalkHint?.(
-                `${cat.name} turned ${!item.active ? 'on' : 'off'}`
-              );
+              if (loc === 'room') {
+                sfx.playToggle(!item.active);
+                propsRef.current.onToggleInteractive(item.uid);
+                propsRef.current.onWalkHint?.(
+                  `${cat.name} turned ${!item.active ? 'on' : 'off'}`
+                );
+              }
               return;
             }
             if (cat.sittable) {
               const seatInfo = getSeatWorldInfo(item);
               if (seatInfo) {
-                const av = handles.avatarState;
                 av.seatedUid = null;
                 av.pendingPortal = null;
                 av.y = 0;
@@ -1104,7 +1634,6 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       const floorHits = raycaster.intersectObject(roomHandles.floorRaycastPlane);
       if (floorHits.length > 0) {
         const pt = floorHits[0].point;
-        const av = handles.avatarState;
         av.seatedUid = null;
         av.pendingSeat = null;
         av.pendingPortal = null;
@@ -1182,6 +1711,22 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     let lastStreetLabel = '';
 
+    function checkWalkableForLoc(x: number, z: number, loc: WorldLocation, list: PlacedItem[]) {
+      if (loc === 'world') {
+        return isMainWorldPosWalkable(
+          x,
+          z,
+          mainWorld.obstacles,
+          0.28,
+          propsRef.current.mainDoorUnlocked
+        );
+      }
+      if (loc === 'lobby') return lobbyHandles.isWalkable(x, z);
+      if (loc === 'hallway') return hallwayHandles.isWalkable(x, z);
+      const suiteOpen = loc === 'resident_room' || propsRef.current.roomDoorUnlocked;
+      return isWorldPosWalkable(x, z, list, 0.25, suiteOpen);
+    }
+
     function tick() {
       if (disposed) return;
       const delta = Math.min(clock.getDelta(), 0.08);
@@ -1193,7 +1738,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       const currentView = propsRef.current.viewMode;
       const currentMode = propsRef.current.mode;
       const currentItems = propsRef.current.items;
-      const canWalk = currentLoc === 'world' || currentMode === 'walk';
+      const canWalk =
+        !propsRef.current.modalOpen && (currentLoc !== 'room' || currentMode === 'walk');
       let isMoving = false;
       const sprinting = Boolean(keys['ShiftLeft'] || keys['ShiftRight']);
       const prevAvX = av.x;
@@ -1212,6 +1758,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           av.path = [];
           av.pendingSeat = null;
           av.pendingPortal = null;
+          av.pendingHallDoor = null;
           av.pendingNpcId = null;
           if (av.seatedUid) {
             av.seatedUid = null;
@@ -1221,7 +1768,6 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           let dirX = 0;
           let dirZ = 0;
           if (currentView === 'play') {
-            // GTA-style camera-yaw forward & strafe
             const fwdX = -Math.sin(handles.playCam.yaw);
             const fwdZ = -Math.cos(handles.playCam.yaw);
             const rightX = Math.cos(handles.playCam.yaw);
@@ -1240,19 +1786,14 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           const len = Math.hypot(dirX, dirZ) || 1;
           const nx = dirX / len;
           const nz = dirZ / len;
-          const baseSpeed = currentLoc === 'world' ? 4.4 : 2.75;
-          const speed = sprinting ? (currentLoc === 'world' ? 10.5 : 4.25) : baseSpeed;
+          const baseSpeed = currentLoc === 'world' ? 4.4 : 2.85;
+          const speed = sprinting ? (currentLoc === 'world' ? 10.5 : 4.4) : baseSpeed;
 
           const nextX = av.x + nx * speed * delta;
           const nextZ = av.z + nz * speed * delta;
 
-          if (currentLoc === 'world') {
-            if (isMainWorldPosWalkable(nextX, av.z, mainWorld.obstacles)) av.x = nextX;
-            if (isMainWorldPosWalkable(av.x, nextZ, mainWorld.obstacles)) av.z = nextZ;
-          } else {
-            if (isWorldPosWalkable(nextX, av.z, currentItems)) av.x = nextX;
-            if (isWorldPosWalkable(av.x, nextZ, currentItems)) av.z = nextZ;
-          }
+          if (checkWalkableForLoc(nextX, av.z, currentLoc, currentItems)) av.x = nextX;
+          if (checkWalkableForLoc(av.x, nextZ, currentLoc, currentItems)) av.z = nextZ;
 
           const targetYaw = Math.atan2(nx, nz);
           av.yaw += shortestAngleDiff(av.yaw, targetYaw) * (1 - Math.exp(-15 * delta));
@@ -1262,12 +1803,18 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           const dx = target.x - av.x;
           const dz = target.z - av.z;
           const dist = Math.hypot(dx, dz);
-          const speed = currentLoc === 'world' ? 4.2 : 2.6;
+          const speed = currentLoc === 'world' ? 4.2 : 2.8;
 
           if (dist <= speed * delta + 0.04) {
             if (
               currentLoc === 'world' &&
-              !isMainWorldPosWalkable(target.x, target.z, mainWorld.obstacles)
+              !isMainWorldPosWalkable(
+                target.x,
+                target.z,
+                mainWorld.obstacles,
+                0.28,
+                propsRef.current.mainDoorUnlocked
+              )
             ) {
               av.path = [];
               propsRef.current.onEmoteChange('idle');
@@ -1280,10 +1827,69 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
                   av.pendingPortal = null;
                   av.portalCooldown = 1.0;
                   propsRef.current.onChangeLocation('world');
-                } else if (av.pendingPortal === 'toRoom') {
+                } else if (av.pendingPortal === 'toLobby') {
                   av.pendingPortal = null;
                   av.portalCooldown = 1.0;
-                  propsRef.current.onChangeLocation('room');
+                  propsRef.current.onChangeLocation('lobby');
+                } else if (av.pendingPortal === 'toHallway') {
+                  av.pendingPortal = null;
+                  if (currentLoc === 'room' && !propsRef.current.roomDoorUnlocked) {
+                    sfx.playKeycardBeep();
+                    av.doorSwingTimer = 1.6;
+                    propsRef.current.onUnlockRoomDoor();
+                    propsRef.current.onWalkHint?.(
+                      `Keycard tapped · Walk through Suite ${PLAYER_SUITE_NUMBER} door to Hallway`
+                    );
+                    propsRef.current.onEmoteChange('idle');
+                  } else {
+                    av.portalCooldown = 1.0;
+                    propsRef.current.onChangeLocation('hallway');
+                  }
+                } else if (av.pendingPortal === 'openDoorTerminal') {
+                  av.pendingPortal = null;
+                  releaseCursorForModal();
+                  sfx.playClick();
+                  propsRef.current.onOpenDoorTerminal();
+                  propsRef.current.onEmoteChange('idle');
+                } else if (av.pendingPortal === 'openElevator') {
+                  av.pendingPortal = null;
+                  av.portalCooldown = 1.4;
+                  releaseCursorForModal();
+                  sfx.playElevatorDing();
+                  propsRef.current.onOpenElevator();
+                  propsRef.current.onEmoteChange('idle');
+                } else if (av.pendingHallDoor) {
+                  const roomNum = av.pendingHallDoor;
+                  av.pendingHallDoor = null;
+                  const slot = hallwayHandles.doors.find((d) => d.roomNumber === roomNum);
+                  if (slot) {
+                    if (slot.unlocked) {
+                      av.portalCooldown = 1.0;
+                      propsRef.current.onEnterSuiteFromHallway(roomNum);
+                    } else if (slot.isPlayerSuite) {
+                      sfx.playKeycardBeep();
+                      propsRef.current.onUnlockHallwayDoor(roomNum);
+                      propsRef.current.onWalkHint?.(
+                        `Keycard accepted · Walk through to enter Suite ${roomNum}`
+                      );
+                    } else if (slot.resident) {
+                      const res = slot.resident;
+                      sfx.playIntercomRing();
+                      propsRef.current.onWalkHint?.(`Ringing ${res.name} (Suite ${roomNum})...`);
+                      window.setTimeout(() => {
+                        sfx.playKeycardBeep();
+                        propsRef.current.onUnlockHallwayDoor(roomNum);
+                        propsRef.current.onNpcChat?.(
+                          res.name,
+                          `Door is unlocked — come on into Suite ${roomNum}!`
+                        );
+                      }, 550);
+                    } else {
+                      sfx.playRemove();
+                      propsRef.current.onWalkHint?.(`Suite ${roomNum} is vacant`);
+                    }
+                  }
+                  propsRef.current.onEmoteChange('idle');
                 } else if (av.pendingSeat) {
                   av.x = av.pendingSeat.seatPos.x;
                   av.y = av.pendingSeat.seatPos.y - 0.35;
@@ -1309,11 +1915,27 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             const stepZ = av.z + (dz / dist) * speed * delta;
             if (currentLoc === 'world') {
               let movedAny = false;
-              if (isMainWorldPosWalkable(stepX, av.z, mainWorld.obstacles)) {
+              if (
+                isMainWorldPosWalkable(
+                  stepX,
+                  av.z,
+                  mainWorld.obstacles,
+                  0.28,
+                  propsRef.current.mainDoorUnlocked
+                )
+              ) {
                 av.x = stepX;
                 movedAny = true;
               }
-              if (isMainWorldPosWalkable(av.x, stepZ, mainWorld.obstacles)) {
+              if (
+                isMainWorldPosWalkable(
+                  av.x,
+                  stepZ,
+                  mainWorld.obstacles,
+                  0.28,
+                  propsRef.current.mainDoorUnlocked
+                )
+              ) {
                 av.z = stepZ;
                 movedAny = true;
               }
@@ -1340,10 +1962,14 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         av.y = THREE.MathUtils.lerp(av.y, groundY, 1 - Math.exp(-18 * delta));
       }
 
-      // Follow player horizontally in Isometric Main City mode so you can roam A-Z & 1st-30th streets
-      if (currentLoc === 'world' && currentView === 'isometric' && !handles.cameraAnim.active) {
+      // Follow player horizontally in Isometric Main City & Long Hallway
+      if (
+        (currentLoc === 'world' || currentLoc === 'hallway') &&
+        currentView === 'isometric' &&
+        !handles.cameraAnim.active
+      ) {
         const dpx = av.x - prevAvX;
-        const dpz = av.z - prevAvZ;
+        const dpz = currentLoc === 'world' ? av.z - prevAvZ : 0;
         if (Math.abs(dpx) > 1e-5 || Math.abs(dpz) > 1e-5) {
           controls.target.x += dpx;
           controls.target.z += dpz;
@@ -1352,32 +1978,66 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         }
       }
 
-      // Walk-through door triggers in BOTH locations
-      if (av.portalCooldown <= 0) {
+      // Walk-through door & elevator triggers across all hotel spaces
+      if (av.portalCooldown <= 0 && !propsRef.current.modalOpen) {
+        const suiteDoorOpenable =
+          currentLoc === 'resident_room' || propsRef.current.roomDoorUnlocked;
+
         if (
-          currentLoc === 'room' &&
-          currentMode === 'walk' &&
-          av.x < -4.72 &&
-          av.z >= 3.02 &&
-          av.z <= 3.98
+          (currentLoc === 'room' || currentLoc === 'resident_room') &&
+          (currentLoc === 'resident_room' || currentMode === 'walk') &&
+          suiteDoorOpenable &&
+          av.x < -6.72 &&
+          Math.abs(av.z - SUITE_DOOR_Z) < 0.56
         ) {
+          av.portalCooldown = 1.0;
+          av.path = [];
+          av.pendingPortal = null;
+          sfx.playToggle(true);
+          propsRef.current.onChangeLocation('hallway');
+        } else if (
+          currentLoc === 'world' &&
+          propsRef.current.mainDoorUnlocked &&
+          Math.hypot(av.x - CITY_LAYOUT.loftDoorPos.x, av.z - CITY_LAYOUT.loftDoorPos.z) < 0.92
+        ) {
+          av.portalCooldown = 1.0;
+          av.path = [];
+          av.pendingPortal = null;
+          sfx.playToggle(true);
+          propsRef.current.onChangeLocation('lobby');
+        } else if (currentLoc === 'lobby' && av.z > 7.42 && Math.abs(av.x) < 0.85) {
           av.portalCooldown = 1.0;
           av.path = [];
           av.pendingPortal = null;
           sfx.playToggle(true);
           propsRef.current.onChangeLocation('world');
-        } else if (
-          currentLoc === 'world' &&
-          Math.hypot(
-            av.x - CITY_LAYOUT.loftDoorPos.x,
-            av.z - CITY_LAYOUT.loftDoorPos.z
-          ) < 0.92
-        ) {
-          av.portalCooldown = 1.0;
+        } else if (currentLoc === 'lobby' && av.z < -7.45 && Math.abs(av.x) < 0.85) {
+          av.portalCooldown = 1.6;
           av.path = [];
           av.pendingPortal = null;
-          sfx.playToggle(true);
-          propsRef.current.onChangeLocation('room');
+          av.z = -7.05;
+          releaseCursorForModal();
+          sfx.playElevatorDing();
+          propsRef.current.onOpenElevator();
+        } else if (currentLoc === 'hallway' && av.x < -11.45 && Math.abs(av.z) < 0.78) {
+          av.portalCooldown = 1.6;
+          av.path = [];
+          av.pendingPortal = null;
+          av.x = -11.0;
+          releaseCursorForModal();
+          sfx.playElevatorDing();
+          propsRef.current.onOpenElevator();
+        } else if (currentLoc === 'hallway') {
+          for (const d of hallwayHandles.doors) {
+            if (d.unlocked && av.z < -2.74 && Math.abs(av.x - d.x) < 0.52) {
+              av.portalCooldown = 1.0;
+              av.path = [];
+              av.pendingHallDoor = null;
+              sfx.playToggle(true);
+              propsRef.current.onEnterSuiteFromHallway(d.roomNumber);
+              break;
+            }
+          }
         }
       }
 
@@ -1432,10 +2092,10 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         let desiredY = Math.max(0.45, targetY + vertOffset);
         let desiredZ = targetZ - fwdZ * horizDist;
 
-        // Keep chase camera inside North/West room walls when indoors
-        if (currentLoc === 'room') {
+        // Keep chase camera inside North/West walls indoors
+        if (currentLoc === 'room' || currentLoc === 'resident_room') {
           let scale = 1.0;
-          const minWall = -4.65;
+          const minWall = -GRID_SIZE / 2 + 0.35;
           if (desiredX < minWall && targetX > minWall) {
             scale = Math.min(scale, (targetX - minWall) / (targetX - desiredX));
           }
@@ -1443,6 +2103,33 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             scale = Math.min(scale, (targetZ - minWall) / (targetZ - desiredZ));
           }
           scale = Math.max(0.28, scale);
+          desiredX = targetX + (desiredX - targetX) * scale;
+          desiredY = targetY + (desiredY - targetY) * scale;
+          desiredZ = targetZ + (desiredZ - targetZ) * scale;
+        } else if (currentLoc === 'hallway') {
+          let scale = 1.0;
+          if (desiredX < -11.6 && targetX > -11.6) {
+            scale = Math.min(scale, (targetX - -11.6) / (targetX - desiredX));
+          }
+          if (desiredX > 11.6 && targetX < 11.6) {
+            scale = Math.min(scale, (11.6 - targetX) / (desiredX - targetX));
+          }
+          if (desiredZ < -2.9 && targetZ > -2.9) {
+            scale = Math.min(scale, (targetZ - -2.9) / (targetZ - desiredZ));
+          }
+          scale = Math.max(0.32, scale);
+          desiredX = targetX + (desiredX - targetX) * scale;
+          desiredY = targetY + (desiredY - targetY) * scale;
+          desiredZ = targetZ + (desiredZ - targetZ) * scale;
+        } else if (currentLoc === 'lobby') {
+          let scale = 1.0;
+          if (desiredX < -8.6 && targetX > -8.6) {
+            scale = Math.min(scale, (targetX - -8.6) / (targetX - desiredX));
+          }
+          if (desiredZ < -7.6 && targetZ > -7.6) {
+            scale = Math.min(scale, (targetZ - -7.6) / (targetZ - desiredZ));
+          }
+          scale = Math.max(0.32, scale);
           desiredX = targetX + (desiredX - targetX) * scale;
           desiredY = targetY + (desiredY - targetY) * scale;
           desiredZ = targetZ + (desiredZ - targetZ) * scale;
@@ -1454,19 +2141,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         camera.position.z = THREE.MathUtils.damp(camera.position.z, desiredZ, camK, delta);
         _lookTarget.set(targetX, targetY, targetZ);
         camera.lookAt(_lookTarget);
-
-        // Proximity prompt check
-        const nearby = getNearbyAction();
-        const nextLabel = nearby ? nearby.label : null;
-        if (nextLabel !== lastPrompt) {
-          lastPrompt = nextLabel;
-          propsRef.current.onProximityPrompt?.(nextLabel);
-        }
       } else {
-        if (lastPrompt !== null) {
-          lastPrompt = null;
-          propsRef.current.onProximityPrompt?.(null);
-        }
         if (handles.cameraAnim.active) {
           camera.position.x = THREE.MathUtils.damp(
             camera.position.x,
@@ -1514,8 +2189,23 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         controls.update();
       }
 
-      const nearRoomDoor = currentLoc === 'room' && av.x < -3.3 && Math.abs(av.z - 3.5) < 1.3;
-      if (av.doorSwingTimer > 0 || nearRoomDoor) {
+      // Proximity prompt check in BOTH Play View and Isometric Walk!
+      const nearby = getNearbyAction();
+      const nextLabel = nearby ? nearby.label : null;
+      if (nextLabel !== lastPrompt) {
+        lastPrompt = nextLabel;
+        propsRef.current.onProximityPrompt?.(nextLabel);
+      }
+
+      // Suite door hinge swing animation (only swings when unlocked!)
+      const isRoomUnlocked = currentLoc === 'resident_room' || propsRef.current.roomDoorUnlocked;
+      const nearRoomDoor =
+        isRoomUnlocked &&
+        (currentLoc === 'room' || currentLoc === 'resident_room') &&
+        av.x < -5.1 &&
+        Math.abs(av.z - SUITE_DOOR_Z) < 1.5;
+
+      if (isRoomUnlocked && (av.doorSwingTimer > 0 || nearRoomDoor)) {
         av.doorSwingTimer = Math.max(0, av.doorSwingTimer - delta * 0.8);
         roomHandles.doorLeafPivot.rotation.y = THREE.MathUtils.lerp(
           roomHandles.doorLeafPivot.rotation.y,
@@ -1530,7 +2220,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         );
       }
 
-      if (av.seatedUid && currentLoc === 'room') {
+      if (av.seatedUid && (currentLoc === 'room' || currentLoc === 'resident_room')) {
         const seatItem = currentItems.find((it) => it.uid === av.seatedUid);
         if (!seatItem) {
           av.seatedUid = null;
@@ -1549,7 +2239,6 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         ? 'sit'
         : propsRef.current.activeEmote;
 
-      // Speed up walk animation slightly when sprinting
       const animElapsed = isMoving && sprinting ? elapsed * 1.35 : elapsed;
       avatarRig.updateAnimation(effectiveEmote, isMoving, animElapsed, delta, av.jumpY);
 
@@ -1560,7 +2249,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         (rippleMesh.material as THREE.MeshBasicMaterial).opacity = rippleLife * 0.75;
       }
 
-      if (currentLoc === 'room') {
+      // Per-location animations
+      if (currentLoc === 'room' || currentLoc === 'resident_room') {
         for (const item of currentItems) {
           const grp = handles.furnitureMap.get(item.uid);
           if (!grp) continue;
@@ -1578,6 +2268,19 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           updateFurnitureAnimations(grp, item, elapsed, delta);
         }
 
+        if (currentLoc === 'resident_room' && residentNpcRig.root.visible) {
+          const targetYaw = Math.atan2(av.x - RESIDENT_NPC_POS.x, av.z - RESIDENT_NPC_POS.z);
+          residentNpcRig.root.rotation.y +=
+            shortestAngleDiff(residentNpcRig.root.rotation.y, targetYaw) *
+            (1 - Math.exp(-7 * delta));
+          let resEmote: EmoteType = 'idle';
+          if (av.residentGreetTimer > 0) {
+            av.residentGreetTimer -= delta;
+            resEmote = 'wave';
+          }
+          residentNpcRig.updateAnimation(resEmote, false, elapsed + 1.5, delta, 0);
+        }
+
         if (selectionBox.visible) {
           const pulse = 1 + Math.sin(elapsed * 5) * 0.025;
           selectionBox.scale.set(
@@ -1586,6 +2289,10 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             selectionBox.userData.baseD * pulse
           );
         }
+      } else if (currentLoc === 'lobby') {
+        lobbyHandles.updateLobby(elapsed, delta, av.x, av.z);
+      } else if (currentLoc === 'hallway') {
+        hallwayHandles.updateHallway(elapsed, delta, av.x, av.z);
       } else {
         keyLight.target.position.set(av.x, 0, av.z);
         keyLight.position.set(av.x - 12, 18, av.z + 8);
@@ -1611,6 +2318,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       resizeObserver.disconnect();
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onWindowBlur);
       document.removeEventListener('pointerlockchange', onPointerLockChange);
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
@@ -1637,7 +2345,6 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       h.cameraAnim.active = false;
       h.camera.fov = 52;
       h.camera.updateProjectionMatrix();
-      // Align playCam behind the avatar's current facing yaw
       h.playCam.yaw = h.avatarState.yaw + Math.PI;
       h.playCam.pitch = 0.24;
       h.avatarState.path = [];
@@ -1650,43 +2357,54 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       h.controls.enabled = true;
       h.camera.fov = 36;
       h.camera.updateProjectionMatrix();
+      const av = h.avatarState;
       if (loc === 'world') {
-        const av = h.avatarState;
         h.cameraAnim.pos.set(av.x + 12.5, 11.5, av.z + 14.5);
         h.cameraAnim.target.set(av.x, 0.8, av.z);
+      } else if (loc === 'lobby') {
+        h.cameraAnim.pos.set(11.0, 11.2, 13.8);
+        h.cameraAnim.target.set(0, 0.8, 0);
+      } else if (loc === 'hallway') {
+        h.cameraAnim.pos.set(av.x + 2.5, 9.6, 12.5);
+        h.cameraAnim.target.set(av.x, 0.9, -0.6);
       } else {
-        h.cameraAnim.pos.set(11.2, 9.6, 11.2);
-        h.cameraAnim.target.set(0, 0.75, 0);
+        h.cameraAnim.pos.set(14.5, 12.0, 14.5);
+        h.cameraAnim.target.set(0, 0.85, 0);
       }
       h.cameraAnim.active = true;
     }
   }, [viewMode]);
 
-  // Sync Location Switching ('room' <-> 'world')
+  // Sync Location Switching & Floor/Resident Entry Spawns
   useEffect(() => {
     const h = sceneHandlesRef.current;
     if (!h) return;
     const vm = propsRef.current.viewMode;
+    const prev = prevLocationRef.current;
 
     h.avatarState.path = [];
     h.avatarState.pendingSeat = null;
     h.avatarState.pendingPortal = null;
+    h.avatarState.pendingHallDoor = null;
     h.avatarState.pendingNpcId = null;
     h.avatarState.seatedUid = null;
     h.avatarState.doorSwingTimer = 0;
-    h.avatarState.portalCooldown = 0.85;
+    h.avatarState.portalCooldown = 0.95;
+
+    h.roomContainer.visible = location === 'room' || location === 'resident_room';
+    h.lobbyContainer.visible = location === 'lobby';
+    h.hallwayContainer.visible = location === 'hallway';
+    h.worldContainer.visible = location === 'world';
 
     const fog = h.scene.fog as THREE.Fog;
 
     if (location === 'world') {
-      h.roomContainer.visible = false;
-      h.worldContainer.visible = true;
       const entry = h.mainWorld.loftDoorEntryPos;
       h.avatarState.x = entry.x;
       h.avatarState.z = entry.z;
       h.avatarState.y = getCityGroundY(entry.x, entry.z);
       h.avatarState.yaw = 0;
-      h.playCam.yaw = Math.PI; // Look south down M St plaza
+      h.playCam.yaw = Math.PI;
       h.controls.minAzimuthAngle = -Infinity;
       h.controls.maxAzimuthAngle = Infinity;
       h.controls.maxDistance = 38;
@@ -1705,60 +2423,186 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       }
       propsRef.current.onCityStreetChange?.(getCityLocationLabel(entry.x, entry.z));
       propsRef.current.onEmoteChange('idle');
-    } else {
-      h.roomContainer.visible = true;
-      h.worldContainer.visible = false;
-      h.avatarState.x = -3.55;
-      h.avatarState.z = 3.5;
+    } else if (location === 'lobby') {
+      if (prev.loc === 'hallway') {
+        // Came down from Elevator
+        h.avatarState.x = 0;
+        h.avatarState.z = -6.0;
+        h.avatarState.yaw = 0;
+        h.playCam.yaw = Math.PI;
+      } else {
+        // Entered from Main City South Doors
+        h.avatarState.x = 0;
+        h.avatarState.z = 6.2;
+        h.avatarState.yaw = Math.PI;
+        h.playCam.yaw = 0;
+      }
       h.avatarState.y = 0;
-      h.avatarState.yaw = Math.PI / 2;
-      h.playCam.yaw = -Math.PI / 2; // Look east into the loft
-      h.controls.minAzimuthAngle = -0.18;
-      h.controls.maxAzimuthAngle = Math.PI / 2 + 0.18;
-      h.controls.maxDistance = 24;
-      fog.near = 26;
-      fog.far = 62;
-      const d = 14;
+      h.controls.minAzimuthAngle = -0.85;
+      h.controls.maxAzimuthAngle = Math.PI / 2 + 0.2;
+      h.controls.maxDistance = 28;
+      fog.near = 35;
+      fog.far = 90;
+      const d = 16;
       h.keyLight.shadow.camera.left = -d;
       h.keyLight.shadow.camera.right = d;
       h.keyLight.shadow.camera.top = d;
       h.keyLight.shadow.camera.bottom = -d;
       h.keyLight.shadow.camera.updateProjectionMatrix();
       h.keyLight.target.position.set(0, 0, 0);
-      h.keyLight.position.set(-10, 14, 6);
+      h.keyLight.position.set(-10, 15, 8);
       if (vm === 'isometric') {
-        h.cameraAnim.pos.set(11.2, 9.6, 11.2);
-        h.cameraAnim.target.set(0, 0.75, 0);
+        h.cameraAnim.pos.set(11.0, 11.2, 13.8);
+        h.cameraAnim.target.set(0, 0.8, 0);
+        h.cameraAnim.active = true;
+      }
+      propsRef.current.onEmoteChange('idle');
+    } else if (location === 'hallway') {
+      if (prev.loc === 'room') {
+        // Stepped out of Suite 402
+        const slot = h.hallwayHandles.doors.find((d) => d.roomNumber === PLAYER_SUITE_NUMBER);
+        h.avatarState.x = slot ? slot.x : -2.0;
+        h.avatarState.z = -2.0;
+        h.avatarState.yaw = 0;
+        h.playCam.yaw = Math.PI;
+      } else if (prev.loc === 'resident_room' && prev.roomNumber) {
+        const slot = h.hallwayHandles.doors.find((d) => d.roomNumber === prev.roomNumber);
+        h.avatarState.x = slot ? slot.x : -2.0;
+        h.avatarState.z = -2.0;
+        h.avatarState.yaw = 0;
+        h.playCam.yaw = Math.PI;
+      } else {
+        // Arrived via Elevator on West end
+        h.avatarState.x = -10.1;
+        h.avatarState.z = 0;
+        h.avatarState.yaw = Math.PI / 2;
+        h.playCam.yaw = -Math.PI / 2;
+      }
+      h.avatarState.y = 0;
+      h.controls.minAzimuthAngle = -0.65;
+      h.controls.maxAzimuthAngle = 0.75;
+      h.controls.maxDistance = 26;
+      fog.near = 35;
+      fog.far = 90;
+      const d = 18;
+      h.keyLight.shadow.camera.left = -d;
+      h.keyLight.shadow.camera.right = d;
+      h.keyLight.shadow.camera.top = d;
+      h.keyLight.shadow.camera.bottom = -d;
+      h.keyLight.shadow.camera.updateProjectionMatrix();
+      h.keyLight.target.position.set(0, 0, 0);
+      h.keyLight.position.set(-6, 14, 10);
+      if (vm === 'isometric') {
+        h.cameraAnim.pos.set(h.avatarState.x + 2.5, 9.6, 12.5);
+        h.cameraAnim.target.set(h.avatarState.x, 0.9, -0.6);
+        h.cameraAnim.active = true;
+      }
+      propsRef.current.onEmoteChange('idle');
+    } else {
+      // 'room' or 'resident_room'
+      if (prev.loc === 'hallway' || prev.loc === 'world' || prev.loc === 'lobby') {
+        h.avatarState.x = -5.85;
+        h.avatarState.z = SUITE_DOOR_Z;
+        h.avatarState.yaw = Math.PI / 2;
+        h.playCam.yaw = -Math.PI / 2;
+      }
+      h.avatarState.y = 0;
+      h.controls.minAzimuthAngle = -0.18;
+      h.controls.maxAzimuthAngle = Math.PI / 2 + 0.18;
+      h.controls.maxDistance = 30;
+      fog.near = 32;
+      fog.far = 72;
+      const d = 16;
+      h.keyLight.shadow.camera.left = -d;
+      h.keyLight.shadow.camera.right = d;
+      h.keyLight.shadow.camera.top = d;
+      h.keyLight.shadow.camera.bottom = -d;
+      h.keyLight.shadow.camera.updateProjectionMatrix();
+      h.keyLight.target.position.set(0, 0, 0);
+      h.keyLight.position.set(-12, 16, 8);
+      if (vm === 'isometric') {
+        h.cameraAnim.pos.set(14.5, 12.0, 14.5);
+        h.cameraAnim.target.set(0, 0.85, 0);
         h.cameraAnim.active = true;
       }
       propsRef.current.onEmoteChange('idle');
     }
-  }, [location]);
+
+    prevLocationRef.current = {
+      loc: location,
+      roomNumber: activeResident?.roomNumber ?? null,
+    };
+  }, [location, hallwayFloor, activeResident]);
+
+  // Sync Hallway Floor Plaques & Lock Status
+  useEffect(() => {
+    const h = sceneHandlesRef.current;
+    if (!h) return;
+    h.hallwayHandles.setFloorState(
+      hallwayFloor,
+      new Set(unlockedRooms),
+      HOTEL_RESIDENTS,
+      avatarConfig.name,
+      h.maxAnisotropy
+    );
+  }, [hallwayFloor, unlockedRooms, avatarConfig.name]);
+
+  // Sync Main Hotel Door Lock & Suite Door Lock
+  useEffect(() => {
+    const h = sceneHandlesRef.current;
+    if (!h) return;
+    h.mainWorld.setMainDoorUnlocked(mainDoorUnlocked);
+  }, [mainDoorUnlocked]);
+
+  useEffect(() => {
+    const h = sceneHandlesRef.current;
+    if (!h) return;
+    const suiteBadge =
+      location === 'resident_room' && activeResident
+        ? activeResident.roomNumber
+        : PLAYER_SUITE_NUMBER;
+    h.roomHandles.setRoomBadge(suiteBadge, h.maxAnisotropy);
+    h.roomHandles.setDoorUnlocked(location === 'resident_room' ? true : roomDoorUnlocked);
+  }, [location, activeResident, roomDoorUnlocked]);
+
+  // Sync Resident NPC inside resident_room
+  useEffect(() => {
+    const h = sceneHandlesRef.current;
+    if (!h) return;
+    if (location === 'resident_room' && activeResident) {
+      h.residentNpcRig.rebuildAppearance(activeResident.avatar);
+      h.residentNpcRig.root.position.set(RESIDENT_NPC_POS.x, 0, RESIDENT_NPC_POS.z);
+      h.residentNpcRig.root.visible = true;
+      h.avatarState.residentGreetTimer = 2.5;
+    } else {
+      h.residentNpcRig.root.visible = false;
+    }
+  }, [location, activeResident]);
 
   // Sync Room Mode
   useEffect(() => {
     const h = sceneHandlesRef.current;
     if (!h) return;
     h.roomHandles.setGridVisible(location === 'room' && mode === 'edit');
-    if (mode === 'walk' || location === 'world') {
+    if (mode === 'walk' || location !== 'room') {
       h.selectionBox.visible = false;
       if (h.ghostGroup) h.ghostGroup.visible = false;
     }
   }, [mode, location]);
 
-  // Sync Surfaces
+  // Sync Surfaces (own suite vs visited resident suite)
   useEffect(() => {
     const h = sceneHandlesRef.current;
     if (!h) return;
-    h.roomHandles.updateSurfaces(surfaces.floor, surfaces.wall, h.maxAnisotropy);
-  }, [surfaces.floor, surfaces.wall]);
+    h.roomHandles.updateSurfaces(activeSurfaces.floor, activeSurfaces.wall, h.maxAnisotropy);
+  }, [activeSurfaces.floor, activeSurfaces.wall]);
 
   // Sync Lighting Mood
   useEffect(() => {
     const h = sceneHandlesRef.current;
     if (!h) return;
-    h.roomHandles.updateMoodBackdrop(mood);
-    if (mood === 'morning') {
+    h.roomHandles.updateMoodBackdrop(activeMood);
+    if (activeMood === 'morning') {
       h.scene.background = new THREE.Color('#dfe8f2');
       (h.scene.fog as THREE.Fog).color.set('#dfe8f2');
       h.keyLight.color.set(0xfff4e0);
@@ -1767,7 +2611,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       h.hemiLight.groundColor.set(0x9c826b);
       h.hemiLight.intensity = 0.78;
       h.fillLight.intensity = 0.55;
-    } else if (mood === 'golden') {
+    } else if (activeMood === 'golden') {
       h.scene.background = new THREE.Color('#e8d5c8');
       (h.scene.fog as THREE.Fog).color.set('#e8d5c8');
       h.keyLight.color.set(0xffb878);
@@ -1786,7 +2630,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       h.hemiLight.intensity = 0.42;
       h.fillLight.intensity = 0.25;
     }
-  }, [mood]);
+  }, [activeMood]);
 
   // Sync Avatar Appearance
   useEffect(() => {
@@ -1813,13 +2657,13 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     }
   }, [emoteTriggerId, activeEmote]);
 
-  // Sync Furniture Items diffing
+  // Sync Furniture Items diffing (uses activeItems: player suite OR visited resident's suite)
   useEffect(() => {
     const h = sceneHandlesRef.current;
     if (!h) return;
 
     const existingKeys = new Set(h.furnitureMap.keys());
-    const nextIds = new Set(items.map((it) => it.uid));
+    const nextIds = new Set(activeItems.map((it) => it.uid));
 
     for (const uid of existingKeys) {
       if (!nextIds.has(uid)) {
@@ -1829,7 +2673,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       }
     }
 
-    for (const item of items) {
+    for (const item of activeItems) {
       const prevGrp = h.furnitureMap.get(item.uid);
       const sig = `${item.catalogId}|${item.color}|${item.active ? 1 : 0}`;
       const needsRebuild = !prevGrp || prevGrp.userData.sig !== sig;
@@ -1844,7 +2688,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         const t = getItemWorldTransform(item);
         newGrp.position.set(t.x, t.y, t.z);
         newGrp.rotation.y = t.rotY;
-        newGrp.visible = item.uid !== movingUid;
+        newGrp.visible = !(location === 'room' && item.uid === movingUid);
         h.furnitureRoot.add(newGrp);
         h.furnitureMap.set(item.uid, newGrp);
         if (!prevGrp) h.popAnimations.set(item.uid, 0.05);
@@ -1852,10 +2696,10 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         const t = getItemWorldTransform(item);
         prevGrp.position.set(t.x, t.y, t.z);
         prevGrp.rotation.y = t.rotY;
-        prevGrp.visible = item.uid !== movingUid;
+        prevGrp.visible = !(location === 'room' && item.uid === movingUid);
       }
     }
-  }, [items, movingUid]);
+  }, [activeItems, movingUid, location]);
 
   // Sync Placement Ghost
   useEffect(() => {
@@ -1863,7 +2707,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     if (!h) return;
 
     const activeCatalogId =
-      placingCatalogId || items.find((it) => it.uid === movingUid)?.catalogId || null;
+      placingCatalogId || activeItems.find((it) => it.uid === movingUid)?.catalogId || null;
 
     if (location !== 'room' || mode !== 'edit' || !activeCatalogId) {
       if (h.ghostGroup) {
@@ -1894,7 +2738,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     } else if (h.ghostGroup) {
       h.ghostGroup.rotation.y = (placingRotation * Math.PI) / 2;
     }
-  }, [location, mode, placingCatalogId, movingUid, placingRotation, placingColor, items]);
+  }, [location, mode, placingCatalogId, movingUid, placingRotation, placingColor, activeItems]);
 
   // Sync Selection Outline Box
   useEffect(() => {
@@ -1936,17 +2780,23 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     if (!h || !cameraPreset || viewMode === 'play') return;
 
     if (cameraPreset.type === 'overview') {
+      const av = h.avatarState;
       if (location === 'world') {
-        const av = h.avatarState;
         h.cameraAnim.pos.set(av.x + 12.5, 11.5, av.z + 14.5);
         h.cameraAnim.target.set(av.x, 0.8, av.z);
+      } else if (location === 'lobby') {
+        h.cameraAnim.pos.set(11.0, 11.2, 13.8);
+        h.cameraAnim.target.set(0, 0.8, 0);
+      } else if (location === 'hallway') {
+        h.cameraAnim.pos.set(av.x + 2.5, 9.6, 12.5);
+        h.cameraAnim.target.set(av.x, 0.9, -0.6);
       } else {
-        h.cameraAnim.pos.set(11.2, 9.6, 11.2);
-        h.cameraAnim.target.set(0, 0.75, 0);
+        h.cameraAnim.pos.set(14.5, 12.0, 14.5);
+        h.cameraAnim.target.set(0, 0.85, 0);
       }
       h.cameraAnim.active = true;
     } else if (cameraPreset.type === 'isometric') {
-      h.cameraAnim.pos.set(0.2, 13.5, 11.8);
+      h.cameraAnim.pos.set(0.2, 14.5, 13.2);
       h.cameraAnim.target.set(0, 0.5, 0);
       h.cameraAnim.active = true;
     } else if (cameraPreset.type === 'closeup') {

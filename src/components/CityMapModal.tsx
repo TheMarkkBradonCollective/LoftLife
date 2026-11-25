@@ -42,7 +42,6 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
 
       const { uLines, zLines, blocks, bounds, loftCenter } = CITY_LAYOUT;
 
-      // Compute exact world X span (considering slant across zMin..zMax)
       const minX = Math.min(
         uzToWorldX(bounds.uMin, bounds.zMin),
         uzToWorldX(bounds.uMin, bounds.zMax)
@@ -65,8 +64,8 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
 
       ctx.clearRect(0, 0, w, h);
 
-      // Asphalt city background
-      ctx.fillStyle = '#1e232d';
+      // Deep carbon city backdrop
+      ctx.fillStyle = '#090e0b';
       ctx.fillRect(0, 0, w, h);
 
       // Draw slanted city blocks
@@ -84,11 +83,11 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
         ctx.closePath();
 
         if (blk.kind === 'loft_plaza') {
-          ctx.fillStyle = '#10b981';
+          ctx.fillStyle = '#39ff14';
         } else if (blk.kind === 'park') {
-          ctx.fillStyle = '#3f6e49';
+          ctx.fillStyle = '#1d4d28';
         } else {
-          ctx.fillStyle = '#3a4252';
+          ctx.fillStyle = '#1a231e';
         }
         ctx.fill();
       }
@@ -101,14 +100,13 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
         const bot = toPx(uzToWorldX(u, bounds.zMax), bounds.zMax);
         const isM = i === 12;
 
-        ctx.strokeStyle = isM ? 'rgba(251, 191, 36, 0.75)' : 'rgba(148, 163, 184, 0.35)';
+        ctx.strokeStyle = isM ? 'rgba(57, 255, 20, 0.85)' : 'rgba(148, 184, 158, 0.25)';
         ctx.beginPath();
         ctx.moveTo(top[0], top[1]);
         ctx.lineTo(bot[0], bot[1]);
         ctx.stroke();
 
-        // Top & bottom letter labels
-        ctx.fillStyle = isM ? '#fbbf24' : '#cbd5e1';
+        ctx.fillStyle = isM ? '#39ff14' : '#a7c2b0';
         ctx.font = isM ? 'bold 11px sans-serif' : '600 10px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(DIAGONAL_LETTERS[i], top[0], top[1] - 8);
@@ -122,41 +120,39 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
         const right = toPx(uzToWorldX(bounds.uMax, z), z);
         const is15 = j === 14;
 
-        ctx.strokeStyle = is15 ? 'rgba(251, 191, 36, 0.75)' : 'rgba(148, 163, 184, 0.3)';
+        ctx.strokeStyle = is15 ? 'rgba(57, 255, 20, 0.85)' : 'rgba(148, 184, 158, 0.22)';
         ctx.beginPath();
         ctx.moveTo(left[0], left[1]);
         ctx.lineTo(right[0], right[1]);
         ctx.stroke();
 
-        // Number labels along the left edge (show all odd or key rows cleanly)
         if (j === 0 || j === 29 || j === 14 || j % 2 === 0) {
-          ctx.fillStyle = is15 ? '#fbbf24' : '#94a3b8';
+          ctx.fillStyle = is15 ? '#39ff14' : '#7f9c88';
           ctx.font = is15 ? 'bold 10px monospace' : '500 9px monospace';
           ctx.textAlign = 'right';
           ctx.fillText(ordinalStreet(j + 1).replace(' St', ''), left[0] - 8, left[1] + 3);
         }
       }
 
-      // Loft Plaza Home Marker
+      // LoftLife Hotel Home Marker
       const [lx, ly] = toPx(loftCenter.x, loftCenter.z);
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = '#070a09';
       ctx.beginPath();
-      ctx.arc(lx, ly, 4.5, 0, Math.PI * 2);
+      ctx.arc(lx, ly, 5, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#fef3c7';
+      ctx.fillStyle = '#d9ffd0';
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText('MY LOFT', lx + 7, ly + 3);
+      ctx.fillText('LOFTLIFE HOTEL', lx + 7, ly + 3);
 
       // Live Player Marker & Direction Arrow
       const pose = playerPoseRef.current;
       const [px, py] = toPx(pose.x, pose.z);
       ctx.save();
       ctx.translate(px, py);
-      // In world space yaw=0 points +Z (down on map), yaw=+PI/2 points +X (right on map)
       ctx.rotate(-pose.yaw);
-      ctx.fillStyle = '#f59e0b';
-      ctx.strokeStyle = '#ffffff';
+      ctx.fillStyle = '#39ff14';
+      ctx.strokeStyle = '#051205';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(0, 9);
@@ -178,17 +174,17 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
-      <div className="w-full max-w-3xl bg-[#181b24] text-slate-100 border border-white/15 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
-        <div className="px-5 py-3.5 border-b border-white/10 flex items-center justify-between gap-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
+      <div className="w-full max-w-3xl bg-[#0b100d] text-slate-100 border border-[#39ff14]/40 rounded-2xl neon-panel-glow overflow-hidden flex flex-col">
+        <div className="px-5 py-3.5 border-b border-[#39ff14]/15 bg-[#0f1612] flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <Compass className="w-5 h-5 text-amber-400 shrink-0" />
+            <Compass className="w-5 h-5 text-[#39ff14] shrink-0" />
             <div>
-              <h2 className="font-display text-base font-bold leading-tight">
-                Main City Grid · A–Z Diagonal × 1st–30th Horizontal
+              <h2 className="font-display text-base font-bold leading-tight text-white">
+                LoftLife City Grid · A–Z Diagonal × 1st–30th Horizontal
               </h2>
               <div className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5">
-                <MapPin className="w-3.5 h-3.5 text-emerald-400" />
+                <MapPin className="w-3.5 h-3.5 text-[#39ff14]" />
                 <span>You are at {currentStreet}</span>
               </div>
             </div>
@@ -204,26 +200,26 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
           </button>
         </div>
 
-        <div className="p-4 bg-[#141720] flex flex-col items-center gap-3">
+        <div className="p-4 bg-[#080c0a] flex flex-col items-center gap-3">
           <canvas
             ref={canvasRef}
             width={740}
             height={520}
-            className="w-full max-h-[68vh] object-contain rounded-xl border border-white/10"
+            className="w-full max-h-[68vh] object-contain rounded-xl border border-[#39ff14]/20"
           />
 
           <div className="w-full flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300 px-1">
             <div className="flex items-center gap-4">
               <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-sm bg-emerald-500 inline-block" />
-                Loft Plaza (M St & 15th St)
+                <span className="w-3 h-3 rounded-sm bg-[#39ff14] inline-block" />
+                LoftLife Plaza (M St &amp; 15th St)
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-sm bg-[#3f6e49] inline-block" />
+                <span className="w-3 h-3 rounded-sm bg-[#1d4d28] inline-block" />
                 City Park
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-full bg-amber-500 inline-block" />
+                <span className="w-3 h-3 rounded-full bg-[#39ff14] ring-2 ring-[#39ff14]/40 inline-block" />
                 Your Position
               </span>
             </div>

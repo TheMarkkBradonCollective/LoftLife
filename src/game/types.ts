@@ -1,4 +1,4 @@
-export type WorldLocation = 'room' | 'world';
+export type WorldLocation = 'room' | 'resident_room' | 'hallway' | 'lobby' | 'world';
 
 export type ViewMode = 'isometric' | 'play';
 
@@ -89,3 +89,17 @@ export interface RoomPreset {
   mood: LightingMood;
   items: PlacedItem[];
 }
+
+export interface ActiveResident {
+  id: string;
+  name: string;
+  roomNumber: string;
+  floor: number;
+  status: string;
+  greeting: string;
+  avatar: AvatarConfig;
+  surfaces: RoomSurfaceConfig;
+  mood: LightingMood;
+  items: PlacedItem[];
+}
+

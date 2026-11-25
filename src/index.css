@@ -5,6 +5,9 @@
     --font-display: 'Outfit', system-ui, sans-serif;
     --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
+    --neon-green: #39ff14;
+    --neon-green-dim: #1fd13a;
+    --neon-surface: #0b100d;
   }
 
   html, body, #root {
@@ -13,6 +16,7 @@
     margin: 0;
     padding: 0;
     overflow: hidden;
+    background-color: #070a09;
     font-family: var(--font-sans);
   }
 }
@@ -24,6 +28,14 @@
 .font-mono-tabular {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+.neon-panel-glow {
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(57, 255, 20, 0.24), 0 0 22px rgba(57, 255, 20, 0.08);
+}
+
+.neon-btn-glow {
+  box-shadow: 0 0 18px rgba(57, 255, 20, 0.35);
 }
 
 /* Custom subtle scrollbars for horizontal catalog strips */

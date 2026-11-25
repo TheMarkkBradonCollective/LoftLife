@@ -72,8 +72,8 @@ export function isValidPlacement(
     const span = cat.size[0];
     if (candidate.wall === 'west') {
       if (candidate.gz < 0 || candidate.gz + span > GRID_SIZE) return false;
-      // Avoid west wall window opening (tiles 2..7) and exit door (tiles 7..9)
-      const overlapsWindowOrDoor = candidate.gz < 9 && candidate.gz + span > 2;
+      // Avoid west wall panoramic window opening (tiles 3..10) and suite door (tiles 11..13)
+      const overlapsWindowOrDoor = candidate.gz < 13 && candidate.gz + span > 3;
       if (overlapsWindowOrDoor) return false;
       return !existingItems.some((other) => {
         if (other.uid === candidate.uid) return false;
@@ -195,10 +195,12 @@ export function isWorldPosWalkable(
   x: number,
   z: number,
   items: PlacedItem[],
-  radius = 0.25
+  radius = 0.25,
+  doorUnlocked = false
 ): boolean {
   const half = GRID_SIZE / 2 - radius;
-  const inDoorwayCorridor = z >= 3.14 && z <= 3.86 && x >= -5.25 && x <= -4.5;
+  const inDoorwayCorridor =
+    doorUnlocked && z >= 4.64 && z <= 5.36 && x >= -7.3 && x <= -6.5;
   if (!inDoorwayCorridor && (x < -half || x > half || z < -half || z > half)) {
     return false;
   }

@@ -43,6 +43,8 @@ import {
 } from 'lucide-react';
 import { AvatarModal } from './components/AvatarModal';
 import { CityMapModal } from './components/CityMapModal';
+import { ElevatorPanelModal } from './components/ElevatorPanelModal';
+import { HotelDoorTerminalModal } from './components/HotelDoorTerminalModal';
 import { type CameraPresetRequest, RoomViewport } from './components/RoomViewport';
 import { sfx } from './game/audio';
 import {
@@ -50,11 +52,16 @@ import {
   FLOOR_STYLES,
   FURNITURE_CATALOG,
   getCatalogItem,
+  GRID_SIZE,
+  HOTEL_RESIDENTS,
+  PLAYER_SUITE_FLOOR,
+  PLAYER_SUITE_NUMBER,
   ROOM_PRESETS,
   WALL_STYLES,
 } from './game/catalog';
 import { getEffectiveSize, isValidPlacement } from './game/gridMath';
 import type {
+  ActiveResident,
   AvatarConfig,
   EmoteType,
   FloorStyleId,
@@ -68,7 +75,8 @@ import type {
   WorldLocation,
 } from './game/types';
 
-const STORAGE_KEY = 'loftline_room_state_v1';
+const STORAGE_KEY = 'loftlife_room_state_v1';
+const LEGACY_STORAGE_KEY = 'loftline_room_state_v1';
 
 interface SavedState {
   items: PlacedItem[];
@@ -80,7 +88,8 @@ interface SavedState {
 
 function loadSavedState(): SavedState {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw =
+      localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<SavedState>;
       if (Array.isArray(parsed.items) && parsed.surfaces && parsed.avatar) {
@@ -156,6 +165,15 @@ export default function App() {
   const initial = useMemo(() => loadSavedState(), []);
 
   const [location, setLocation] = useState<WorldLocation>('room');
+  const [hallwayFloor, setHallwayFloor] = useState<number>(PLAYER_SUITE_FLOOR);
+  const [unlockedRooms, setUnlockedRooms] = useState<string[]>([]);
+  const [mainDoorUnlocked, setMainDoorUnlocked] = useState<boolean>(false);
+  const [roomDoorUnlocked, setRoomDoorUnlocked] = useState<boolean>(false);
+  const [activeResident, setActiveResident] = useState<ActiveResident | null>(null);
+  const [targetVisitResident, setTargetVisitResident] = useState<ActiveResident | null>(null);
+  const [doorTerminalOpen, setDoorTerminalOpen] = useState(false);
+  const [elevatorModalOpen, setElevatorModalOpen] = useState(false);
+
   const [viewMode, setViewMode] = useState<ViewMode>('isometric');
   const [mode, setMode] = useState<GameMode>('walk');
   const [items, setItems] = useState<PlacedItem[]>(initial.items);
@@ -229,18 +247,110 @@ export default function App() {
       sfx.playToggle(next === 'world');
       setLocation(next);
       setNpcChat(null);
-      if (next === 'world') {
+      if (next !== 'room') {
         setMode('walk');
         setSelectedUid(null);
         setPlacingCatalogId(null);
         setMovingUid(null);
-        showHint('Main City · A–Z Diagonal × 1st–30th Streets · Walk through Loft doors to return');
-      } else {
+      }
+      if (next !== 'world') {
         setCityMapOpen(false);
-        showHint(`Returned to ${roomName}`);
+      }
+      if (next === 'world') {
+        showHint('Main City · Walk to Hotel Main Entrance & press E for Keycard / Guest Intercom');
+      } else if (next === 'lobby') {
+        showHint('Main Lobby · Walk into the North brass elevator to ride to Floors 2–4');
+      } else if (next === 'hallway') {
+        setActiveResident(null);
+        showHint(`Floor ${hallwayFloor} Hallway · Find a numbered suite door or ride the elevator`);
+      } else if (next === 'room') {
+        setActiveResident(null);
+        setHallwayFloor(PLAYER_SUITE_FLOOR);
+        showHint(`${roomName} (Suite ${PLAYER_SUITE_NUMBER}) · Walk to West door & press E for Keycard`);
       }
     },
-    [roomName, showHint]
+    [hallwayFloor, roomName, showHint]
+  );
+
+  const handleUnlockRoomDoor = useCallback(() => {
+    setRoomDoorUnlocked(true);
+    setUnlockedRooms((prev) =>
+      prev.includes(PLAYER_SUITE_NUMBER) ? prev : [...prev, PLAYER_SUITE_NUMBER]
+    );
+  }, []);
+
+  const handleUnlockHallwayDoor = useCallback((roomNumber: string) => {
+    setUnlockedRooms((prev) => (prev.includes(roomNumber) ? prev : [...prev, roomNumber]));
+    if (roomNumber === PLAYER_SUITE_NUMBER) {
+      setRoomDoorUnlocked(true);
+    }
+  }, []);
+
+  const handleEnterSuiteFromHallway = useCallback(
+    (roomNumber: string) => {
+      if (roomNumber === PLAYER_SUITE_NUMBER) {
+        setActiveResident(null);
+        handleChangeLocation('room');
+        return;
+      }
+      const res = HOTEL_RESIDENTS.find((r) => r.roomNumber === roomNumber);
+      if (res) {
+        setActiveResident(res);
+        setTargetVisitResident(null);
+        setLocation('resident_room');
+        setMode('walk');
+        showHint(`Entered ${res.name}'s Suite ${res.roomNumber} · Press E near ${res.name} to chat`);
+        showNpcChat(res.name, res.greeting);
+      }
+    },
+    [handleChangeLocation, showHint, showNpcChat]
+  );
+
+  const handleUnlockMainWithKeycard = useCallback(() => {
+    setMainDoorUnlocked(true);
+    setRoomDoorUnlocked(true);
+    setUnlockedRooms((prev) =>
+      prev.includes(PLAYER_SUITE_NUMBER) ? prev : [...prev, PLAYER_SUITE_NUMBER]
+    );
+    setDoorTerminalOpen(false);
+    showHint(`Keycard accepted! Walk into Main Lobby & ride elevator to Floor ${PLAYER_SUITE_FLOOR}`);
+  }, [showHint]);
+
+  const handleUnlockMainFromResident = useCallback(
+    (resident: ActiveResident) => {
+      setMainDoorUnlocked(true);
+      setTargetVisitResident(resident);
+      setUnlockedRooms((prev) =>
+        prev.includes(resident.roomNumber) ? prev : [...prev, resident.roomNumber]
+      );
+      window.setTimeout(() => {
+        setDoorTerminalOpen(false);
+        showHint(
+          `Approved by ${resident.name}! Walk into Main Lobby → Elevator → Floor ${resident.floor} → Suite ${resident.roomNumber}`
+        );
+        showNpcChat(
+          resident.name,
+          `I buzzed the lobby door open! Come up the elevator to Floor ${resident.floor}, Suite ${resident.roomNumber}.`
+        );
+      }, 650);
+    },
+    [showHint, showNpcChat]
+  );
+
+  const handleArriveFloor = useCallback(
+    (floor: 'L' | 2 | 3 | 4) => {
+      setElevatorModalOpen(false);
+      if (floor === 'L') {
+        handleChangeLocation('lobby');
+      } else {
+        setHallwayFloor(floor);
+        setLocation('hallway');
+        setActiveResident(null);
+        setMode('walk');
+        showHint(`Arrived on Floor ${floor} · Walk down the hallway to Suites ${floor}01–${floor}04`);
+      }
+    },
+    [handleChangeLocation, showHint]
   );
 
   const pushHistory = useCallback((prevItems: PlacedItem[]) => {
@@ -340,8 +450,8 @@ export default function App() {
       const nextRot = ((selectedItem.rot + 1) % 4) as 0 | 1 | 2 | 3;
       const [ew, ed] = getEffectiveSize(selectedItem.catalogId, nextRot);
       // Adjust position slightly if near wall boundary when rotating rectangular item
-      const clampedGx = Math.min(selectedItem.gx, 10 - ew);
-      const clampedGz = Math.min(selectedItem.gz, 10 - ed);
+      const clampedGx = Math.min(selectedItem.gx, GRID_SIZE - ew);
+      const clampedGz = Math.min(selectedItem.gz, GRID_SIZE - ed);
       const candidate = { ...selectedItem, gx: clampedGx, gz: clampedGz, rot: nextRot };
       if (isValidPlacement(candidate, items)) {
         sfx.playClick();
@@ -401,6 +511,9 @@ export default function App() {
       ) {
         return;
       }
+      if (doorTerminalOpen || elevatorModalOpen) {
+        return;
+      }
       if (e.key === 'h' || e.key === 'H') {
         setDockCollapsed((c) => !c);
       } else if (e.key === 'v' || e.key === 'V') {
@@ -428,6 +541,8 @@ export default function App() {
     mode,
     location,
     cityMapOpen,
+    doorTerminalOpen,
+    elevatorModalOpen,
     rotateSelectedOrPlacing,
     selectedUid,
     handleDeleteSelected,
@@ -450,16 +565,43 @@ export default function App() {
     [placingCatalogId]
   );
 
-  const isDarkSky = mood === 'night';
-  const hudPanelClass = isDarkSky
-    ? 'bg-[#181b24]/95 text-slate-100 border-white/12 shadow-2xl'
-    : 'bg-[#fbfaf7]/95 text-slate-900 border-slate-900/10 shadow-xl';
+  const hudPanelClass =
+    'bg-[#0b100d]/95 text-slate-100 border-[#39ff14]/30 neon-panel-glow';
+
+  const anyModalOpen = avatarModalOpen || cityMapOpen || doorTerminalOpen || elevatorModalOpen;
+
+  const locationTitle =
+    location === 'world'
+      ? 'Main City'
+      : location === 'lobby'
+      ? 'Hotel Lobby'
+      : location === 'hallway'
+      ? `Floor ${hallwayFloor} Hallway`
+      : location === 'resident_room' && activeResident
+      ? `${activeResident.name}'s Suite ${activeResident.roomNumber}`
+      : `Suite ${PLAYER_SUITE_NUMBER} · ${roomName}`;
+
+  const locationSub =
+    location === 'world'
+      ? cityStreet
+      : location === 'lobby'
+      ? 'Floor 1 · Concierge & Elevator'
+      : location === 'hallway'
+      ? `Suites ${hallwayFloor}01–${hallwayFloor}04`
+      : location === 'resident_room' && activeResident
+      ? `Floor ${activeResident.floor} · Guest Visit`
+      : `Floor ${PLAYER_SUITE_FLOOR} · ${items.length} items`;
 
   return (
     <div className="relative w-screen h-screen overflow-hidden select-none">
       {/* Full-Screen 3D Canvas */}
       <RoomViewport
         location={location}
+        hallwayFloor={hallwayFloor}
+        unlockedRooms={unlockedRooms}
+        mainDoorUnlocked={mainDoorUnlocked}
+        roomDoorUnlocked={roomDoorUnlocked}
+        activeResident={activeResident}
         viewMode={viewMode}
         mode={mode}
         items={items}
@@ -474,6 +616,7 @@ export default function App() {
         placingColor={placingColor}
         movingUid={movingUid}
         cameraPreset={cameraPreset}
+        modalOpen={anyModalOpen}
         playerPoseRef={playerPoseRef}
         onChangeLocation={handleChangeLocation}
         onSelectItem={setSelectedUid}
@@ -486,55 +629,60 @@ export default function App() {
         onPointerLockChange={setPointerLocked}
         onProximityPrompt={setProximityPrompt}
         onCityStreetChange={setCityStreet}
+        onOpenDoorTerminal={() => setDoorTerminalOpen(true)}
+        onOpenElevator={() => setElevatorModalOpen(true)}
+        onUnlockRoomDoor={handleUnlockRoomDoor}
+        onUnlockHallwayDoor={handleUnlockHallwayDoor}
+        onEnterSuiteFromHallway={handleEnterSuiteFromHallway}
       />
 
       {/* Functional Aiming Reticle when Pointer-Locked in Play View */}
       {viewMode === 'play' && pointerLocked && (
         <div className="fixed inset-0 pointer-events-none z-20 flex items-center justify-center">
-          <div className="w-1.5 h-1.5 rounded-full bg-white/85 shadow-sm ring-1 ring-black/40" />
+          <div className="w-1.5 h-1.5 rounded-full bg-[#39ff14] shadow-sm ring-2 ring-black/60" />
         </div>
       )}
 
-      {/* Top-Left Brand & Room / City Street Summary */}
+      {/* Top-Left Brand & Hotel / City Summary */}
       <div className="fixed top-4 left-4 z-20 pointer-events-auto">
         <div className={`px-4 py-2.5 rounded-xl border flex items-center gap-3 ${hudPanelClass}`}>
-          <span className="font-display text-base font-bold tracking-tight whitespace-nowrap shrink-0">
-            Loftline
+          <span className="font-display text-base font-bold tracking-tight text-[#39ff14] whitespace-nowrap shrink-0">
+            LoftLife
           </span>
-          <span className="text-xs opacity-35" aria-hidden="true">
+          <span className="text-xs text-[#39ff14]/45" aria-hidden="true">
             |
           </span>
-          <div className="flex items-center gap-2 text-xs opacity-80 whitespace-nowrap">
-            <span>{location === 'world' ? 'Main City' : roomName}</span>
-            <span aria-hidden="true">·</span>
-            <span className="font-mono-tabular">
-              {location === 'world' ? cityStreet : `${items.length} items`}
+          <div className="flex items-center gap-2 text-xs text-slate-200 whitespace-nowrap">
+            <span className="font-medium text-white">{locationTitle}</span>
+            <span className="text-[#39ff14]/60" aria-hidden="true">
+              ·
             </span>
+            <span className="font-mono-tabular text-slate-300">{locationSub}</span>
           </div>
         </div>
       </div>
 
       {/* Top-Right Compact Mode & Utility Bar */}
       <div className="fixed top-4 right-4 z-20 flex flex-wrap items-center justify-end gap-2 pointer-events-auto">
-        {/* Exit to Main World / Return to My Loft Primary Action */}
+        {/* Exit to Main World / Return to My Suite Quick Travel */}
         <button
           type="button"
-          onClick={() => handleChangeLocation(location === 'room' ? 'world' : 'room')}
-          className={`px-3.5 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
+          onClick={() => handleChangeLocation(location === 'world' ? 'room' : 'world')}
+          className={`px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
             location === 'world'
-              ? 'bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-700'
-              : 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700'
+              ? 'bg-[#39ff14] text-[#051205] border-[#39ff14] hover:bg-[#5bff3b] neon-btn-glow'
+              : 'bg-[#111914] text-[#39ff14] border-[#39ff14]/45 hover:bg-[#19261d]'
           }`}
         >
-          {location === 'room' ? (
+          {location === 'world' ? (
             <>
-              <DoorOpen className="w-3.5 h-3.5" />
-              Exit to Main World
+              <Home className="w-3.5 h-3.5" />
+              Return to Suite {PLAYER_SUITE_NUMBER}
             </>
           ) : (
             <>
-              <Home className="w-3.5 h-3.5" />
-              Return to My Loft
+              <DoorOpen className="w-3.5 h-3.5" />
+              Main City
             </>
           )}
         </button>
@@ -548,7 +696,9 @@ export default function App() {
               setCityMapOpen((v) => !v);
             }}
             className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-              cityMapOpen ? 'bg-amber-500 text-slate-950 border-amber-400' : hudPanelClass
+              cityMapOpen
+                ? 'bg-[#39ff14] text-[#051205] border-[#39ff14] neon-btn-glow'
+                : hudPanelClass
             }`}
           >
             <MapIcon className="w-3.5 h-3.5" />
@@ -565,12 +715,8 @@ export default function App() {
             }}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
               viewMode === 'isometric'
-                ? isDarkSky
-                  ? 'bg-white text-slate-900'
-                  : 'bg-slate-900 text-white'
-                : isDarkSky
-                ? 'text-slate-300 hover:bg-white/10'
-                : 'text-slate-600 hover:bg-slate-200/70'
+                ? 'bg-[#39ff14] text-[#051205]'
+                : 'text-slate-300 hover:bg-white/10'
             }`}
           >
             <Eye className="w-3.5 h-3.5" />
@@ -583,10 +729,8 @@ export default function App() {
             }}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
               viewMode === 'play'
-                ? 'bg-amber-500 text-slate-950'
-                : isDarkSky
-                ? 'text-slate-300 hover:bg-white/10'
-                : 'text-slate-600 hover:bg-slate-200/70'
+                ? 'bg-[#39ff14] text-[#051205]'
+                : 'text-slate-300 hover:bg-white/10'
             }`}
           >
             <Gamepad2 className="w-3.5 h-3.5" />
@@ -594,7 +738,7 @@ export default function App() {
           </button>
         </div>
 
-        {/* Walk / Edit Room Mode Segmented Switch (only inside My Loft) */}
+        {/* Walk / Edit Room Mode Segmented Switch (only inside My Suite) */}
         {location === 'room' && (
           <div className={`p-1 rounded-xl border flex items-center gap-1 ${hudPanelClass}`}>
             <button
@@ -602,10 +746,8 @@ export default function App() {
               onClick={() => handleModeSwitch('walk')}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
                 mode === 'walk'
-                  ? 'bg-emerald-600 text-white'
-                  : isDarkSky
-                  ? 'text-slate-300 hover:bg-white/10'
-                  : 'text-slate-600 hover:bg-slate-200/70'
+                  ? 'bg-[#39ff14] text-[#051205]'
+                  : 'text-slate-300 hover:bg-white/10'
               }`}
             >
               <Footprints className="w-3.5 h-3.5" />
@@ -616,10 +758,8 @@ export default function App() {
               onClick={() => handleModeSwitch('edit')}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
                 mode === 'edit'
-                  ? 'bg-slate-900 text-white'
-                  : isDarkSky
-                  ? 'text-slate-300 hover:bg-white/10'
-                  : 'text-slate-600 hover:bg-slate-200/70'
+                  ? 'bg-[#39ff14] text-[#051205]'
+                  : 'text-slate-300 hover:bg-white/10'
               }`}
             >
               <PencilRuler className="w-3.5 h-3.5" />
@@ -648,12 +788,8 @@ export default function App() {
               }}
               className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
                 mood === m.id
-                  ? isDarkSky
-                    ? 'bg-white text-slate-900'
-                    : 'bg-slate-900 text-white'
-                  : isDarkSky
-                  ? 'text-slate-300 hover:bg-white/10'
-                  : 'text-slate-600 hover:bg-slate-200/70'
+                  ? 'bg-[#39ff14] text-[#051205]'
+                  : 'text-slate-300 hover:bg-white/10'
               }`}
             >
               {m.icon}
@@ -671,10 +807,8 @@ export default function App() {
             }}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
               avatarModalOpen
-                ? 'bg-slate-900 text-white'
-                : isDarkSky
-                ? 'text-slate-200 hover:bg-white/10'
-                : 'text-slate-700 hover:bg-slate-200/70'
+                ? 'bg-[#39ff14] text-[#051205]'
+                : 'text-slate-200 hover:bg-white/10'
             }`}
           >
             <User className="w-3.5 h-3.5" />
@@ -691,11 +825,7 @@ export default function App() {
               setCameraToggle(next);
               setCameraPreset({ id: Date.now(), type: next });
             }}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-              isDarkSky
-                ? 'text-slate-300 hover:bg-white/10'
-                : 'text-slate-600 hover:bg-slate-200/70'
-            }`}
+            className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-slate-300 hover:bg-white/10 hover:text-[#39ff14]"
           >
             <Camera className="w-3.5 h-3.5" />
           </button>
@@ -710,11 +840,7 @@ export default function App() {
               setMuted(next);
               if (!next) sfx.playClick();
             }}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-              isDarkSky
-                ? 'text-slate-300 hover:bg-white/10'
-                : 'text-slate-600 hover:bg-slate-200/70'
-            }`}
+            className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-slate-300 hover:bg-white/10 hover:text-[#39ff14]"
           >
             {muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
           </button>
@@ -724,30 +850,30 @@ export default function App() {
       {/* Transient Walk / Action Hint Banner */}
       {walkHint && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
-          <div className={`px-3.5 py-1.5 rounded-lg border text-xs font-medium ${hudPanelClass}`}>
+          <div className={`px-3.5 py-1.5 rounded-lg border text-xs font-medium text-[#d8ffd0] ${hudPanelClass}`}>
             {walkHint}
           </div>
         </div>
       )}
 
-      {/* Play View Proximity Action Prompt */}
-      {viewMode === 'play' && proximityPrompt && (
+      {/* Proximity Action Prompt (Isometric Walk & Play View) */}
+      {proximityPrompt && !anyModalOpen && (
         <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
-          <div className="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-semibold text-xs shadow-lg border border-amber-400">
+          <div className="px-4 py-2 rounded-xl bg-[#39ff14] text-[#051205] font-bold text-xs border border-[#8eff78] neon-btn-glow">
             {proximityPrompt}
           </div>
         </div>
       )}
 
-      {/* NPC Dialogue Toast in Main World */}
+      {/* NPC Dialogue Toast */}
       {npcChat && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 w-[min(460px,90vw)] pointer-events-auto">
           <div className={`px-4 py-3 rounded-xl border flex items-start justify-between gap-3 ${hudPanelClass}`}>
             <div className="flex items-start gap-2.5">
-              <MessageCircle className="w-4 h-4 mt-0.5 text-emerald-500 shrink-0" />
+              <MessageCircle className="w-4 h-4 mt-0.5 text-[#39ff14] shrink-0" />
               <div className="text-xs leading-relaxed">
-                <span className="font-semibold mr-1.5">{npcChat.speaker}:</span>
-                <span className="opacity-85">{npcChat.message}</span>
+                <span className="font-semibold text-[#39ff14] mr-1.5">{npcChat.speaker}:</span>
+                <span className="text-slate-200">{npcChat.message}</span>
               </div>
             </div>
             <button
@@ -803,8 +929,8 @@ export default function App() {
                       }}
                       className={`w-5 h-5 rounded-full border transition-transform ${
                         placingColor === c.hex
-                          ? 'border-blue-500 scale-115 ring-2 ring-blue-500/30'
-                          : 'border-black/20 hover:scale-105'
+                          ? 'border-[#39ff14] scale-115 ring-2 ring-[#39ff14]/40'
+                          : 'border-white/20 hover:scale-105'
                       }`}
                       style={{ backgroundColor: c.hex }}
                     />
@@ -816,7 +942,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={rotateSelectedOrPlacing}
-                  className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-white hover:bg-slate-800 flex items-center gap-1 whitespace-nowrap"
+                  className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-[#39ff14] text-[#051205] hover:bg-[#5bff3b] flex items-center gap-1 whitespace-nowrap"
                 >
                   <RotateCw className="w-3.5 h-3.5" />
                   Rotate (R)
@@ -830,9 +956,7 @@ export default function App() {
                   setPlacingCatalogId(null);
                   setMovingUid(null);
                 }}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 whitespace-nowrap ${
-                  isDarkSky ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-200/80 hover:bg-slate-300/80'
-                }`}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 whitespace-nowrap bg-white/10 hover:bg-white/20 text-slate-200"
               >
                 <X className="w-3.5 h-3.5" />
                 Cancel
@@ -851,18 +975,18 @@ export default function App() {
               className={`mb-2 w-full max-w-3xl px-4 py-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-3 ${hudPanelClass}`}
             >
               <div className="flex items-center gap-2 text-xs">
-                <span className="font-semibold">{selectedCatalog.name}</span>
+                <span className="font-semibold text-white">{selectedCatalog.name}</span>
                 <span className="opacity-40" aria-hidden="true">
                   ·
                 </span>
-                <span className="font-mono-tabular opacity-70">
+                <span className="font-mono-tabular text-[#39ff14]">
                   {selectedCatalog.size[0]}×{selectedCatalog.size[1]}m
                 </span>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
                 {/* Live Recolor Swatches */}
-                <div className="flex items-center gap-1 pr-2 border-r border-current/15">
+                <div className="flex items-center gap-1 pr-2 border-r border-white/15">
                   {selectedCatalog.colors.map((c) => (
                     <button
                       key={c.hex}
@@ -871,8 +995,8 @@ export default function App() {
                       onClick={() => handleRecolorSelected(c.hex)}
                       className={`w-5 h-5 rounded-full border transition-transform ${
                         selectedItem.color === c.hex
-                          ? 'border-blue-500 scale-115 ring-2 ring-blue-500/30'
-                          : 'border-black/20 hover:scale-105'
+                          ? 'border-[#39ff14] scale-115 ring-2 ring-[#39ff14]/40'
+                          : 'border-white/20 hover:scale-105'
                       }`}
                       style={{ backgroundColor: c.hex }}
                     />
@@ -882,9 +1006,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={handleStartMoveSelected}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 whitespace-nowrap ${
-                    isDarkSky ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-100 hover:bg-slate-200'
-                  }`}
+                  className="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 whitespace-nowrap bg-white/10 hover:bg-white/20 text-slate-100"
                 >
                   <Move className="w-3.5 h-3.5" />
                   Move
@@ -894,9 +1016,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={rotateSelectedOrPlacing}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 whitespace-nowrap ${
-                      isDarkSky ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-100 hover:bg-slate-200'
-                    }`}
+                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 whitespace-nowrap bg-white/10 hover:bg-white/20 text-slate-100"
                   >
                     <RotateCw className="w-3.5 h-3.5" />
                     Rotate
@@ -906,9 +1026,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={handleDuplicateSelected}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 whitespace-nowrap ${
-                    isDarkSky ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-100 hover:bg-slate-200'
-                  }`}
+                  className="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 whitespace-nowrap bg-white/10 hover:bg-white/20 text-slate-100"
                 >
                   <Copy className="w-3.5 h-3.5" />
                   Duplicate
@@ -955,10 +1073,8 @@ export default function App() {
                   onClick={() => triggerEmote('wave')}
                   className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                     activeEmote === 'wave'
-                      ? 'bg-emerald-600 text-white'
-                      : isDarkSky
-                      ? 'bg-white/10 hover:bg-white/15 text-slate-100'
-                      : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+                      ? 'bg-[#39ff14] text-[#051205]'
+                      : 'bg-white/8 hover:bg-white/15 text-slate-100'
                   }`}
                 >
                   <Hand className="w-3.5 h-3.5" />
@@ -969,10 +1085,8 @@ export default function App() {
                   onClick={() => triggerEmote('dance')}
                   className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                     activeEmote === 'dance'
-                      ? 'bg-emerald-600 text-white'
-                      : isDarkSky
-                      ? 'bg-white/10 hover:bg-white/15 text-slate-100'
-                      : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+                      ? 'bg-[#39ff14] text-[#051205]'
+                      : 'bg-white/8 hover:bg-white/15 text-slate-100'
                   }`}
                 >
                   <Music className="w-3.5 h-3.5" />
@@ -983,10 +1097,8 @@ export default function App() {
                   onClick={() => triggerEmote('cheer')}
                   className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                     activeEmote === 'cheer'
-                      ? 'bg-emerald-600 text-white'
-                      : isDarkSky
-                      ? 'bg-white/10 hover:bg-white/15 text-slate-100'
-                      : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+                      ? 'bg-[#39ff14] text-[#051205]'
+                      : 'bg-white/8 hover:bg-white/15 text-slate-100'
                   }`}
                 >
                   <Sparkles className="w-3.5 h-3.5" />
@@ -995,11 +1107,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => triggerEmote('jump')}
-                  className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
-                    isDarkSky
-                      ? 'bg-white/10 hover:bg-white/15 text-slate-100'
-                      : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
-                  }`}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap bg-white/8 hover:bg-white/15 text-slate-100"
                 >
                   <ArrowUp className="w-3.5 h-3.5" />
                   Jump
@@ -1008,11 +1116,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setActiveEmote('idle')}
-                    className={`px-3 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
-                      isDarkSky
-                        ? 'text-slate-300 hover:bg-white/10'
-                        : 'text-slate-600 hover:bg-slate-200'
-                    }`}
+                    className="px-3 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap text-slate-300 hover:bg-white/10"
                   >
                     Stand Still
                   </button>
@@ -1034,15 +1138,37 @@ export default function App() {
                     <span aria-hidden="true">·</span>
                     <span>M City Map</span>
                     <span aria-hidden="true">·</span>
-                    <span>Walk straight through Loft doors to enter</span>
+                    <span>At Hotel Door: press E for Keycard or Ring Active User</span>
+                  </>
+                ) : location === 'lobby' ? (
+                  <>
+                    <span>Click floor or WASD</span>
+                    <span aria-hidden="true">·</span>
+                    <span>North Elevator → Floors 2–4</span>
+                    <span aria-hidden="true">·</span>
+                    <span>South Doors → Main City</span>
+                  </>
+                ) : location === 'hallway' ? (
+                  <>
+                    <span>Walk corridor to numbered doors</span>
+                    <span aria-hidden="true">·</span>
+                    <span>Press E at door for Keycard / Ring</span>
+                    <span aria-hidden="true">·</span>
+                    <span>West Elevator → Change Floor</span>
+                  </>
+                ) : location === 'resident_room' ? (
+                  <>
+                    <span>Visiting Suite {activeResident?.roomNumber}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>Press E near {activeResident?.name} to chat</span>
+                    <span aria-hidden="true">·</span>
+                    <span>West Door → Floor Hallway</span>
                   </>
                 ) : (
                   <>
                     <span>Click floor or WASD</span>
                     <span aria-hidden="true">·</span>
-                    <span>Walk straight through West Door to exit</span>
-                    <span aria-hidden="true">·</span>
-                    <span>Click seats, lamps, or TV</span>
+                    <span>West Door: press E to enter Keycard → Lobby &amp; Elevator</span>
                   </>
                 )}
               </div>
@@ -1050,11 +1176,7 @@ export default function App() {
           ) : (
             <div className="flex flex-col">
               {/* Top Edit Tab Row */}
-              <div
-                className={`px-4 py-2 border-b flex items-center justify-between gap-3 ${
-                  isDarkSky ? 'border-white/10' : 'border-slate-200'
-                }`}
-              >
+              <div className="px-4 py-2 border-b border-[#39ff14]/15 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
@@ -1064,10 +1186,8 @@ export default function App() {
                     }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                       editTab === 'catalog'
-                        ? 'bg-slate-900 text-white'
-                        : isDarkSky
-                        ? 'text-slate-300 hover:bg-white/10'
-                        : 'text-slate-600 hover:bg-slate-200/70'
+                        ? 'bg-[#39ff14] text-[#051205]'
+                        : 'text-slate-300 hover:bg-white/10'
                     }`}
                   >
                     <Sofa className="w-3.5 h-3.5" />
@@ -1081,10 +1201,8 @@ export default function App() {
                     }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                       editTab === 'surfaces'
-                        ? 'bg-slate-900 text-white'
-                        : isDarkSky
-                        ? 'text-slate-300 hover:bg-white/10'
-                        : 'text-slate-600 hover:bg-slate-200/70'
+                        ? 'bg-[#39ff14] text-[#051205]'
+                        : 'text-slate-300 hover:bg-white/10'
                     }`}
                   >
                     <Paintbrush className="w-3.5 h-3.5" />
@@ -1098,10 +1216,8 @@ export default function App() {
                     }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                       editTab === 'presets'
-                        ? 'bg-slate-900 text-white'
-                        : isDarkSky
-                        ? 'text-slate-300 hover:bg-white/10'
-                        : 'text-slate-600 hover:bg-slate-200/70'
+                        ? 'bg-[#39ff14] text-[#051205]'
+                        : 'text-slate-300 hover:bg-white/10'
                     }`}
                   >
                     <Layers className="w-3.5 h-3.5" />
@@ -1114,9 +1230,7 @@ export default function App() {
                     type="button"
                     disabled={history.length === 0}
                     onClick={handleUndo}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors whitespace-nowrap disabled:opacity-35 ${
-                      isDarkSky ? 'hover:bg-white/10' : 'hover:bg-slate-200/70'
-                    }`}
+                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors whitespace-nowrap disabled:opacity-35 text-slate-200 hover:bg-white/10"
                   >
                     <Undo2 className="w-3.5 h-3.5" />
                     Undo
@@ -1131,11 +1245,7 @@ export default function App() {
                       setPlacingCatalogId(null);
                       setMovingUid(null);
                     }}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors whitespace-nowrap ${
-                      isDarkSky
-                        ? 'text-red-300 hover:bg-red-500/20'
-                        : 'text-red-600 hover:bg-red-50'
-                    }`}
+                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors whitespace-nowrap text-red-300 hover:bg-red-500/20"
                   >
                     <Eraser className="w-3.5 h-3.5" />
                     Clear Floor
@@ -1156,14 +1266,10 @@ export default function App() {
                           sfx.playClick();
                           setCategoryFilter(cat.id);
                         }}
-                        className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                        className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
                           categoryFilter === cat.id
-                            ? isDarkSky
-                              ? 'bg-white text-slate-900'
-                              : 'bg-slate-900 text-white'
-                            : isDarkSky
-                            ? 'text-slate-300 hover:bg-white/10'
-                            : 'text-slate-600 hover:bg-slate-200/70'
+                            ? 'bg-[#39ff14] text-[#051205]'
+                            : 'text-slate-300 hover:bg-white/10'
                         }`}
                       >
                         {cat.label}
@@ -1193,26 +1299,22 @@ export default function App() {
                           }}
                           className={`min-w-[126px] px-3 py-2 rounded-xl border text-left transition-all shrink-0 flex flex-col gap-1.5 ${
                             isActive
-                              ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
-                              : isDarkSky
-                              ? 'bg-white/5 border-white/10 hover:bg-white/10 text-slate-100'
-                              : 'bg-white border-slate-200 hover:border-slate-400 text-slate-900'
+                              ? 'bg-[#39ff14] text-[#051205] border-[#39ff14] neon-btn-glow'
+                              : 'bg-[#101713] border-white/12 hover:border-[#39ff14]/50 text-slate-100'
                           }`}
                         >
                           <div className="flex items-center justify-between w-full">
                             <span
                               className={`w-7 h-7 rounded-lg flex items-center justify-center ${
                                 isActive
-                                  ? 'bg-white/20 text-white'
-                                  : isDarkSky
-                                  ? 'bg-white/10 text-slate-200'
-                                  : 'bg-slate-100 text-slate-700'
+                                  ? 'bg-black/15 text-[#051205]'
+                                  : 'bg-white/8 text-[#39ff14]'
                               }`}
                             >
                               {getCategoryIcon(item.id)}
                             </span>
                             <span
-                              className="w-3.5 h-3.5 rounded-full border border-black/15"
+                              className="w-3.5 h-3.5 rounded-full border border-black/25"
                               style={{ backgroundColor: item.defaultColor }}
                             />
                           </div>
@@ -1220,7 +1322,7 @@ export default function App() {
                             <div className="text-xs font-semibold truncate">{item.name}</div>
                             <div
                               className={`text-[11px] font-mono-tabular ${
-                                isActive ? 'text-emerald-100' : 'opacity-60'
+                                isActive ? 'text-[#0a230a]' : 'text-slate-400'
                               }`}
                             >
                               {item.size[0]}×{item.size[1]}m
@@ -1237,7 +1339,7 @@ export default function App() {
               {editTab === 'surfaces' && (
                 <div className="px-4 py-3 grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <span className="block text-xs font-medium opacity-75">Floor Finish</span>
+                    <span className="block text-xs font-medium text-slate-300">Floor Finish</span>
                     <div className="flex flex-wrap gap-1.5">
                       {FLOOR_STYLES.map((fl) => {
                         const active = surfaces.floor === fl.id;
@@ -1249,16 +1351,14 @@ export default function App() {
                               sfx.playClick();
                               setSurfaces((s) => ({ ...s, floor: fl.id as FloorStyleId }));
                             }}
-                            className={`px-3 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-2 transition-colors whitespace-nowrap ${
+                            className={`px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-2 transition-colors whitespace-nowrap ${
                               active
-                                ? 'bg-slate-900 text-white border-slate-900'
-                                : isDarkSky
-                                ? 'bg-white/5 border-white/10 hover:bg-white/10'
-                                : 'bg-white border-slate-200 hover:bg-slate-100'
+                                ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]'
+                                : 'bg-[#101713] border-white/12 text-slate-200 hover:border-[#39ff14]/45'
                             }`}
                           >
                             <span
-                              className="w-3.5 h-3.5 rounded-full border border-black/20"
+                              className="w-3.5 h-3.5 rounded-full border border-black/25"
                               style={{ backgroundColor: fl.color }}
                             />
                             {fl.label}
@@ -1269,7 +1369,7 @@ export default function App() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <span className="block text-xs font-medium opacity-75">Wall Paint</span>
+                    <span className="block text-xs font-medium text-slate-300">Wall Paint</span>
                     <div className="flex flex-wrap gap-1.5">
                       {WALL_STYLES.map((wl) => {
                         const active = surfaces.wall === wl.id;
@@ -1281,16 +1381,14 @@ export default function App() {
                               sfx.playClick();
                               setSurfaces((s) => ({ ...s, wall: wl.id as WallStyleId }));
                             }}
-                            className={`px-3 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-2 transition-colors whitespace-nowrap ${
+                            className={`px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-2 transition-colors whitespace-nowrap ${
                               active
-                                ? 'bg-slate-900 text-white border-slate-900'
-                                : isDarkSky
-                                ? 'bg-white/5 border-white/10 hover:bg-white/10'
-                                : 'bg-white border-slate-200 hover:bg-slate-100'
+                                ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]'
+                                : 'bg-[#101713] border-white/12 text-slate-200 hover:border-[#39ff14]/45'
                             }`}
                           >
                             <span
-                              className="w-3.5 h-3.5 rounded-full border border-black/20"
+                              className="w-3.5 h-3.5 rounded-full border border-black/25"
                               style={{ backgroundColor: wl.color }}
                             />
                             {wl.label}
@@ -1321,14 +1419,16 @@ export default function App() {
                       }}
                       className={`px-4 py-2 rounded-xl border text-xs font-semibold flex items-center gap-2 transition-colors whitespace-nowrap ${
                         roomName === preset.name
-                          ? 'bg-slate-900 text-white border-slate-900'
-                          : isDarkSky
-                          ? 'bg-white/5 border-white/10 hover:bg-white/10'
-                          : 'bg-white border-slate-200 hover:bg-slate-100'
+                          ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]'
+                          : 'bg-[#101713] border-white/12 text-slate-200 hover:border-[#39ff14]/45'
                       }`}
                     >
                       <span>{preset.name}</span>
-                      <span className="opacity-55 font-mono-tabular">
+                      <span
+                        className={`font-mono-tabular ${
+                          roomName === preset.name ? 'text-[#0a230a]' : 'text-slate-400'
+                        }`}
+                      >
                         {preset.items.length} items
                       </span>
                     </button>
@@ -1354,6 +1454,27 @@ export default function App() {
         currentStreet={cityStreet}
         playerPoseRef={playerPoseRef}
         onClose={() => setCityMapOpen(false)}
+      />
+
+      {/* Hotel Main Door Keycard & Up/Down Active Resident Ring Terminal */}
+      <HotelDoorTerminalModal
+        open={doorTerminalOpen}
+        playerName={avatarConfig.name}
+        mainDoorUnlocked={mainDoorUnlocked}
+        onUnlockWithKeycard={handleUnlockMainWithKeycard}
+        onUnlockFromResident={handleUnlockMainFromResident}
+        onClose={() => setDoorTerminalOpen(false)}
+      />
+
+      {/* Hotel Brass Elevator Floor Selector */}
+      <ElevatorPanelModal
+        open={elevatorModalOpen}
+        currentLocation={location}
+        currentFloor={hallwayFloor}
+        playerName={avatarConfig.name}
+        targetVisitResident={targetVisitResident}
+        onArriveFloor={handleArriveFloor}
+        onClose={() => setElevatorModalOpen(false)}
       />
     </div>
   );
