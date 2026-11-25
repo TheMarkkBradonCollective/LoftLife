@@ -285,7 +285,7 @@ export const FURNITURE_CATALOG: FurnitureCatalogItem[] = [
     size: [2, 2],
     sittable: true,
     seatOffset: [-0.62, 0.46, 0],
-    seatApproach: [-1.15, 0],
+    seatApproach: [-1.35, 0],
     colors: [
       { label: 'Natural Oak', hex: '#c89e6d' },
       { label: 'Smoked Walnut', hex: '#684730' },

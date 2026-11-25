@@ -470,15 +470,15 @@ export function buildHotelLobby(maxAnisotropy: number): HotelLobbyHandles {
     label: 'Lobby Velvet Sofa',
     mesh: sofa,
     seatPos: { x: 5.15, y: 0.44, z: 0.4 },
-    approachPos: { x: 4.1, z: 0.4 },
+    approachPos: { x: 4.12, z: 0.4 },
     facingYaw: -Math.PI / 2,
   });
 
   const coffeeTable = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.65, 0.65, 0.4, 20),
+    new THREE.CylinderGeometry(0.62, 0.62, 0.4, 20),
     new THREE.MeshStandardMaterial({ color: 0xefe8dc, roughness: 0.2 })
   );
-  coffeeTable.position.set(3.55, 0.2, 0.4);
+  coffeeTable.position.set(3.15, 0.2, 0.4);
   coffeeTable.castShadow = true;
   lobbyGroup.add(coffeeTable);
 
@@ -571,10 +571,10 @@ export function buildHotelLobby(maxAnisotropy: number): HotelLobbyHandles {
       return false;
     }
     // Lobby sofa + table
-    if (x > 4.45 - radius && x < 5.95 + radius && z > -0.8 - radius && z < 1.6 + radius) {
+    if (x > 4.48 - radius && x < 5.95 + radius && z > -0.8 - radius && z < 1.6 + radius) {
       return false;
     }
-    if (Math.hypot(x - 3.55, z - 0.4) < 0.7 + radius) return false;
+    if (Math.hypot(x - 3.15, z - 0.4) < 0.62 + radius) return false;
     // Corner palms
     for (const [px, pz] of palmSpots) {
       if (Math.hypot(x - px, z - pz) < 0.45 + radius) return false;

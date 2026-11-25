@@ -1260,9 +1260,9 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
 
   // Sittable Park Benches near Fountain
   const benchOffsets: { dx: number; dz: number; rotY: number; ax: number; az: number }[] = [
-    { dx: 0, dz: 3.1, rotY: Math.PI, ax: 0, az: 2.25 },
-    { dx: 3.1, dz: 0, rotY: -Math.PI / 2, ax: 2.25, az: 0 },
-    { dx: -3.1, dz: 0, rotY: Math.PI / 2, ax: -2.25, az: 0 },
+    { dx: 0, dz: 3.65, rotY: Math.PI, ax: 0, az: 2.72 },
+    { dx: 3.65, dz: 0, rotY: -Math.PI / 2, ax: 2.72, az: 0 },
+    { dx: -3.65, dz: 0, rotY: Math.PI / 2, ax: -2.72, az: 0 },
   ];
   benchOffsets.forEach((bo, idx) => {
     const bx = fX + bo.dx;

@@ -337,6 +337,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         uid: string;
         seatPos: { x: number; y: number; z: number };
         facingYaw: number;
+        exitPos?: { x: number; z: number };
       } | null;
       pendingPortal:
         | 'toWorld'
@@ -348,6 +349,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       pendingHallDoor: string | null;
       pendingNpcId: string | null;
       seatedUid: string | null;
+      seatExitPos: { x: number; z: number } | null;
       jumpVel: number;
       jumpY: number;
       stepTimer: number;
@@ -355,6 +357,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       portalCooldown: number;
       residentGreetTimer: number;
     };
+    standUp: () => void;
+    ensureUnstuck: () => void;
   } | null>(null);
 
   // Initialize WebGL Scene once
@@ -590,6 +594,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           uid: string;
           seatPos: { x: number; y: number; z: number };
           facingYaw: number;
+          exitPos?: { x: number; z: number };
         } | null,
         pendingPortal: null as
           | 'toWorld'
@@ -601,6 +606,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         pendingHallDoor: null as string | null,
         pendingNpcId: null as string | null,
         seatedUid: null as string | null,
+        seatExitPos: null as { x: number; z: number } | null,
         jumpVel: 0,
         jumpY: 0,
         stepTimer: 0,
@@ -608,6 +614,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         portalCooldown: 0,
         residentGreetTimer: 0,
       },
+      standUp: () => {},
+      ensureUnstuck: () => {},
     };
     sceneHandlesRef.current = handles;
 
@@ -620,6 +628,112 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         document.exitPointerLock?.();
       }
       for (const k of Object.keys(keys)) keys[k] = false;
+    };
+
+    function checkWalkableForLoc(x: number, z: number, loc: WorldLocation, list: PlacedItem[]) {
+      if (loc === 'world') {
+        return isMainWorldPosWalkable(
+          x,
+          z,
+          mainWorld.obstacles,
+          0.28,
+          propsRef.current.mainDoorUnlocked
+        );
+      }
+      if (loc === 'lobby') return lobbyHandles.isWalkable(x, z);
+      if (loc === 'hallway') return hallwayHandles.isWalkable(x, z);
+      const suiteOpen = loc === 'resident_room' || propsRef.current.roomDoorUnlocked;
+      return isWorldPosWalkable(x, z, list, 0.25, suiteOpen);
+    }
+
+    function findNearestWalkable(
+      fromX: number,
+      fromZ: number,
+      prefX: number,
+      prefZ: number,
+      loc: WorldLocation,
+      list: PlacedItem[]
+    ): { x: number; z: number } {
+      if (checkWalkableForLoc(prefX, prefZ, loc, list)) {
+        return { x: prefX, z: prefZ };
+      }
+      if (checkWalkableForLoc(fromX, fromZ, loc, list)) {
+        return { x: fromX, z: fromZ };
+      }
+      for (let r = 0.2; r <= 3.6; r += 0.2) {
+        let best: { x: number; z: number } | null = null;
+        let bestScore = Infinity;
+        for (let i = 0; i < 16; i++) {
+          const ang = (i / 16) * Math.PI * 2;
+          const cx = fromX + Math.cos(ang) * r;
+          const cz = fromZ + Math.sin(ang) * r;
+          if (checkWalkableForLoc(cx, cz, loc, list)) {
+            const score = Math.hypot(cx - prefX, cz - prefZ);
+            if (score < bestScore) {
+              bestScore = score;
+              best = { x: cx, z: cz };
+            }
+          }
+        }
+        if (best) return best;
+      }
+      return { x: fromX, z: fromZ };
+    }
+
+    function standUpFromSeat() {
+      const av = handles.avatarState;
+      const curLoc = propsRef.current.location;
+      const curList = propsRef.current.items;
+      if (av.seatedUid) {
+        const pref = av.seatExitPos ?? { x: av.x, z: av.z };
+        const safe = findNearestWalkable(av.x, av.z, pref.x, pref.z, curLoc, curList);
+        av.x = safe.x;
+        av.z = safe.z;
+        av.seatedUid = null;
+        av.seatExitPos = null;
+      }
+      av.y = curLoc === 'world' ? getCityGroundY(av.x, av.z) : 0;
+    }
+
+    function sitOnSeat(
+      uid: string,
+      seatPos: { x: number; y: number; z: number },
+      facingYaw: number,
+      approachPos?: { x: number; z: number }
+    ) {
+      const av = handles.avatarState;
+      const curLoc = propsRef.current.location;
+      const curList = propsRef.current.items;
+      const pref =
+        approachPos && checkWalkableForLoc(approachPos.x, approachPos.z, curLoc, curList)
+          ? approachPos
+          : { x: av.x, z: av.z };
+      av.seatExitPos = findNearestWalkable(
+        seatPos.x,
+        seatPos.z,
+        pref.x,
+        pref.z,
+        curLoc,
+        curList
+      );
+      av.path = [];
+      av.x = seatPos.x;
+      av.y = seatPos.y - 0.35;
+      av.z = seatPos.z;
+      av.yaw = facingYaw;
+      av.seatedUid = uid;
+    }
+
+    handles.standUp = standUpFromSeat;
+    handles.ensureUnstuck = () => {
+      const av = handles.avatarState;
+      const curLoc = propsRef.current.location;
+      const curList = propsRef.current.items;
+      if (!av.seatedUid && !checkWalkableForLoc(av.x, av.z, curLoc, curList)) {
+        const safe = findNearestWalkable(av.x, av.z, av.x, av.z, curLoc, curList);
+        av.x = safe.x;
+        av.z = safe.z;
+      }
     };
 
     // Unified proximity action evaluation (runs in Isometric Walk & Play View!)
@@ -643,8 +757,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         return {
           label: 'Press E · Stand Up',
           execute: () => {
-            av.seatedUid = null;
-            av.y = 0;
+            standUpFromSeat();
             propsRef.current.onEmoteChange('idle');
             sfx.playClick();
           },
@@ -692,13 +805,19 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           };
         }
 
-        let bestDist = 1.65;
+        let bestDist = 1.25;
         let bestItem: PlacedItem | null = null;
         for (const it of list) {
           const cat = getCatalogItem(it.catalogId);
           if (!cat || (!cat.interactive && !cat.sittable)) continue;
-          const t = getItemWorldTransform(it);
-          const dist = Math.hypot(av.x - t.x, av.z - t.z);
+          const [ew, ed] = getEffectiveSize(it.catalogId, it.rot);
+          const minX = -GRID_SIZE / 2 + it.gx;
+          const maxX = -GRID_SIZE / 2 + it.gx + ew;
+          const minZ = -GRID_SIZE / 2 + it.gz;
+          const maxZ = -GRID_SIZE / 2 + it.gz + ed;
+          const cx = Math.max(minX, Math.min(av.x, maxX));
+          const cz = Math.max(minZ, Math.min(av.z, maxZ));
+          const dist = Math.hypot(av.x - cx, av.z - cz);
           if (dist < bestDist) {
             bestDist = dist;
             bestItem = it;
@@ -728,12 +847,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
               return {
                 label: `Press E · Sit on ${cat.name}`,
                 execute: () => {
-                  av.path = [];
-                  av.x = seatInfo.seatPos.x;
-                  av.y = seatInfo.seatPos.y - 0.35;
-                  av.z = seatInfo.seatPos.z;
-                  av.yaw = seatInfo.facingYaw;
-                  av.seatedUid = bestItem!.uid;
+                  sitOnSeat(
+                    bestItem!.uid,
+                    seatInfo.seatPos,
+                    seatInfo.facingYaw,
+                    seatInfo.approachPos
+                  );
                   propsRef.current.onEmoteChange('sit');
                   sfx.playClick();
                 },
@@ -863,12 +982,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             return {
               label: `Press E · Sit on ${s.label}`,
               execute: () => {
-                av.path = [];
-                av.x = s.seatPos.x;
-                av.y = s.seatPos.y - 0.35;
-                av.z = s.seatPos.z;
-                av.yaw = s.facingYaw;
-                av.seatedUid = s.id;
+                sitOnSeat(s.id, s.seatPos, s.facingYaw, s.approachPos);
                 propsRef.current.onEmoteChange('sit');
                 sfx.playClick();
               },
@@ -930,12 +1044,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           return {
             label: `Press E · Sit on ${s.label}`,
             execute: () => {
-              av.path = [];
-              av.x = s.seatPos.x;
-              av.y = s.seatPos.y - 0.35;
-              av.z = s.seatPos.z;
-              av.yaw = s.facingYaw;
-              av.seatedUid = s.id;
+              sitOnSeat(s.id, s.seatPos, s.facingYaw, s.approachPos);
               propsRef.current.onEmoteChange('sit');
               sfx.playClick();
             },
@@ -971,8 +1080,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         e.preventDefault();
         const av = handles.avatarState;
         if (av.seatedUid) {
-          av.seatedUid = null;
-          av.y = 0;
+          standUpFromSeat();
           propsRef.current.onEmoteChange('idle');
         }
         if (av.jumpY <= 0.001) {
@@ -1321,7 +1429,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       if (loc === 'world') {
         const portalHits = raycaster.intersectObject(mainWorld.loftPortalGroup, true);
         if (portalHits.length > 0) {
-          av.seatedUid = null;
+          standUpFromSeat();
           av.pendingSeat = null;
           av.pendingNpcId = null;
           av.pendingHallDoor = null;
@@ -1369,10 +1477,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           while (obj && !obj.userData.npcId) obj = obj.parent;
           const npc = mainWorld.npcs.find((n) => n.id === obj?.userData.npcId);
           if (npc) {
-            av.seatedUid = null;
+            standUpFromSeat();
             av.pendingSeat = null;
             av.pendingPortal = null;
-            av.y = 0;
             const ang = Math.atan2(av.x - npc.x, av.z - npc.z);
             const stopX = npc.x + Math.sin(ang) * 1.15;
             const stopZ = npc.z + Math.cos(ang) * 1.15;
@@ -1403,10 +1510,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           while (obj && !obj.userData.worldSeatId) obj = obj.parent;
           const targetSeat = mainWorld.seats.find((s) => s.id === obj?.userData.worldSeatId);
           if (targetSeat) {
-            av.seatedUid = null;
+            standUpFromSeat();
             av.pendingPortal = null;
             av.pendingNpcId = null;
-            av.y = 0;
             av.path = buildPlazaPath(
               av.x,
               av.z,
@@ -1417,6 +1523,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
               uid: targetSeat.id,
               seatPos: targetSeat.seatPos,
               facingYaw: targetSeat.facingYaw,
+              exitPos: targetSeat.approachPos,
             };
             propsRef.current.onEmoteChange('walk');
             propsRef.current.onWalkHint?.(`Walking to ${targetSeat.label}`);
@@ -1428,7 +1535,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         const groundHits = raycaster.intersectObject(mainWorld.groundRaycastPlane);
         if (groundHits.length > 0) {
           const pt = groundHits[0].point;
-          av.seatedUid = null;
+          standUpFromSeat();
           av.pendingSeat = null;
           av.pendingPortal = null;
           av.pendingNpcId = null;
@@ -1446,9 +1553,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       if (loc === 'lobby') {
         const elevHits = raycaster.intersectObject(lobbyHandles.elevatorGroup, true);
         if (elevHits.length > 0) {
-          av.seatedUid = null;
+          standUpFromSeat();
           av.pendingSeat = null;
-          av.y = 0;
           if (Math.hypot(av.x - 0, av.z - -6.7) < 1.35) {
             releaseCursorForModal();
             sfx.playElevatorDing();
@@ -1465,9 +1571,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
         const streetDoorHits = raycaster.intersectObject(lobbyHandles.streetDoorGroup, true);
         if (streetDoorHits.length > 0) {
-          av.seatedUid = null;
+          standUpFromSeat();
           av.pendingSeat = null;
-          av.y = 0;
           av.path = [
             { x: 0, z: 6.9 },
             { x: 0, z: 7.7 },
@@ -1485,10 +1590,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         );
         if (npcHits.length > 0) {
           const morgan = lobbyHandles.npcs[0];
-          av.seatedUid = null;
+          standUpFromSeat();
           av.pendingSeat = null;
           av.pendingPortal = null;
-          av.y = 0;
           av.path = [{ x: -4.15, z: -1.2 }];
           morgan.greetTimer = 4.0;
           propsRef.current.onEmoteChange('walk');
@@ -1503,14 +1607,14 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         );
         if (seatHits.length > 0) {
           const s = lobbyHandles.seats[0];
-          av.seatedUid = null;
+          standUpFromSeat();
           av.pendingPortal = null;
-          av.y = 0;
           av.path = [{ x: s.approachPos.x, z: s.approachPos.z }];
           av.pendingSeat = {
             uid: s.id,
             seatPos: s.seatPos,
             facingYaw: s.facingYaw,
+            exitPos: s.approachPos,
           };
           propsRef.current.onEmoteChange('walk');
           sfx.playClick();
@@ -1521,10 +1625,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         if (floorHits.length > 0) {
           const pt = floorHits[0].point;
           if (lobbyHandles.isWalkable(pt.x, pt.z)) {
-            av.seatedUid = null;
+            standUpFromSeat();
             av.pendingSeat = null;
             av.pendingPortal = null;
-            av.y = 0;
             av.path = [{ x: pt.x, z: pt.z }];
             propsRef.current.onEmoteChange('walk');
             rippleMesh.position.set(pt.x, 0.03, pt.z);
@@ -1672,10 +1775,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
       const doorHits = raycaster.intersectObject(roomHandles.exitDoorGroup, true);
       if (doorHits.length > 0) {
-        av.seatedUid = null;
+        standUpFromSeat();
         av.pendingSeat = null;
         av.pendingNpcId = null;
-        av.y = 0;
 
         const nearSuiteDoor = Math.hypot(av.x - -6.4, av.z - SUITE_DOOR_Z) < 1.85;
         if (loc === 'room' && !propsRef.current.roomDoorUnlocked && nearSuiteDoor) {
@@ -1737,24 +1839,23 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             if (cat.sittable) {
               const seatInfo = getSeatWorldInfo(item);
               if (seatInfo) {
-                av.seatedUid = null;
+                standUpFromSeat();
                 av.pendingPortal = null;
-                av.y = 0;
-                const path = findPath(
-                  av.x,
-                  av.z,
+                const safeApproach = findNearestWalkable(
+                  seatInfo.seatPos.x,
+                  seatInfo.seatPos.z,
                   seatInfo.approachPos.x,
                   seatInfo.approachPos.z,
+                  loc,
                   list
                 );
-                av.path =
-                  path.length > 0
-                    ? path
-                    : [{ x: seatInfo.approachPos.x, z: seatInfo.approachPos.z }];
+                const path = findPath(av.x, av.z, safeApproach.x, safeApproach.z, list);
+                av.path = path.length > 0 ? path : [safeApproach];
                 av.pendingSeat = {
                   uid: item.uid,
                   seatPos: seatInfo.seatPos,
                   facingYaw: seatInfo.facingYaw,
+                  exitPos: safeApproach,
                 };
                 propsRef.current.onEmoteChange('walk');
                 propsRef.current.onWalkHint?.(`Walking to sit on ${cat.name}`);
@@ -1769,10 +1870,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       const floorHits = raycaster.intersectObject(roomHandles.floorRaycastPlane);
       if (floorHits.length > 0) {
         const pt = floorHits[0].point;
-        av.seatedUid = null;
+        standUpFromSeat();
         av.pendingSeat = null;
         av.pendingPortal = null;
-        av.y = 0;
         const path = findPath(av.x, av.z, pt.x, pt.z, list);
         if (path.length > 0) {
           av.path = path;
@@ -1847,22 +1947,6 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     let lastStreetLabel = '';
 
-    function checkWalkableForLoc(x: number, z: number, loc: WorldLocation, list: PlacedItem[]) {
-      if (loc === 'world') {
-        return isMainWorldPosWalkable(
-          x,
-          z,
-          mainWorld.obstacles,
-          0.28,
-          propsRef.current.mainDoorUnlocked
-        );
-      }
-      if (loc === 'lobby') return lobbyHandles.isWalkable(x, z);
-      if (loc === 'hallway') return hallwayHandles.isWalkable(x, z);
-      const suiteOpen = loc === 'resident_room' || propsRef.current.roomDoorUnlocked;
-      return isWorldPosWalkable(x, z, list, 0.25, suiteOpen);
-    }
-
     function tick() {
       if (disposed) return;
       const delta = Math.min(clock.getDelta(), 0.08);
@@ -1881,6 +1965,13 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       const prevAvX = av.x;
       const prevAvZ = av.z;
 
+      // Auto-unstuck if avatar overlaps any couch/furniture/obstacle while standing
+      if (canWalk && !av.seatedUid && !checkWalkableForLoc(av.x, av.z, currentLoc, currentItems)) {
+        const safe = findNearestWalkable(av.x, av.z, av.x, av.z, currentLoc, currentItems);
+        av.x = safe.x;
+        av.z = safe.z;
+      }
+
       // 1. Movement (WASD + Click Path)
       if (canWalk) {
         let moveX = 0;
@@ -1897,8 +1988,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           av.pendingHallDoor = null;
           av.pendingNpcId = null;
           if (av.seatedUid) {
-            av.seatedUid = null;
-            av.y = currentLoc === 'world' ? getCityGroundY(av.x, av.z) : 0;
+            standUpFromSeat();
           }
 
           let dirX = 0;
@@ -2039,12 +2129,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
                   }
                   propsRef.current.onEmoteChange('idle');
                 } else if (av.pendingSeat) {
-                  av.x = av.pendingSeat.seatPos.x;
-                  av.y = av.pendingSeat.seatPos.y - 0.35;
-                  av.z = av.pendingSeat.seatPos.z;
-                  av.yaw = av.pendingSeat.facingYaw;
-                  av.seatedUid = av.pendingSeat.uid;
+                  const ps = av.pendingSeat;
                   av.pendingSeat = null;
+                  sitOnSeat(ps.uid, ps.seatPos, ps.facingYaw, ps.exitPos);
                   propsRef.current.onEmoteChange('sit');
                 } else if (av.pendingNpcId) {
                   const npc = mainWorld.npcs.find((n) => n.id === av.pendingNpcId);
@@ -2384,8 +2471,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       if (av.seatedUid && (currentLoc === 'room' || currentLoc === 'resident_room')) {
         const seatItem = currentItems.find((it) => it.uid === av.seatedUid);
         if (!seatItem) {
-          av.seatedUid = null;
-          av.y = 0;
+          standUpFromSeat();
           propsRef.current.onEmoteChange('idle');
         }
       }
@@ -2550,6 +2636,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     h.avatarState.pendingHallDoor = null;
     h.avatarState.pendingNpcId = null;
     h.avatarState.seatedUid = null;
+    h.avatarState.seatExitPos = null;
     h.avatarState.doorSwingTimer = 0;
     h.avatarState.portalCooldown = 0.95;
 
@@ -2749,6 +2836,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     if (mode === 'walk' || location !== 'room') {
       h.selectionBox.visible = false;
       if (h.ghostGroup) h.ghostGroup.visible = false;
+      h.ensureUnstuck();
     }
   }, [mode, location]);
 
@@ -2809,8 +2897,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       h.avatarState.jumpVel = 4.4;
     }
     if (activeEmote !== 'sit' && h.avatarState.seatedUid) {
-      h.avatarState.seatedUid = null;
-      h.avatarState.y = 0;
+      h.standUp();
     }
     if (activeEmote !== 'walk') {
       h.avatarState.path = [];
