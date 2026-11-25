@@ -248,25 +248,31 @@ export function buildRoomArchitecture(
   glassPane.position.set(-half - 0.1, 1.78, -0.5);
   roomGroup.add(glassPane);
 
-  // Exterior Sky & City Horizon outside hotel window
+  // Exterior 3D Sky & Textured City Skyline outside hotel window
   const windowSkyMat = new THREE.MeshBasicMaterial({ color: 0xbfe2ff });
-  const skyPanel = new THREE.Mesh(new THREE.PlaneGeometry(7.4, 2.4), windowSkyMat);
+  const skyPanel = new THREE.Mesh(new THREE.PlaneGeometry(14.0, 6.2), windowSkyMat);
   skyPanel.rotation.y = Math.PI / 2;
-  skyPanel.position.set(-half - 0.42, 1.78, -0.5);
+  skyPanel.position.set(-half - 5.2, 2.3, -0.5);
   roomGroup.add(skyPanel);
 
   const windowSunMat = new THREE.MeshBasicMaterial({ color: 0xfff5d6 });
-  const sunDisc = new THREE.Mesh(new THREE.CircleGeometry(0.42, 24), windowSunMat);
+  const sunDisc = new THREE.Mesh(new THREE.CircleGeometry(0.62, 24), windowSunMat);
   sunDisc.rotation.y = Math.PI / 2;
-  sunDisc.position.set(-half - 0.39, 2.24, -2.2);
+  sunDisc.position.set(-half - 4.9, 3.1, -2.5);
   roomGroup.add(sunDisc);
 
-  const cityMat = new THREE.MeshBasicMaterial({ color: 0x8ea7c2 });
-  for (let b = 0; b < 8; b++) {
-    const bh = 0.42 + ((b * 37) % 5) * 0.16;
-    const bldg = new THREE.Mesh(new THREE.PlaneGeometry(0.82, bh), cityMat);
-    bldg.rotation.y = Math.PI / 2;
-    bldg.position.set(-half - 0.37, 0.72 + bh / 2, -3.4 + b * 0.85);
+  const cityMat = new THREE.MeshStandardMaterial({
+    color: 0x6f849c,
+    roughness: 0.65,
+    emissive: new THREE.Color(0xffdfa6),
+    emissiveIntensity: 0.15,
+  });
+  for (let b = 0; b < 9; b++) {
+    const bh = 1.6 + ((b * 37) % 5) * 0.65;
+    const bw = 0.85 + (b % 3) * 0.25;
+    const bd = 0.9 + ((b * 13) % 3) * 0.35;
+    const bldg = new THREE.Mesh(new THREE.BoxGeometry(bd, bh, bw), cityMat);
+    bldg.position.set(-half - 2.1 - (b % 3) * 1.05, bh / 2 - 0.1, -4.4 + b * 0.98);
     roomGroup.add(bldg);
   }
 
@@ -397,27 +403,34 @@ export function buildRoomArchitecture(
   westCap.position.set(-half - wallThick / 2, wallHeight + 0.03, -wallThick / 2);
   roomGroup.add(westCap);
 
-  // --- Edit Mode Architectural Floor Grid ---
+  // --- Edit Mode Architectural Floor Grid (1m primary + 0.5m sub-grid) ---
   const gridOverlay = new THREE.Group();
   gridOverlay.visible = false;
 
   const lineMat = new THREE.LineBasicMaterial({
     color: 0xffffff,
     transparent: true,
-    opacity: 0.36,
+    opacity: 0.34,
+    depthWrite: false,
+  });
+  const subLineMat = new THREE.LineBasicMaterial({
+    color: 0x39ff14,
+    transparent: true,
+    opacity: 0.14,
     depthWrite: false,
   });
   const pts: THREE.Vector3[] = [];
-  for (let i = 0; i <= GRID_SIZE; i++) {
-    const p = -half + i;
-    pts.push(new THREE.Vector3(p, 0.014, -half));
-    pts.push(new THREE.Vector3(p, 0.014, half));
-    pts.push(new THREE.Vector3(-half, 0.014, p));
-    pts.push(new THREE.Vector3(half, 0.014, p));
+  const subPts: THREE.Vector3[] = [];
+  for (let i = 0; i <= GRID_SIZE * 2; i++) {
+    const p = -half + i * 0.5;
+    const target = i % 2 === 0 ? pts : subPts;
+    target.push(new THREE.Vector3(p, 0.014, -half));
+    target.push(new THREE.Vector3(p, 0.014, half));
+    target.push(new THREE.Vector3(-half, 0.014, p));
+    target.push(new THREE.Vector3(half, 0.014, p));
   }
-  const gridGeo = new THREE.BufferGeometry().setFromPoints(pts);
-  const gridLines = new THREE.LineSegments(gridGeo, lineMat);
-  gridOverlay.add(gridLines);
+  gridOverlay.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), lineMat));
+  gridOverlay.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(subPts), subLineMat));
   roomGroup.add(gridOverlay);
 
   let currentFloorTex: THREE.CanvasTexture | null = floorTopMat.map as THREE.CanvasTexture;
@@ -440,15 +453,18 @@ export function buildRoomArchitecture(
     if (mood === 'morning') {
       windowSkyMat.color.set(0xbfe2ff);
       windowSunMat.color.set(0xfff5d6);
-      cityMat.color.set(0x8ea7c2);
+      cityMat.color.set(0x7c93ad);
+      cityMat.emissiveIntensity = 0.08;
     } else if (mood === 'golden') {
       windowSkyMat.color.set(0xf5a67e);
       windowSunMat.color.set(0xffdf85);
-      cityMat.color.set(0x7c5d75);
+      cityMat.color.set(0x6d526b);
+      cityMat.emissiveIntensity = 0.28;
     } else {
-      windowSkyMat.color.set(0x161c33);
+      windowSkyMat.color.set(0x11172a);
       windowSunMat.color.set(0xe2e8f0);
-      cityMat.color.set(0x28314d);
+      cityMat.color.set(0x222c46);
+      cityMat.emissiveIntensity = 0.52;
     }
   }
 

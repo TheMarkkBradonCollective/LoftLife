@@ -40,7 +40,8 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
       const padT = 34;
       const padB = 34;
 
-      const { uLines, zLines, blocks, bounds, loftCenter } = CITY_LAYOUT;
+      const { uLines, zLines, uIsMajor, zIsMajor, blocks, bounds, loftCenter, metroLineZ, busStops } =
+        CITY_LAYOUT;
 
       const minX = Math.min(
         uzToWorldX(bounds.uMin, bounds.zMin),
@@ -93,14 +94,19 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
       }
 
       // Draw 26 Diagonal Streets (A St .. Z St)
-      ctx.lineWidth = 1.4;
       for (let i = 0; i < DIAGONAL_LETTERS.length; i++) {
         const u = uLines[i];
         const top = toPx(uzToWorldX(u, bounds.zMin), bounds.zMin);
         const bot = toPx(uzToWorldX(u, bounds.zMax), bounds.zMax);
         const isM = i === 12;
+        const isMajor = uIsMajor[i];
 
-        ctx.strokeStyle = isM ? 'rgba(57, 255, 20, 0.85)' : 'rgba(148, 184, 158, 0.25)';
+        ctx.lineWidth = isM ? 2.4 : isMajor ? 2.0 : 1.1;
+        ctx.strokeStyle = isM
+          ? 'rgba(57, 255, 20, 0.85)'
+          : isMajor
+          ? 'rgba(180, 212, 190, 0.42)'
+          : 'rgba(148, 184, 158, 0.22)';
         ctx.beginPath();
         ctx.moveTo(top[0], top[1]);
         ctx.lineTo(bot[0], bot[1]);
@@ -119,8 +125,14 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
         const left = toPx(uzToWorldX(bounds.uMin, z), z);
         const right = toPx(uzToWorldX(bounds.uMax, z), z);
         const is15 = j === 14;
+        const isMajor = zIsMajor[j];
 
-        ctx.strokeStyle = is15 ? 'rgba(57, 255, 20, 0.85)' : 'rgba(148, 184, 158, 0.22)';
+        ctx.lineWidth = is15 ? 2.4 : isMajor ? 2.0 : 1.0;
+        ctx.strokeStyle = is15
+          ? 'rgba(57, 255, 20, 0.85)'
+          : isMajor
+          ? 'rgba(180, 212, 190, 0.38)'
+          : 'rgba(148, 184, 158, 0.2)';
         ctx.beginPath();
         ctx.moveTo(left[0], left[1]);
         ctx.lineTo(right[0], right[1]);
@@ -132,6 +144,35 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
           ctx.textAlign = 'right';
           ctx.fillText(ordinalStreet(j + 1).replace(' St', ''), left[0] - 8, left[1] + 3);
         }
+      }
+
+      // Elevated Metro Line along 16th St
+      const railLeft = toPx(uzToWorldX(bounds.uMin, metroLineZ), metroLineZ);
+      const railRight = toPx(uzToWorldX(bounds.uMax, metroLineZ), metroLineZ);
+      ctx.save();
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 2.2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(railLeft[0], railLeft[1]);
+      ctx.lineTo(railRight[0], railRight[1]);
+      ctx.stroke();
+      ctx.restore();
+
+      const [msx, msy] = toPx(uzToWorldX(uLines[12], metroLineZ), metroLineZ);
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(msx - 5, msy - 3, 10, 6);
+      ctx.font = 'bold 9px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('METRO 16TH', msx + 8, msy + 3);
+
+      // Bus Stops
+      ctx.fillStyle = '#fbbf24';
+      for (const bs of busStops) {
+        const [bx, by] = toPx(bs.x, bs.z);
+        ctx.beginPath();
+        ctx.arc(bx, by, 2.5, 0, Math.PI * 2);
+        ctx.fill();
       }
 
       // LoftLife Hotel Home Marker
@@ -209,10 +250,14 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
           />
 
           <div className="w-full flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300 px-1">
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4">
               <span className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded-sm bg-[#39ff14] inline-block" />
                 LoftLife Plaza (M St &amp; 15th St)
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-4 h-0.5 border-t-2 border-dashed border-[#38bdf8] inline-block" />
+                Elevated Metro (16th St)
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded-sm bg-[#1d4d28] inline-block" />

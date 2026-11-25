@@ -6,6 +6,7 @@ import {
   Camera,
   ChevronDown,
   ChevronUp,
+  Coffee,
   Copy,
   DoorOpen,
   Eraser,
@@ -21,6 +22,7 @@ import {
   Layers,
   Map as MapIcon,
   MessageCircle,
+  Monitor,
   Move,
   Music,
   Paintbrush,
@@ -33,9 +35,11 @@ import {
   Sunset,
   Moon,
   Trash2,
+  Trees,
   Tv,
   Undo2,
   User,
+  Utensils,
   Volume2,
   VolumeX,
   Footprints,
@@ -59,7 +63,7 @@ import {
   ROOM_PRESETS,
   WALL_STYLES,
 } from './game/catalog';
-import { getEffectiveSize, isValidPlacement } from './game/gridMath';
+import { getEffectiveSize, isValidPlacement, SNAP_STEP, snapGrid } from './game/gridMath';
 import type {
   ActiveResident,
   AvatarConfig,
@@ -118,12 +122,19 @@ function loadSavedState(): SavedState {
 function getCategoryIcon(catalogId: string) {
   switch (catalogId) {
     case 'plush_sofa':
+    case 'sectional_sofa':
       return <Sofa className="w-4 h-4" />;
     case 'lounge_chair':
     case 'bar_stool':
       return <Armchair className="w-4 h-4" />;
     case 'cozy_bed':
       return <BedDouble className="w-4 h-4" />;
+    case 'dining_set':
+      return <Utensils className="w-4 h-4" />;
+    case 'espresso_bar':
+      return <Coffee className="w-4 h-4" />;
+    case 'dual_desk':
+      return <Monitor className="w-4 h-4" />;
     case 'coffee_table':
     case 'side_desk':
       return <Layers className="w-4 h-4" />;
@@ -141,10 +152,15 @@ function getCategoryIcon(catalogId: string) {
       return <LampDesk className="w-4 h-4" />;
     case 'monstera_plant':
       return <Sprout className="w-4 h-4" />;
+    case 'olive_tree':
+      return <Trees className="w-4 h-4" />;
     case 'woven_rug':
       return <Layers className="w-4 h-4" />;
+    case 'neon_sign':
+      return <Sparkles className="w-4 h-4" />;
     case 'wall_art':
     case 'wall_shelf':
+    case 'floor_mirror':
       return <Frame className="w-4 h-4" />;
     default:
       return <Sofa className="w-4 h-4" />;
@@ -450,8 +466,8 @@ export default function App() {
       const nextRot = ((selectedItem.rot + 1) % 4) as 0 | 1 | 2 | 3;
       const [ew, ed] = getEffectiveSize(selectedItem.catalogId, nextRot);
       // Adjust position slightly if near wall boundary when rotating rectangular item
-      const clampedGx = Math.min(selectedItem.gx, GRID_SIZE - ew);
-      const clampedGz = Math.min(selectedItem.gz, GRID_SIZE - ed);
+      const clampedGx = snapGrid(Math.max(0, Math.min(selectedItem.gx, GRID_SIZE - ew)));
+      const clampedGz = snapGrid(Math.max(0, Math.min(selectedItem.gz, GRID_SIZE - ed)));
       const candidate = { ...selectedItem, gx: clampedGx, gz: clampedGz, rot: nextRot };
       if (isValidPlacement(candidate, items)) {
         sfx.playClick();
@@ -532,6 +548,51 @@ export default function App() {
           setSelectedUid(null);
         } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedUid) {
           handleDeleteSelected();
+        } else if (
+          !placingCatalogId &&
+          !movingUid &&
+          selectedItem &&
+          selectedCatalog &&
+          ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)
+        ) {
+          e.preventDefault();
+          let dx = 0;
+          let dz = 0;
+          if (e.key === 'ArrowLeft') dx = -SNAP_STEP;
+          if (e.key === 'ArrowRight') dx = SNAP_STEP;
+          if (e.key === 'ArrowUp') dz = -SNAP_STEP;
+          if (e.key === 'ArrowDown') dz = SNAP_STEP;
+
+          let nextGx = selectedItem.gx;
+          let nextGz = selectedItem.gz;
+          if (selectedCatalog.layer === 'wall') {
+            if (selectedItem.wall === 'west') {
+              nextGz = snapGrid(
+                Math.max(0, Math.min(GRID_SIZE - selectedCatalog.size[0], selectedItem.gz + dz))
+              );
+            } else {
+              nextGx = snapGrid(
+                Math.max(0, Math.min(GRID_SIZE - selectedCatalog.size[0], selectedItem.gx + dx))
+              );
+            }
+          } else {
+            const [ew, ed] = getEffectiveSize(selectedItem.catalogId, selectedItem.rot);
+            nextGx = snapGrid(Math.max(0, Math.min(GRID_SIZE - ew, selectedItem.gx + dx)));
+            nextGz = snapGrid(Math.max(0, Math.min(GRID_SIZE - ed, selectedItem.gz + dz)));
+          }
+
+          if (nextGx !== selectedItem.gx || nextGz !== selectedItem.gz) {
+            const candidate = { ...selectedItem, gx: nextGx, gz: nextGz };
+            if (isValidPlacement(candidate, items)) {
+              sfx.playClick();
+              pushHistory(items);
+              setItems((prev) =>
+                prev.map((it) => (it.uid === selectedItem.uid ? candidate : it))
+              );
+            } else {
+              sfx.playRemove();
+            }
+          }
         }
       }
     };
@@ -543,6 +604,12 @@ export default function App() {
     cityMapOpen,
     doorTerminalOpen,
     elevatorModalOpen,
+    placingCatalogId,
+    movingUid,
+    selectedItem,
+    selectedCatalog,
+    items,
+    pushHistory,
     rotateSelectedOrPlacing,
     selectedUid,
     handleDeleteSelected,
@@ -1126,7 +1193,7 @@ export default function App() {
               <div className="text-xs opacity-70 flex items-center gap-2 whitespace-nowrap">
                 {viewMode === 'play' ? (
                   <>
-                    <span>WASD move · Shift sprint · Space jump</span>
+                    <span>WASD move (camera auto-follows) · Shift sprint · Space jump</span>
                     <span aria-hidden="true">·</span>
                     <span>Mouse look (click to lock)</span>
                     <span aria-hidden="true">·</span>
@@ -1225,7 +1292,10 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="hidden md:inline text-[11px] text-slate-400 mr-2">
+                    Drag items to move · Arrows nudge 0.5m · R rotate
+                  </span>
                   <button
                     type="button"
                     disabled={history.length === 0}

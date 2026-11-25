@@ -18,6 +18,7 @@ import {
   getSeatWorldInfo,
   isValidPlacement,
   isWorldPosWalkable,
+  snapGrid,
 } from '../game/gridMath';
 import {
   CITY_LAYOUT,
@@ -31,6 +32,7 @@ import {
   buildMainWorld,
   getCityGroundY,
   isMainWorldPosWalkable,
+  resolveCityCameraScale,
 } from '../game/worldBuilder';
 import type {
   ActiveResident,
@@ -322,6 +324,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       yaw: number;
       pitch: number;
       dist: number;
+      currentScale: number;
+      lastManualLookTime: number;
     };
     avatarState: {
       x: number;
@@ -418,7 +422,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       36,
       mount.clientWidth / mount.clientHeight,
       0.1,
-      450
+      900
     );
     camera.position.set(14.5, 12.0, 14.5);
 
@@ -573,6 +577,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         yaw: 0,
         pitch: 0.26,
         dist: 3.7,
+        currentScale: 1.0,
+        lastManualLookTime: 0,
       },
       avatarState: {
         x: 0.5,
@@ -974,12 +980,27 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           sfx.playClick();
         }
       }
+      if (e.code === 'KeyR' && dragCandidate?.active) {
+        const cat = getCatalogItem(dragCandidate.catalogId);
+        if (cat && cat.layer !== 'wall') {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          dragCandidate.rot = ((dragCandidate.rot + 1) % 4) as 0 | 1 | 2 | 3;
+          sfx.playClick();
+          updateGhostAtPointer(lastLookX, lastLookY);
+        }
+      }
     };
     const onKeyUp = (e: KeyboardEvent) => {
       keys[e.code] = false;
     };
     const onWindowBlur = () => {
       for (const k of Object.keys(keys)) keys[k] = false;
+      draggingLook = false;
+      if (dragCandidate) {
+        clearDragGhost();
+        if (propsRef.current.viewMode !== 'play') controls.enabled = true;
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
@@ -999,6 +1020,28 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     let lastLookY = 0;
     let draggingLook = false;
     let lastMoveRaycast = 0;
+    let dragCandidate: {
+      uid: string;
+      catalogId: string;
+      rot: 0 | 1 | 2 | 3;
+      color: string;
+      startX: number;
+      startY: number;
+      active: boolean;
+    } | null = null;
+    let dragGhostGroup: THREE.Group | null = null;
+
+    function clearDragGhost() {
+      if (dragGhostGroup) {
+        scene.remove(dragGhostGroup);
+        dragGhostGroup = null;
+      }
+      if (dragCandidate) {
+        const orig = handles.furnitureMap.get(dragCandidate.uid);
+        if (orig) orig.visible = true;
+        dragCandidate = null;
+      }
+    }
 
     function updateNDC(clientX: number, clientY: number) {
       const rect = renderer.domElement.getBoundingClientRect();
@@ -1012,17 +1055,24 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         mode: m,
         placingCatalogId: pId,
         movingUid: mUid,
-        placingRotation: rot,
+        placingRotation: pRot,
         items: list,
       } = propsRef.current;
 
-      if (loc !== 'room' || m !== 'edit' || (!pId && !mUid)) {
+      const isDirectDrag = Boolean(dragCandidate && dragCandidate.active);
+      const targetGhost = isDirectDrag ? dragGhostGroup : handles.ghostGroup;
+
+      if (loc !== 'room' || m !== 'edit' || (!pId && !mUid && !isDirectDrag)) {
         if (handles.ghostGroup) handles.ghostGroup.visible = false;
+        if (dragGhostGroup) dragGhostGroup.visible = false;
         return;
       }
 
-      const activeCatalogId =
-        pId || list.find((it) => it.uid === mUid)?.catalogId || null;
+      const activeUid = isDirectDrag ? dragCandidate!.uid : mUid ?? undefined;
+      const rot = isDirectDrag ? dragCandidate!.rot : pRot;
+      const activeCatalogId = isDirectDrag
+        ? dragCandidate!.catalogId
+        : pId || list.find((it) => it.uid === mUid)?.catalogId || null;
       if (!activeCatalogId) return;
       const cat = getCatalogItem(activeCatalogId);
       if (!cat) return;
@@ -1046,12 +1096,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           if (hit.object === roomHandles.westWallRaycastPlane) {
             wall = 'west';
             gx = 0;
-            gz = Math.round(hit.point.z + GRID_SIZE / 2 - cat.size[0] / 2);
+            gz = snapGrid(hit.point.z + GRID_SIZE / 2 - cat.size[0] / 2);
             gz = Math.max(0, Math.min(GRID_SIZE - cat.size[0], gz));
           } else {
             wall = 'north';
             gz = 0;
-            gx = Math.round(hit.point.x + GRID_SIZE / 2 - cat.size[0] / 2);
+            gx = snapGrid(hit.point.x + GRID_SIZE / 2 - cat.size[0] / 2);
             gx = Math.max(0, Math.min(GRID_SIZE - cat.size[0], gx));
           }
         }
@@ -1061,21 +1111,21 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           foundHit = true;
           const pt = floorHits[0].point;
           const [ew, ed] = getEffectiveSize(activeCatalogId, rot);
-          gx = Math.round(pt.x + GRID_SIZE / 2 - ew / 2);
-          gz = Math.round(pt.z + GRID_SIZE / 2 - ed / 2);
+          gx = snapGrid(pt.x + GRID_SIZE / 2 - ew / 2);
+          gz = snapGrid(pt.z + GRID_SIZE / 2 - ed / 2);
           gx = Math.max(0, Math.min(GRID_SIZE - ew, gx));
           gz = Math.max(0, Math.min(GRID_SIZE - ed, gz));
         }
       }
 
-      if (!foundHit || !handles.ghostGroup) {
-        if (handles.ghostGroup) handles.ghostGroup.visible = false;
+      if (!foundHit || !targetGhost) {
+        if (targetGhost) targetGhost.visible = false;
         return;
       }
 
       const valid = isValidPlacement(
         {
-          uid: mUid ?? undefined,
+          uid: activeUid,
           catalogId: activeCatalogId,
           gx,
           gz,
@@ -1096,12 +1146,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         wall,
         color: '#ffffff',
       });
-      handles.ghostGroup.visible = true;
-      handles.ghostGroup.position.set(t.x, t.y + 0.01, t.z);
-      handles.ghostGroup.rotation.y = t.rotY;
+      targetGhost.visible = true;
+      targetGhost.position.set(t.x, t.y + 0.01, t.z);
+      targetGhost.rotation.y = t.rotY;
 
       const tint = valid ? 0x39ff14 : 0xf87171;
-      handles.ghostGroup.traverse((obj) => {
+      targetGhost.traverse((obj) => {
         if ((obj as THREE.Mesh).isMesh) {
           const mat = (obj as THREE.Mesh).material as THREE.MeshStandardMaterial;
           mat.color.setHex(tint);
@@ -1116,6 +1166,37 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       lastLookY = e.clientY;
       if (propsRef.current.viewMode === 'play') {
         draggingLook = true;
+        return;
+      }
+      if (
+        e.button === 0 &&
+        !propsRef.current.modalOpen &&
+        propsRef.current.location === 'room' &&
+        propsRef.current.mode === 'edit' &&
+        !propsRef.current.placingCatalogId &&
+        !propsRef.current.movingUid
+      ) {
+        updateNDC(e.clientX, e.clientY);
+        raycaster.setFromCamera(pointerNDC, camera);
+        const furHits = raycaster.intersectObjects(furnitureRoot.children, true);
+        if (furHits.length > 0) {
+          let obj: THREE.Object3D | null = furHits[0].object;
+          while (obj && !obj.userData.uid) obj = obj.parent;
+          const uid = obj?.userData.uid as string | undefined;
+          const item = uid ? propsRef.current.items.find((it) => it.uid === uid) : undefined;
+          if (item) {
+            dragCandidate = {
+              uid: item.uid,
+              catalogId: item.catalogId,
+              rot: item.rot,
+              color: item.color,
+              startX: e.clientX,
+              startY: e.clientY,
+              active: false,
+            };
+            controls.enabled = false;
+          }
+        }
       }
     };
 
@@ -1128,6 +1209,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           const my = isLocked ? e.movementY : e.clientY - lastLookY;
           lastLookX = e.clientX;
           lastLookY = e.clientY;
+          handles.playCam.lastManualLookTime = performance.now();
           handles.playCam.yaw -= mx * 0.0042;
           handles.playCam.pitch = THREE.MathUtils.clamp(
             handles.playCam.pitch + my * 0.0036,
@@ -1136,6 +1218,33 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           );
         }
         return;
+      }
+
+      lastLookX = e.clientX;
+      lastLookY = e.clientY;
+
+      if (dragCandidate && !dragCandidate.active) {
+        if (Math.hypot(e.clientX - dragCandidate.startX, e.clientY - dragCandidate.startY) > 5) {
+          dragCandidate.active = true;
+          const orig = handles.furnitureMap.get(dragCandidate.uid);
+          if (orig) orig.visible = false;
+          handles.selectionBox.visible = false;
+          dragGhostGroup = buildFurnitureGroup(
+            {
+              uid: 'ghost',
+              catalogId: dragCandidate.catalogId,
+              gx: 0,
+              gz: 0,
+              rot: dragCandidate.rot,
+              color: dragCandidate.color,
+            },
+            { maxAnisotropy: handles.maxAnisotropy, isGhost: true, isSoftwareGl: handles.isSoftwareGl }
+          );
+          dragGhostGroup.visible = false;
+          scene.add(dragGhostGroup);
+          updateGhostAtPointer(e.clientX, e.clientY);
+          return;
+        }
       }
 
       const now = performance.now();
@@ -1149,6 +1258,32 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     const onPointerUp = (e: PointerEvent) => {
       draggingLook = false;
+      if (propsRef.current.viewMode !== 'play') {
+        controls.enabled = true;
+      }
+      if (dragCandidate) {
+        const cand = dragCandidate;
+        if (cand.active) {
+          updateGhostAtPointer(e.clientX, e.clientY);
+          const { valid, gx, gz, wall } = handles.ghostState;
+          clearDragGhost();
+          if (valid && !propsRef.current.modalOpen) {
+            const cat = getCatalogItem(cand.catalogId);
+            sfx.playPlace();
+            propsRef.current.onFinishMove(
+              cand.uid,
+              gx,
+              gz,
+              cat?.layer === 'wall' ? (wall === 'west' ? 1 : 0) : cand.rot,
+              wall
+            );
+          } else {
+            sfx.playRemove();
+          }
+          return;
+        }
+        clearDragGhost();
+      }
       if (propsRef.current.modalOpen) return;
       const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
       if (dist > 6) return;
@@ -1652,6 +1787,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     const onWheel = (e: WheelEvent) => {
       if (propsRef.current.viewMode === 'play') {
+        handles.playCam.lastManualLookTime = performance.now();
         handles.playCam.dist = THREE.MathUtils.clamp(
           handles.playCam.dist + e.deltaY * 0.0025,
           2.1,
@@ -1798,6 +1934,18 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           const targetYaw = Math.atan2(nx, nz);
           av.yaw += shortestAngleDiff(av.yaw, targetYaw) * (1 - Math.exp(-15 * delta));
           isMoving = true;
+
+          // Auto-follow camera behind player facing when walking in Play View
+          if (
+            currentView === 'play' &&
+            moveZ <= 0 &&
+            performance.now() - handles.playCam.lastManualLookTime > 550
+          ) {
+            const targetCamYaw = av.yaw + Math.PI;
+            handles.playCam.yaw +=
+              shortestAngleDiff(handles.playCam.yaw, targetCamYaw) *
+              (1 - Math.exp(-3.2 * delta));
+          }
         } else if (av.path.length > 0 && currentView === 'isometric') {
           const target = av.path[0];
           const dx = target.x - av.x;
@@ -2092,47 +2240,60 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         let desiredY = Math.max(0.45, targetY + vertOffset);
         let desiredZ = targetZ - fwdZ * horizDist;
 
-        // Keep chase camera inside North/West walls indoors
-        if (currentLoc === 'room' || currentLoc === 'resident_room') {
-          let scale = 1.0;
+        // Spring-arm camera occlusion avoidance (outdoor skyscrapers & viaduct + indoor walls)
+        let hitScale = 1.0;
+        if (currentLoc === 'world') {
+          hitScale = resolveCityCameraScale(
+            targetX,
+            targetY,
+            targetZ,
+            desiredX,
+            desiredY,
+            desiredZ,
+            mainWorld.cameraOccluders
+          );
+        } else if (currentLoc === 'room' || currentLoc === 'resident_room') {
           const minWall = -GRID_SIZE / 2 + 0.35;
           if (desiredX < minWall && targetX > minWall) {
-            scale = Math.min(scale, (targetX - minWall) / (targetX - desiredX));
+            hitScale = Math.min(hitScale, (targetX - minWall) / (targetX - desiredX));
           }
           if (desiredZ < minWall && targetZ > minWall) {
-            scale = Math.min(scale, (targetZ - minWall) / (targetZ - desiredZ));
+            hitScale = Math.min(hitScale, (targetZ - minWall) / (targetZ - desiredZ));
           }
-          scale = Math.max(0.28, scale);
-          desiredX = targetX + (desiredX - targetX) * scale;
-          desiredY = targetY + (desiredY - targetY) * scale;
-          desiredZ = targetZ + (desiredZ - targetZ) * scale;
+          hitScale = Math.max(0.28, hitScale);
         } else if (currentLoc === 'hallway') {
-          let scale = 1.0;
           if (desiredX < -11.6 && targetX > -11.6) {
-            scale = Math.min(scale, (targetX - -11.6) / (targetX - desiredX));
+            hitScale = Math.min(hitScale, (targetX - -11.6) / (targetX - desiredX));
           }
           if (desiredX > 11.6 && targetX < 11.6) {
-            scale = Math.min(scale, (11.6 - targetX) / (desiredX - targetX));
+            hitScale = Math.min(hitScale, (11.6 - targetX) / (desiredX - targetX));
           }
           if (desiredZ < -2.9 && targetZ > -2.9) {
-            scale = Math.min(scale, (targetZ - -2.9) / (targetZ - desiredZ));
+            hitScale = Math.min(hitScale, (targetZ - -2.9) / (targetZ - desiredZ));
           }
-          scale = Math.max(0.32, scale);
-          desiredX = targetX + (desiredX - targetX) * scale;
-          desiredY = targetY + (desiredY - targetY) * scale;
-          desiredZ = targetZ + (desiredZ - targetZ) * scale;
+          hitScale = Math.max(0.32, hitScale);
         } else if (currentLoc === 'lobby') {
-          let scale = 1.0;
           if (desiredX < -8.6 && targetX > -8.6) {
-            scale = Math.min(scale, (targetX - -8.6) / (targetX - desiredX));
+            hitScale = Math.min(hitScale, (targetX - -8.6) / (targetX - desiredX));
           }
           if (desiredZ < -7.6 && targetZ > -7.6) {
-            scale = Math.min(scale, (targetZ - -7.6) / (targetZ - desiredZ));
+            hitScale = Math.min(hitScale, (targetZ - -7.6) / (targetZ - desiredZ));
           }
-          scale = Math.max(0.32, scale);
-          desiredX = targetX + (desiredX - targetX) * scale;
-          desiredY = targetY + (desiredY - targetY) * scale;
-          desiredZ = targetZ + (desiredZ - targetZ) * scale;
+          hitScale = Math.max(0.32, hitScale);
+        }
+
+        // Fast pull-in when occluded, smooth release when clear
+        const scaleRate = hitScale < handles.playCam.currentScale ? 22 : 6;
+        handles.playCam.currentScale = THREE.MathUtils.lerp(
+          handles.playCam.currentScale,
+          hitScale,
+          1 - Math.exp(-scaleRate * delta)
+        );
+        desiredX = targetX + (desiredX - targetX) * handles.playCam.currentScale;
+        desiredY = targetY + (desiredY - targetY) * handles.playCam.currentScale;
+        desiredZ = targetZ + (desiredZ - targetZ) * handles.playCam.currentScale;
+        if (currentLoc === 'world') {
+          desiredY = Math.max(getCityGroundY(desiredX, desiredZ) + 0.45, desiredY);
         }
 
         const camK = 14;
@@ -2313,6 +2474,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     return () => {
       disposed = true;
+      clearDragGhost();
       cancelAnimationFrame(frameId);
       clearTimeout(frameId);
       resizeObserver.disconnect();
@@ -2407,9 +2569,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       h.playCam.yaw = Math.PI;
       h.controls.minAzimuthAngle = -Infinity;
       h.controls.maxAzimuthAngle = Infinity;
-      h.controls.maxDistance = 38;
-      fog.near = 65;
-      fog.far = 220;
+      h.controls.maxDistance = 48;
+      fog.near = 90;
+      fog.far = 300;
       const d = 24;
       h.keyLight.shadow.camera.left = -d;
       h.keyLight.shadow.camera.right = d;

@@ -983,6 +983,341 @@ export function buildFurnitureGroup(
       }
       break;
     }
+
+    case 'sectional_sofa': {
+      // Main 2.8m north bench + 1.8m left chaise return (fits inside 3x2m footprint)
+      const plinthMain = new THREE.Mesh(createBeveledBox(2.76, 0.12, 0.88, 0.015), woodDarkMat);
+      plinthMain.position.set(0, 0.15, -0.45);
+      group.add(plinthMain);
+
+      const plinthChaise = new THREE.Mesh(createBeveledBox(0.92, 0.12, 0.96, 0.015), woodDarkMat);
+      plinthChaise.position.set(-0.92, 0.15, 0.42);
+      group.add(plinthChaise);
+
+      const legGeo = new THREE.CylinderGeometry(0.026, 0.018, 0.12, 10);
+      for (const [lx, lz] of [
+        [-1.28, -0.82],
+        [1.28, -0.82],
+        [1.28, -0.08],
+        [-1.28, 0.82],
+        [-0.54, 0.82],
+      ]) {
+        const leg = new THREE.Mesh(legGeo, brassMat);
+        leg.position.set(lx, 0.06, lz);
+        group.add(leg);
+      }
+
+      for (const sx of [-0.9, 0.0, 0.9]) {
+        const seat = new THREE.Mesh(createBeveledBox(0.86, 0.18, 0.82, 0.04), fabricMat);
+        seat.position.set(sx, 0.3, -0.44);
+        group.add(seat);
+      }
+      const chaiseSeat = new THREE.Mesh(createBeveledBox(0.88, 0.18, 0.96, 0.04), fabricMat);
+      chaiseSeat.position.set(-0.91, 0.3, 0.42);
+      group.add(chaiseSeat);
+
+      const backWall = new THREE.Mesh(createBeveledBox(2.8, 0.46, 0.18, 0.03), fabricMat);
+      backWall.position.set(0, 0.46, -0.83);
+      group.add(backWall);
+
+      for (const bx of [-0.88, 0.0, 0.88]) {
+        const cush = new THREE.Mesh(createBeveledBox(0.82, 0.35, 0.16, 0.04), fabricMat);
+        cush.position.set(bx, 0.52, -0.71);
+        cush.rotation.x = -0.14;
+        group.add(cush);
+      }
+
+      const armL = new THREE.Mesh(createBeveledBox(0.18, 0.36, 1.76, 0.04), fabricMat);
+      armL.position.set(-1.35, 0.38, -0.02);
+      group.add(armL);
+      const armR = new THREE.Mesh(createBeveledBox(0.18, 0.36, 0.88, 0.04), fabricMat);
+      armR.position.set(1.35, 0.38, -0.45);
+      group.add(armR);
+
+      const accentMat = new THREE.MeshPhysicalMaterial({ color: 0xd99b52, roughness: 0.82, sheen: 0.5 });
+      const p1 = new THREE.Mesh(createBeveledBox(0.32, 0.28, 0.11, 0.03), accentMat);
+      p1.position.set(-1.08, 0.5, -0.55);
+      p1.rotation.set(-0.2, 0.42, 0.1);
+      group.add(p1);
+      const p2 = new THREE.Mesh(createBeveledBox(0.3, 0.26, 0.1, 0.03), creamMat);
+      p2.position.set(1.06, 0.5, -0.58);
+      p2.rotation.set(-0.2, -0.35, -0.08);
+      group.add(p2);
+      break;
+    }
+
+    case 'dining_set': {
+      // Round Pedestal Dining Table + 2 Sculpted Dining Chairs (2x2m)
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.38, 0.04, 24), darkMetalMat);
+      base.position.y = 0.02;
+      group.add(base);
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.72, 16), woodPrimaryMat);
+      col.position.y = 0.38;
+      group.add(col);
+      const top = new THREE.Mesh(new THREE.CylinderGeometry(0.56, 0.56, 0.05, 28), woodPrimaryMat);
+      top.position.y = 0.755;
+      group.add(top);
+
+      // Centerpiece vase
+      const vase = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.055, 0.075, 0.2, 16),
+        new THREE.MeshPhysicalMaterial({ color: 0x3b6b58, roughness: 0.2, clearcoat: 0.7 })
+      );
+      vase.position.set(0, 0.88, 0);
+      group.add(vase);
+
+      // Left & Right chairs
+      for (const side of [-1, 1]) {
+        const cx = side * 0.72;
+        const chair = new THREE.Group();
+        chair.position.set(cx, 0, 0);
+        chair.rotation.y = side < 0 ? Math.PI / 2 : -Math.PI / 2;
+
+        for (const [lx, lz] of [
+          [-0.17, -0.17],
+          [0.17, -0.17],
+          [-0.17, 0.17],
+          [0.17, 0.17],
+        ]) {
+          const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.013, 0.44, 8), darkMetalMat);
+          leg.position.set(lx, 0.22, lz);
+          chair.add(leg);
+        }
+        const seat = new THREE.Mesh(createBeveledBox(0.42, 0.06, 0.42, 0.015), creamMat);
+        seat.position.y = 0.45;
+        chair.add(seat);
+        const back = new THREE.Mesh(createBeveledBox(0.42, 0.36, 0.05, 0.015), woodPrimaryMat);
+        back.position.set(0, 0.66, -0.19);
+        back.rotation.x = -0.1;
+        chair.add(back);
+        group.add(chair);
+      }
+      break;
+    }
+
+    case 'espresso_bar': {
+      const cabinet = new THREE.Mesh(createBeveledBox(1.76, 0.86, 0.72, 0.02), woodPrimaryMat);
+      cabinet.position.y = 0.43;
+      group.add(cabinet);
+
+      const marbleTop = new THREE.Mesh(
+        createBeveledBox(1.82, 0.055, 0.78, 0.015),
+        new THREE.MeshPhysicalMaterial({ color: 0xf4efe6, roughness: 0.18, clearcoat: 0.6 })
+      );
+      marbleTop.position.y = 0.89;
+      group.add(marbleTop);
+
+      // Espresso Machine
+      const machine = new THREE.Mesh(createBeveledBox(0.42, 0.38, 0.34, 0.015), brassMat);
+      machine.position.set(-0.36, 1.11, -0.05);
+      group.add(machine);
+      const groupHead = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 0.12), darkMetalMat);
+      groupHead.position.set(-0.36, 1.14, 0.13);
+      group.add(groupHead);
+
+      const statusLedMat = new THREE.MeshStandardMaterial({
+        color: placed.active ? 0x39ff14 : 0x4b5563,
+        emissive: placed.active ? 0x39ff14 : 0x000000,
+        emissiveIntensity: placed.active ? 1.8 : 0,
+      });
+      const statusLed = new THREE.Mesh(new THREE.SphereGeometry(0.016, 10, 10), statusLedMat);
+      statusLed.position.set(-0.22, 1.24, 0.12);
+      group.add(statusLed);
+
+      // Ceramic Espresso Cups & Grinder
+      const grinder = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.085, 0.32, 14), darkMetalMat);
+      grinder.position.set(0.08, 1.08, -0.06);
+      group.add(grinder);
+
+      for (const mx of [0.36, 0.52]) {
+        const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.036, 0.08, 12), creamMat);
+        cup.position.set(mx, 0.96, 0.06);
+        group.add(cup);
+      }
+
+      if (!opts.isGhost) {
+        const barLight = new THREE.PointLight(0xffd28a, placed.active ? 1.3 : 0, 4.5, 1.6);
+        barLight.position.set(-0.36, 1.25, 0.25);
+        group.add(barLight);
+        group.userData.light = barLight;
+      }
+      break;
+    }
+
+    case 'dual_desk': {
+      // Studio Creator Dual-Monitor Desk
+      for (const lx of [-0.82, 0.82]) {
+        const frame = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.72, 0.66), darkMetalMat);
+        frame.position.set(lx, 0.36, 0);
+        group.add(frame);
+      }
+      const top = new THREE.Mesh(createBeveledBox(1.82, 0.05, 0.8, 0.015), woodPrimaryMat);
+      top.position.y = 0.745;
+      group.add(top);
+
+      // Monitor Stand Bar
+      const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, 0.32, 12), darkMetalMat);
+      stand.position.set(0, 0.92, -0.2);
+      group.add(stand);
+
+      // Dual angled displays
+      const screenMats: THREE.MeshStandardMaterial[] = [];
+      for (const side of [-1, 1]) {
+        const bezel = new THREE.Mesh(createBeveledBox(0.74, 0.44, 0.03, 0.008), darkMetalMat);
+        bezel.position.set(side * 0.39, 1.08, -0.15 + Math.abs(side) * 0.03);
+        bezel.rotation.y = -side * 0.16;
+        group.add(bezel);
+
+        const scrMat = new THREE.MeshStandardMaterial({
+          color: placed.active ? 0x102a1e : 0x0d1016,
+          emissive: placed.active ? 0x22c55e : 0x000000,
+          emissiveIntensity: placed.active ? 0.75 : 0,
+          roughness: 0.2,
+        });
+        screenMats.push(scrMat);
+        const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.68, 0.38), scrMat);
+        scr.position.set(side * 0.39, 1.08, -0.13 + Math.abs(side) * 0.03);
+        scr.rotation.y = -side * 0.16;
+        group.add(scr);
+      }
+      group.userData.dualScreenMats = screenMats;
+
+      // Keyboard & Studio Speakers
+      const kb = new THREE.Mesh(createBeveledBox(0.46, 0.018, 0.15, 0.004), darkMetalMat);
+      kb.position.set(0, 0.78, 0.12);
+      group.add(kb);
+      for (const sx of [-0.76, 0.76]) {
+        const spk = new THREE.Mesh(createBeveledBox(0.16, 0.24, 0.18, 0.01), darkMetalMat);
+        spk.position.set(sx, 0.89, -0.12);
+        group.add(spk);
+      }
+      break;
+    }
+
+    case 'olive_tree': {
+      // Fluted Architectural Planter + Branching Olive Tree
+      const planter = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.24, 0.21, 0.42, 20),
+        new THREE.MeshStandardMaterial({ color: primaryColor, roughness: 0.72 })
+      );
+      planter.position.y = 0.21;
+      group.add(planter);
+
+      const soil = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.21, 0.21, 0.02, 16),
+        new THREE.MeshStandardMaterial({ color: 0x3b2c22, roughness: 0.95 })
+      );
+      soil.position.y = 0.42;
+      group.add(soil);
+
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.035, 0.055, 1.15, 10),
+        woodDarkMat
+      );
+      trunk.position.y = 0.98;
+      trunk.rotation.z = 0.05;
+      group.add(trunk);
+
+      const oliveLeafMat = new THREE.MeshStandardMaterial({ color: 0x6c8768, roughness: 0.75 });
+      const oliveLeafMat2 = new THREE.MeshStandardMaterial({ color: 0x809c7c, roughness: 0.72 });
+      const crowns: [number, number, number, number][] = [
+        [0, 1.66, 0, 0.34],
+        [-0.22, 1.48, 0.12, 0.24],
+        [0.24, 1.54, -0.1, 0.26],
+        [0.06, 1.84, -0.06, 0.25],
+      ];
+      crowns.forEach(([cx, cy, cz, r], i) => {
+        const ball = new THREE.Mesh(
+          new THREE.IcosahedronGeometry(r, 1),
+          i % 2 === 0 ? oliveLeafMat : oliveLeafMat2
+        );
+        ball.position.set(cx, cy, cz);
+        group.add(ball);
+      });
+      break;
+    }
+
+    case 'floor_mirror': {
+      const frameMat = new THREE.MeshStandardMaterial({
+        color: primaryColor,
+        roughness: 0.26,
+        metalness: 0.82,
+      });
+      const backPlate = new THREE.Mesh(createBeveledBox(0.76, 1.62, 0.045, 0.01), frameMat);
+      backPlate.position.set(0, 0.84, -0.05);
+      backPlate.rotation.x = -0.08;
+      group.add(backPlate);
+
+      const archTop = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 0.045, 24), frameMat);
+      archTop.rotation.x = Math.PI / 2 - 0.08;
+      archTop.position.set(0, 1.64, -0.115);
+      group.add(archTop);
+
+      const mirrorGlassMat = new THREE.MeshPhysicalMaterial({
+        color: 0xe2ecf5,
+        roughness: 0.04,
+        metalness: 0.92,
+        clearcoat: 1.0,
+      });
+      const glassRect = new THREE.Mesh(new THREE.PlaneGeometry(0.68, 1.54), mirrorGlassMat);
+      glassRect.position.set(0, 0.84, -0.025);
+      glassRect.rotation.x = -0.08;
+      group.add(glassRect);
+
+      const glassArch = new THREE.Mesh(new THREE.CircleGeometry(0.34, 24, 0, Math.PI), mirrorGlassMat);
+      glassArch.position.set(0, 1.6, -0.088);
+      glassArch.rotation.x = -0.08;
+      group.add(glassArch);
+
+      // Rear easel stand leg
+      const easel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.25, 0.04), frameMat);
+      easel.position.set(0, 0.62, -0.26);
+      easel.rotation.x = 0.28;
+      group.add(easel);
+      break;
+    }
+
+    case 'neon_sign': {
+      const backing = new THREE.Mesh(
+        createBeveledBox(1.56, 0.56, 0.04, 0.01),
+        new THREE.MeshPhysicalMaterial({ color: 0x0d1210, roughness: 0.15, clearcoat: 0.8 })
+      );
+      group.add(backing);
+
+      const tubeMat = new THREE.MeshStandardMaterial({
+        color: primaryColor,
+        emissive: primaryColor,
+        emissiveIntensity: placed.active ? 2.2 : 0.1,
+        roughness: 0.2,
+      });
+      const borderTube = new THREE.Mesh(new THREE.BoxGeometry(1.44, 0.44, 0.03), tubeMat);
+      borderTube.position.z = 0.02;
+      group.add(borderTube);
+
+      const innerCut = new THREE.Mesh(
+        new THREE.BoxGeometry(1.36, 0.36, 0.034),
+        new THREE.MeshStandardMaterial({ color: 0x0b100d, roughness: 0.4 })
+      );
+      innerCut.position.z = 0.021;
+      group.add(innerCut);
+
+      // Neon wave/bolt motif inside frame
+      for (let i = -2; i <= 2; i++) {
+        const bar = new THREE.Mesh(new THREE.CapsuleGeometry(0.014, 0.14 + (i % 2) * 0.06, 4, 8), tubeMat);
+        bar.position.set(i * 0.22, 0, 0.04);
+        bar.rotation.z = i % 2 === 0 ? 0.35 : -0.35;
+        group.add(bar);
+      }
+
+      if (!opts.isGhost) {
+        const neonLight = new THREE.PointLight(primaryColor, placed.active ? 1.5 : 0, 4.5, 1.6);
+        neonLight.position.set(0, 0, 0.35);
+        group.add(neonLight);
+        group.userData.light = neonLight;
+      }
+      group.userData.neonTubeMat = tubeMat;
+      break;
+    }
   }
 
   if (opts.isGhost) {
@@ -1049,7 +1384,6 @@ export function updateFurnitureAnimations(
         ctx.fillStyle = '#0d0f14';
         ctx.fillRect(0, 0, 256, 144);
       } else {
-        // Animated warm lo-fi sunset + equalizer visualizer
         const grad = ctx.createLinearGradient(0, 0, 0, 144);
         grad.addColorStop(0, '#1e1b4b');
         grad.addColorStop(0.55, '#7c3aed');
@@ -1057,13 +1391,11 @@ export function updateFurnitureAnimations(
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, 256, 144);
 
-        // Glowing sun disc
         ctx.fillStyle = '#fde047';
         ctx.beginPath();
         ctx.arc(128, 66 + Math.sin(elapsed * 0.8) * 4, 24, 0, Math.PI * 2);
         ctx.fill();
 
-        // Equalizer bars
         ctx.fillStyle = 'rgba(255,255,255,0.85)';
         for (let b = 0; b < 16; b++) {
           const bh = 10 + Math.abs(Math.sin(elapsed * 4.5 + b * 0.55)) * 28;
@@ -1077,6 +1409,22 @@ export function updateFurnitureAnimations(
     if (leaves) {
       leaves.forEach((pivot, i) => {
         pivot.rotation.x = Math.sin(elapsed * 1.4 + i * 0.9) * 0.035;
+      });
+    }
+  } else if (placed.catalogId === 'neon_sign') {
+    const tubeMat = group.userData.neonTubeMat as THREE.MeshStandardMaterial | undefined;
+    const light = group.userData.light as THREE.PointLight | undefined;
+    if (tubeMat) {
+      tubeMat.emissiveIntensity = isActive ? 2.0 + Math.sin(elapsed * 4.5) * 0.35 : 0.08;
+    }
+    if (light) {
+      light.intensity = isActive ? 1.4 + Math.sin(elapsed * 4.5) * 0.25 : 0;
+    }
+  } else if (placed.catalogId === 'dual_desk') {
+    const mats = group.userData.dualScreenMats as THREE.MeshStandardMaterial[] | undefined;
+    if (mats) {
+      mats.forEach((m) => {
+        m.emissiveIntensity = isActive ? 0.8 : 0;
       });
     }
   }

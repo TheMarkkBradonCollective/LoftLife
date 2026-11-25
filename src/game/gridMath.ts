@@ -1,6 +1,12 @@
 import { getCatalogItem, GRID_SIZE } from './catalog';
 import type { PlacedItem } from './types';
 
+export const SNAP_STEP = 0.5;
+
+export function snapGrid(val: number): number {
+  return Math.round(val / SNAP_STEP) * SNAP_STEP;
+}
+
 export function getEffectiveSize(
   catalogId: string,
   rot: 0 | 1 | 2 | 3
@@ -79,7 +85,7 @@ export function isValidPlacement(
         if (other.uid === candidate.uid) return false;
         const otherCat = getCatalogItem(other.catalogId);
         if (!otherCat || otherCat.layer !== 'wall' || other.wall !== 'west') return false;
-        return candidate.gz < other.gz + otherCat.size[0] && candidate.gz + span > other.gz;
+        return candidate.gz < other.gz + otherCat.size[0] - 0.01 && candidate.gz + span > other.gz + 0.01;
       });
     } else {
       // North wall
@@ -88,39 +94,38 @@ export function isValidPlacement(
         if (other.uid === candidate.uid) return false;
         const otherCat = getCatalogItem(other.catalogId);
         if (!otherCat || otherCat.layer !== 'wall' || other.wall === 'west') return false;
-        return candidate.gx < other.gx + otherCat.size[0] && candidate.gx + span > other.gx;
+        return candidate.gx < other.gx + otherCat.size[0] - 0.01 && candidate.gx + span > other.gx + 0.01;
       });
     }
   }
 
   const [ew, ed] = getEffectiveSize(candidate.catalogId, candidate.rot);
   if (
-    candidate.gx < 0 ||
-    candidate.gz < 0 ||
-    candidate.gx + ew > GRID_SIZE ||
-    candidate.gz + ed > GRID_SIZE
+    candidate.gx < -0.001 ||
+    candidate.gz < -0.001 ||
+    candidate.gx + ew > GRID_SIZE + 0.001 ||
+    candidate.gz + ed > GRID_SIZE + 0.001
   ) {
     return false;
   }
 
   // Rugs only collide with other rugs; floor items only collide with other floor items
+  const eps = 0.02;
   return !existingItems.some((other) => {
     if (other.uid === candidate.uid) return false;
     const otherCat = getCatalogItem(other.catalogId);
     if (!otherCat || otherCat.layer !== cat.layer) return false;
     const [ow, od] = getEffectiveSize(other.catalogId, other.rot);
     return (
-      candidate.gx < other.gx + ow &&
-      candidate.gx + ew > other.gx &&
-      candidate.gz < other.gz + od &&
-      candidate.gz + ed > other.gz
+      candidate.gx < other.gx + ow - eps &&
+      candidate.gx + ew > other.gx + eps &&
+      candidate.gz < other.gz + od - eps &&
+      candidate.gz + ed > other.gz + eps
     );
   });
 }
 
 function rotateLocalXZ(lx: number, lz: number, rot: 0 | 1 | 2 | 3): [number, number] {
-  // Three.js rotation.y = rot * PI/2 rotates local +Z toward +X? Let's verify:
-  // Right-hand rule around +Y: x' = x*cos(a) + z*sin(a), z' = -x*sin(a) + z*cos(a)
   const a = (rot * Math.PI) / 2;
   const c = Math.round(Math.cos(a));
   const s = Math.round(Math.sin(a));
@@ -156,7 +161,7 @@ export function getSeatWorldInfo(placed: PlacedItem): {
 // ---------------------------------------------------------------------------
 // 0.5m Sub-Grid Collision & A* Pathfinding
 // ---------------------------------------------------------------------------
-const SUB = 2; // 2 cells per meter => 20 x 20 nav grid
+const SUB = 2; // 2 cells per meter => 28 x 28 nav grid
 const NAV_SIZE = GRID_SIZE * SUB;
 
 export function buildNavGrid(items: PlacedItem[]): Uint8Array {
@@ -165,10 +170,10 @@ export function buildNavGrid(items: PlacedItem[]): Uint8Array {
     const cat = getCatalogItem(item.catalogId);
     if (!cat || cat.layer !== 'floor' || cat.walkable) continue;
     const [ew, ed] = getEffectiveSize(item.catalogId, item.rot);
-    const minX = Math.max(0, item.gx * SUB);
-    const maxX = Math.min(NAV_SIZE - 1, (item.gx + ew) * SUB - 1);
-    const minZ = Math.max(0, item.gz * SUB);
-    const maxZ = Math.min(NAV_SIZE - 1, (item.gz + ed) * SUB - 1);
+    const minX = Math.max(0, Math.round(item.gx * SUB));
+    const maxX = Math.min(NAV_SIZE - 1, Math.round((item.gx + ew) * SUB) - 1);
+    const minZ = Math.max(0, Math.round(item.gz * SUB));
+    const maxZ = Math.min(NAV_SIZE - 1, Math.round((item.gz + ed) * SUB) - 1);
     for (let z = minZ; z <= maxZ; z++) {
       for (let x = minX; x <= maxX; x++) {
         grid[z * NAV_SIZE + x] = 1;
@@ -231,7 +236,6 @@ export function findPath(
   const [sx, sz] = worldToNavCell(startX, startZ);
   let [gx, gz] = worldToNavCell(goalX, goalZ);
 
-  // If goal cell is blocked, search nearest walkable cell around it
   if (nav[gz * NAV_SIZE + gx] === 1) {
     let bestDist = Infinity;
     let best: [number, number] | null = null;
@@ -253,7 +257,6 @@ export function findPath(
     gz = best[1];
   }
 
-  // Ensure start cell isn't treated as impassable
   nav[sz * NAV_SIZE + sx] = 0;
 
   const total = NAV_SIZE * NAV_SIZE;
@@ -311,7 +314,6 @@ export function findPath(
       if (nx < 0 || nx >= NAV_SIZE || nz < 0 || nz >= NAV_SIZE) continue;
       const nIdx = nz * NAV_SIZE + nx;
       if (closed[nIdx] || nav[nIdx] === 1) continue;
-      // Prevent diagonal corner cutting
       if (dx !== 0 && dz !== 0) {
         if (nav[cz * NAV_SIZE + nx] === 1 || nav[nz * NAV_SIZE + cx] === 1) continue;
       }
