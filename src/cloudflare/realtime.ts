@@ -159,6 +159,7 @@ export class LoftLifeRealtime {
       return;
     }
 
+    let capacity = MAX_PLAYERS;
     if (instanceId.startsWith('world:')) {
       const worldId = instanceId.slice(6);
       const worlds = await sql.query('SELECT id, owner_id, access, published, max_visitors FROM ll_worlds WHERE id=$1 LIMIT 1', [worldId]) as Array<{ id: string; owner_id: string; access: string; published: boolean; max_visitors: number }>;
@@ -168,12 +169,13 @@ export class LoftLifeRealtime {
         ws.close(1008, 'world_not_found');
         return;
       }
+      capacity = Math.max(1, Math.min(MAX_PLAYERS, Number(world.max_visitors) || MAX_PLAYERS));
       let allowed = world.owner_id === account.id || (world.published && world.access === 'public');
       if (!allowed && ['invite', 'friends', 'collab'].includes(world.access)) {
         const [invite, collaborator, friendship] = await Promise.all([
           sql.query('SELECT 1 FROM ll_world_invites WHERE world_id=$1 AND user_id=$2 LIMIT 1', [worldId, account.id]),
           sql.query('SELECT 1 FROM ll_world_collaborators WHERE world_id=$1 AND user_id=$2 LIMIT 1', [worldId, account.id]),
-          sql.query("SELECT 1 FROM ll_friendships WHERE status='accepted' AND ((a=$1 AND b=owner_id) OR (b=$1 AND a=owner_id)) LIMIT 1".replace('owner_id', '$3'), [account.id, worldId, world.owner_id]),
+          sql.query("SELECT 1 FROM ll_friendships WHERE status='accepted' AND ((a=$1 AND b=$2) OR (a=$2 AND b=$1)) LIMIT 1", [account.id, world.owner_id]),
         ]);
         allowed = invite.length > 0 || collaborator.length > 0 || (world.access === 'friends' && friendship.length > 0);
       }
@@ -186,8 +188,7 @@ export class LoftLifeRealtime {
 
     const peers = this.ctx.getWebSockets();
     const active = peers.map((peer) => peer.deserializeAttachment() as Player | undefined).filter((p): p is Player => Boolean(p && p.instanceId === instanceId && !('pending' in (p as object))));
-    const max = instanceId.startsWith('world:') ? 64 : MAX_PLAYERS;
-    if (active.length >= max) {
+    if (active.length >= capacity) {
       error(ws, 'instance_full', 'This instance is full');
       ws.close(1013, 'instance_full');
       return;
@@ -203,8 +204,8 @@ export class LoftLifeRealtime {
     };
     ws.serializeAttachment(player);
     const players = this.players(instanceId);
-    const capacity = instanceId.startsWith('world:') ? 64 : MAX_PLAYERS;
-    send(ws, { t: 'ready', instance: { id: instanceId, kind: instanceId.startsWith('world:') ? 'world' : 'city', worldId: instanceId.startsWith('world:') ? instanceId.slice(6) : null, capacity, count: players.length + 1 }, you: publicPlayer(player), players });
+    const existingPlayers = players.filter((entry) => entry.connId !== player.connId);
+    send(ws, { t: 'ready', instance: { id: instanceId, kind: instanceId.startsWith('world:') ? 'world' : 'city', worldId: instanceId.startsWith('world:') ? instanceId.slice(6) : null, capacity, count: existingPlayers.length + 1 }, you: publicPlayer(player), players: existingPlayers });
     this.broadcast(instanceId, { t: 'join', player: publicPlayer(player) }, ws);
     this.broadcastSnapshot(instanceId, true);
   }
@@ -257,7 +258,9 @@ export class LoftLifeRealtime {
     ws.serializeAttachment({ ...player, lastChatAt: now });
   }
 
-  async webSocketClose(ws: HibernatableWebSocket) {
+  async webSocketClose(ws: HibernatableWebSocket, code: number, reason: string) {
+    if (code >= 1000 && code < 5000 && ![1004, 1005, 1006, 1015].includes(code)) ws.close(code, reason);
+    else ws.close();
     const player = ws.deserializeAttachment() as Player | undefined;
     if (player?.userId) {
       this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
