@@ -1,12 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  Building2,
   Check,
   ChevronRight,
   Crown,
   Globe2,
-  Home,
   Keyboard,
   Loader2,
   Lock,
@@ -184,7 +182,7 @@ const CityMiniMap: React.FC<{
       if (!canvas || !ctx) return;
       const w = canvas.width;
       const h = canvas.height;
-      const { bounds, blocks, loftCenter, uLines, zLines } = CITY_LAYOUT;
+      const { bounds, blocks, uLines, zLines } = CITY_LAYOUT;
       const minU = bounds.uMin;
       const maxU = bounds.uMax;
       const minZ = bounds.zMin;
@@ -556,30 +554,7 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                   </p>
                 </div>
                 <div className="flex flex-wrap items-start gap-2 sm:justify-end">
-                  {location !== 'world' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onTravelCity();
-                        onClose();
-                      }}
-                      className="px-3 py-2 rounded-lg text-xs font-bold bg-[#39ff14] text-[#051205] flex items-center gap-1.5"
-                    >
-                      <Building2 className="w-3.5 h-3.5" /> Travel to Main City
-                    </button>
-                  )}
-                  {location !== 'room' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onTravelSuite();
-                        onClose();
-                      }}
-                      className="px-3 py-2 rounded-lg text-xs font-bold bg-white/10 text-slate-100 flex items-center gap-1.5"
-                    >
-                      <Home className="w-3.5 h-3.5" /> Return to Suite
-                    </button>
-                  )}
+
                   {location === 'world' && (
                     <button
                       type="button"

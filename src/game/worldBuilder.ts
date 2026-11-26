@@ -483,7 +483,6 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     loftCenter,
     loftDoorPos,
     airportCenter,
-    airportArrivalPos,
     airportDeparturePos,
     airportShopPos,
   } = CITY_LAYOUT;
