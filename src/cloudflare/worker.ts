@@ -637,6 +637,16 @@ export default {
         return await handleLogout(request, env);
       }
 
+      if (url.pathname === '/api/party' && request.method === 'GET') {
+        const auth = await currentAccount(request, env);
+        if (!auth) return fail('Sign in to continue.',401,'unauthorized');
+        if (!env.REALTIME) return fail('Party service is not configured.',503,'party_unavailable');
+        const partyId = env.REALTIME.idFromName('party:global');
+        return env.REALTIME.get(partyId).fetch(new Request('https://loftlife-internal/internal/party/state',{
+          method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({userId:auth.account.id}),
+        }));
+      }
+
       if (url.pathname === '/api/transit') {
         const transitResponse = handleTransitRoute(request);
         if (transitResponse) return transitResponse;
