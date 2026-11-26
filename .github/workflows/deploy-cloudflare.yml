@@ -7,11 +7,12 @@ on:
 
 jobs:
   deploy:
-    if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.DATABASE_URL != '' && secrets.LOFTLIFE_SESSION_SECRET != '' }}
     runs-on: ubuntu-latest
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: 92d9592953c4d46474ae07993913f710
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      LOFTLIFE_SESSION_SECRET: ${{ secrets.LOFTLIFE_SESSION_SECRET }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,13 +23,22 @@ jobs:
       - run: npm test
       - run: npm run lint
       - run: npm run build
+      - name: Check deployment credentials
+        id: credentials
+        shell: bash
+        run: |
+          if [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$DATABASE_URL" && -n "$LOFTLIFE_SESSION_SECRET" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Cloudflare deployment secrets are not configured; build checks completed without publishing."
+          fi
       - name: Configure Neon connection secret
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        if: steps.credentials.outputs.configured == 'true'
         run: printf '%s' "$DATABASE_URL" | npx --yes wrangler@4 secret put DATABASE_URL
       - name: Configure session signing secret
-        env:
-          LOFTLIFE_SESSION_SECRET: ${{ secrets.LOFTLIFE_SESSION_SECRET }}
+        if: steps.credentials.outputs.configured == 'true'
         run: printf '%s' "$LOFTLIFE_SESSION_SECRET" | npx --yes wrangler@4 secret put LOFTLIFE_SESSION_SECRET
       - name: Deploy Worker and Durable Objects
+        if: steps.credentials.outputs.configured == 'true'
         run: npx --yes wrangler@4 deploy
