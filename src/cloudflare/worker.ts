@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { handleWorldRoute } from './worlds';
+import { handleSocialRoute } from './social';
 export { LoftLifeRealtime } from './realtime';
 import {
   hashPassword,
@@ -602,6 +603,21 @@ export default {
         if (!sql) return fail('DATABASE_URL is not configured.', 503, 'unconfigured');
         const worldResponse = await handleWorldRoute(request, sql, auth?.account ?? null);
         if (worldResponse) return worldResponse;
+      }
+
+      if (
+        url.pathname.startsWith('/api/friends') ||
+        url.pathname.startsWith('/api/blocks') ||
+        url.pathname.startsWith('/api/players') ||
+        url.pathname.startsWith('/api/chat/history') ||
+        url.pathname.startsWith('/api/reports') ||
+        url.pathname.startsWith('/api/profiles/')
+      ) {
+        const auth = await currentAccount(request, env);
+        const sql = auth?.sql ?? await database(env);
+        if (!sql) return fail('DATABASE_URL is not configured.', 503, 'unconfigured');
+        const socialResponse = await handleSocialRoute(request, sql, auth?.account ?? null);
+        if (socialResponse) return socialResponse;
       }
 
       if (url.pathname === '/ws') {
