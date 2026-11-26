@@ -1,3 +1,5 @@
+import { invitationsAllowedWith } from './platform';
+
 type Sql = { query(query: string, params?: unknown[]): Promise<unknown[]> };
 type User = { id: string; handle: string };
 type World = Record<string, unknown>;
@@ -156,6 +158,7 @@ export async function handleWorldRoute(request: Request, sql: Sql, user: User | 
     const body = await request.json().catch(()=>({})) as World;
     const targets = await sql.query('SELECT id FROM ll_accounts WHERE handle=$1 LIMIT 1',[String(body.handle??'').toLowerCase()]) as Array<{id:string}>;
     if (!targets[0]) return fail('No player with that handle.',404,'not_found');
+    if (!(await invitationsAllowedWith(sql,targets[0].id))) return fail('This player is not accepting world invitations.',403,'forbidden');
     await sql.query('INSERT INTO ll_world_invites(world_id,user_id,created_at) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[id,targets[0].id,Date.now()]);
     return json({invited:targets[0].id});
   }

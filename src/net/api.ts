@@ -13,12 +13,41 @@ export interface SessionUser {
   createdAt: number;
 }
 
+export type VoiceRangeSetting = 'off' | 'whisper' | 'talk' | 'shout';
+export type MicrophoneMode =
+  | 'push-to-talk'
+  | 'toggle-to-talk'
+  | 'voice-activation'
+  | 'open-mic'
+  | 'push-to-mute';
+
+/** Account-synced voice preferences (range, microphone mode, sensitivity). */
+export interface VoicePreferences {
+  range: VoiceRangeSetting;
+  micMode: MicrophoneMode;
+  sensitivity: number;
+}
+
+export interface TouchLayoutPreferences {
+  size: 'sm' | 'md' | 'lg';
+  handedness: 'right' | 'left';
+  opacity: number;
+}
+
+/** Account-synced keybindings and touch layout. */
+export interface ControlsPreferences {
+  bindings: Record<string, string>;
+  touch: TouchLayoutPreferences;
+  updatedAt: number;
+}
+
 export interface Profile {
   userId: string;
   handle: string;
   displayName: string;
   avatar: AvatarConfig;
   bio: string;
+  voice?: VoicePreferences;
   createdAt: number;
   updatedAt: number;
 }
@@ -89,6 +118,25 @@ export interface ShopEntry {
   price: number;
   currency: 'yuanzi' | 'tongbao';
   label?: string;
+}
+
+export interface ConversationEntry {
+  userId: string;
+  handle: string;
+  displayName: string;
+  avatar: AvatarConfig | null;
+  unread: number;
+  lastMessage: { body: string; createdAt: number; fromMe: boolean };
+}
+
+export interface PublicProfile {
+  userId: string;
+  handle: string;
+  displayName: string;
+  bio: string;
+  avatar: AvatarConfig | null;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 export interface FriendEntry {
@@ -221,8 +269,20 @@ export const api = {
       suite: SuiteState;
     }>('/auth/me'),
 
-  updateProfile: (body: { displayName?: string; bio?: string; avatar?: AvatarConfig }) =>
-    request<Profile>('/profile', { method: 'PATCH', body }),
+  getControls: () => request<ControlsPreferences>('/preferences/controls'),
+
+  saveControls: (body: {
+    bindings: Record<string, string>;
+    touch: TouchLayoutPreferences;
+    updatedAt?: number;
+  }) => request<ControlsPreferences>('/preferences/controls', { method: 'PUT', body }),
+
+  updateProfile: (body: {
+    displayName?: string;
+    bio?: string;
+    avatar?: AvatarConfig;
+    voice?: VoicePreferences;
+  }) => request<Profile>('/profile', { method: 'PATCH', body }),
 
   shop: () => request<{ furniture: ShopEntry[]; clothing: ShopEntry[] }>('/shop', { auth: false }),
 
@@ -255,10 +315,12 @@ export const api = {
     if (params.mine) search.set('mine', '1');
     if (params.q) search.set('q', params.q);
     const suffix = search.toString();
-    return request<WorldSummary[]>(`/worlds${suffix ? `?${suffix}` : ''}`, { auth: false });
+    // "My worlds" is account-scoped; public discovery stays anonymous.
+    return request<WorldSummary[]>(`/worlds${suffix ? `?${suffix}` : ''}`, { auth: params.mine === true });
   },
 
-  world: (id: string) => request<WorldSummary>(`/worlds/${id}`, { auth: false }),
+  // Send the session when available so owner/editor flags and state are correct.
+  world: (id: string) => request<WorldSummary>(`/worlds/${id}`),
 
   createWorld: (body: { name: string; kind: WorldKind; access: WorldAccess; description?: string }) =>
     request<WorldSummary>('/worlds', { method: 'POST', body }),
@@ -295,6 +357,30 @@ export const api = {
     request<{ instanceId: string; capacity: number; name: string }>(`/worlds/${id}/entry`),
 
   friends: () => request<FriendEntry[]>('/friends'),
+
+  /** Account preferences persisted server-side; local storage is the offline copy. */
+  settings: () => request<{ settings: Record<string, unknown> }>('/settings'),
+
+  saveSettings: (settings: unknown) =>
+    request<{ settings: Record<string, unknown> }>('/settings', {
+      method: 'PUT',
+      body: { settings },
+    }),
+
+  conversations: () =>
+    request<{ conversations: ConversationEntry[] }>('/messages/conversations'),
+
+  markConversationRead: (handle: string) =>
+    request<{ ok: boolean; handle: string }>('/messages/read', {
+      method: 'POST',
+      body: { handle },
+    }),
+
+  suiteOf: (handle: string) =>
+    request<SuiteState>(`/suites/${encodeURIComponent(handle)}`),
+
+  profileOf: (handle: string) =>
+    request<PublicProfile>(`/profiles/${encodeURIComponent(handle)}`),
 
   requestFriend: (handle: string) =>
     request<{ status: string }>('/friends/request', { method: 'POST', body: { handle } }),

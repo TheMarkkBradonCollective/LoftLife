@@ -41,8 +41,10 @@ import {
   dmScopeId,
   fileReport,
   listBlocked,
+  listConversations,
   listFriends,
   listOpenReports,
+  markConversationRead,
   readProfile,
   removeFriend,
   searchPlayers,
@@ -51,6 +53,7 @@ import {
   unblockPlayer,
   updateProfile,
 } from './social.mjs';
+import { canViewProfile, readSettings, writeSettings } from './settings.mjs';
 import {
   addCollaborator,
   canEnterWorld,
@@ -67,6 +70,7 @@ import {
   setSuiteVisibility,
   updateWorld,
 } from './worlds.mjs';
+import { readControls, saveControls } from './preferences.mjs';
 
 const PORT = Number(process.env.PORT || process.env.LOFTLIFE_PORT || 8787);
 const ROOT = process.cwd();
@@ -115,6 +119,19 @@ export function createApp() {
     })
   );
 
+  app.get(
+    '/api/settings',
+    requireAuth,
+    handler((req, res) => res.json({ settings: readSettings(req.user.id) }))
+  );
+
+  app.put(
+    '/api/settings',
+    requireAuth,
+    writeLimiter,
+    handler((req, res) => res.json({ settings: writeSettings(req.user.id, req.body ?? {}) }))
+  );
+
   app.post(
     '/api/auth/logout',
     requireAuth,
@@ -153,6 +170,20 @@ export function createApp() {
     handler((req, res) => res.json(updateProfile(req.user.id, req.body ?? {})))
   );
 
+  // Keybindings + touch layout: local-first on the client, account-synced here.
+  app.get(
+    '/api/preferences/controls',
+    requireAuth,
+    handler((req, res) => res.json(readControls(req.user.id)))
+  );
+
+  app.put(
+    '/api/preferences/controls',
+    requireAuth,
+    writeLimiter,
+    handler((req, res) => res.json(saveControls(req.user.id, req.body ?? {})))
+  );
+
   app.get(
     '/api/players',
     requireAuth,
@@ -167,6 +198,9 @@ export function createApp() {
         .prepare('SELECT id FROM users WHERE handle = ?')
         .get(String(req.params.handle).toLowerCase());
       if (!row) throw notFound('No player with that handle');
+      if (!canViewProfile(req.user?.id ?? null, row.id)) {
+        throw forbidden('This profile is private');
+      }
       const profile = readProfile(row.id);
       res.json({
         userId: profile.userId,
@@ -402,6 +436,21 @@ export function createApp() {
       }
       res.json(chatHistory({ scope, scopeId, viewerId: req.user.id, limit: req.query.limit }));
     })
+  );
+
+  app.get(
+    '/api/messages/conversations',
+    requireAuth,
+    handler((req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ conversations: listConversations(req.user.id, req.query.limit) });
+    })
+  );
+
+  app.post(
+    '/api/messages/read',
+    requireAuth,
+    handler((req, res) => res.json(markConversationRead(req.user.id, req.body?.handle)))
   );
 
   /* ------------------------------ moderation ---------------------------- */

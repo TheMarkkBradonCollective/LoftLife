@@ -1,17 +1,31 @@
-import React, { useState } from 'react';
-import { DoorOpen, Loader2, LogIn, UserPlus, WifiOff } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { DoorOpen, Loader2, LogIn, UserPlus, WifiOff, X } from 'lucide-react';
 import { useSession } from '../session';
 
 type Tab = 'login' | 'register';
 
-/** Sign-in wall. Renders before the game so every online session has an identity. */
-export const AuthGate: React.FC = () => {
+/**
+ * Going online. The game is playable offline by default, so this is opened from
+ * inside the world and can be dismissed back to the on-device character.
+ */
+export const AuthGate: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
   const { login, register, authError, authBusy, continueOffline, status } = useSession();
   const [tab, setTab] = useState<Tab>('login');
   const [handle, setHandle] = useState('');
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
+
+  useEffect(() => {
+    if (status !== 'online') return;
+    if (onClose) {
+      onClose();
+    } else if (window.location.hash && window.location.hash !== '#/') {
+      // Signing in from the platform always lands on Home, never on a stale
+      // deep link or straight into a world.
+      window.location.hash = '#/';
+    }
+  }, [status, onClose]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -30,7 +44,7 @@ export const AuthGate: React.FC = () => {
     'w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/12 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-[#39ff14]/70 focus:ring-2 focus:ring-[#39ff14]/20';
 
   return (
-    <div className="w-screen h-screen flex items-center justify-center relative overflow-hidden">
+    <div className="fixed inset-0 z-50 w-screen h-screen flex items-center justify-center relative overflow-hidden">
       <div
         className="absolute inset-0 opacity-40"
         style={{
@@ -39,12 +53,26 @@ export const AuthGate: React.FC = () => {
         }}
       />
       <div className="relative w-[min(430px,92vw)] rounded-2xl border border-[#39ff14]/25 bg-[#0b100d]/95 p-6 neon-panel-glow">
+        {onClose && (
+          <button
+            type="button"
+            onClick={() => {
+              continueOffline();
+              onClose();
+            }}
+            aria-label="Keep playing offline"
+            className="absolute top-3 right-3 w-10 h-10 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
         <div className="flex items-center gap-2.5 mb-1">
           <DoorOpen className="w-5 h-5 text-[#39ff14]" />
           <h1 className="font-display text-2xl font-bold text-[#39ff14] tracking-tight">LoftLife</h1>
         </div>
         <p className="text-xs text-slate-400 mb-5">
-          Your suite, your city, your people. Sign in to play online.
+          Sign in to open your dashboard, messages, friends and destinations. Your character, outfit
+          and suite from this device come online with you. You can also keep playing offline.
         </p>
 
         <div className="flex gap-1 p-1 rounded-xl border border-white/10 mb-4">
@@ -157,11 +185,14 @@ export const AuthGate: React.FC = () => {
 
         <div className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between gap-3">
           <p className="text-[11px] leading-snug text-slate-500">
-            Offline mode keeps the room builder local to this browser only.
+            Offline keeps your character in this browser. Nothing is uploaded until you sign in.
           </p>
           <button
             type="button"
-            onClick={continueOffline}
+            onClick={() => {
+              continueOffline();
+              onClose?.();
+            }}
             className="shrink-0 px-3 py-1.5 rounded-lg border border-white/12 text-[11px] font-semibold text-slate-300 hover:bg-white/10 flex items-center gap-1.5"
           >
             <WifiOff className="w-3.5 h-3.5" />

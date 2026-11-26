@@ -22,10 +22,12 @@ type PanelTab = 'chat' | 'people';
 
 interface SocialHudProps {
   onEnterWorld: (worldId: string) => void;
+  /** False on mobile browsers/unsupported runtimes: browsing only. */
+  gameplayAllowed: boolean;
 }
 
 /** Chat, presence, friends and shop/world entry points. */
-export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld }) => {
+export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld, gameplayAllowed }) => {
   const {
     status,
     connection,
@@ -41,12 +43,15 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld }) => {
     party,
     partyInvites,
     partyAction,
-    voiceStatus,
-    voiceMode,
-    setVoiceMode,
+    voice,
+    chatOpen,
+    setChatOpen,
   } = useSession();
 
-  const [open, setOpen] = useState(false);
+  // Chat visibility is shared with the C shortcut and the mobile chat button,
+  // so closing and reopening keeps messages, tabs and the unsent draft intact.
+  const open = chatOpen;
+  const setOpen = setChatOpen;
   const [panelTab, setPanelTab] = useState<PanelTab>('chat');
   const [chatTab, setChatTab] = useState<ChatTab>('local');
   const [mode, setMode] = useState<'whisper' | 'say' | 'shout'>('say');
@@ -281,22 +286,20 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld }) => {
                     <select
                       value={mode}
                       onChange={(event) => {
-                        const next = event.target.value as typeof mode;
-                        setMode(next);
-                        setVoiceMode(next);
+                        setMode(event.target.value as typeof mode);
                       }}
                       className="ml-auto bg-black/40 border border-white/12 rounded px-1.5 py-0.5 text-[11px] text-slate-200"
                       aria-label="Speaking distance"
-                      title="Distance band for proximity text and voice"
+                      title="Distance band for nearby text chat"
                     >
                       <option value="whisper">Whisper 4m</option>
-                      <option value="say">Say 14m</option>
+                      <option value="say">Talk 14m</option>
                       <option value="shout">Shout 35m</option>
                     </select>
                   )}
                   {chatTab === 'city' && (
                     <span className="ml-auto text-[10px] text-slate-500 font-mono-tabular">
-                      voice {voiceMode} · {voiceStatus === 'ready' ? 'on' : 'off'}
+                      voice {voice.range} · {voice.status === 'ready' ? 'on' : 'off'}
                     </span>
                   )}
                 </div>
@@ -548,9 +551,11 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld }) => {
         open={worldsOpen}
         onClose={() => setWorldsOpen(false)}
         onEnter={(worldId) => {
+          if (!gameplayAllowed) return;
           setWorldsOpen(false);
           onEnterWorld(worldId);
         }}
+        gameplayAllowed={gameplayAllowed}
       />
     </>
   );

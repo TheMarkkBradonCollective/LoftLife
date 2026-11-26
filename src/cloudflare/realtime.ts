@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { sha256Hex, verifyAuthToken } from '../../shared/auth-core.mjs';
+import { settingsFor } from './platform';
 import { TRANSIT_LINES } from './transit';
 
 interface Env {
@@ -517,6 +518,21 @@ export class LoftLifeRealtime {
     if(!response.ok){error(ws,result.code??'party_error',result.error??'Party action failed');return;}
   }
 
+  /** Respect the recipient's "messages from friends only" preference. */
+  private async dmAllowed(senderId: string, targetId: string): Promise<boolean> {
+    try {
+      const settings = await settingsFor(this.database(), targetId);
+      if (settings.privacy.messages !== 'friends') return true;
+      const friends = await this.database().query(
+        "SELECT 1 FROM ll_friendships WHERE status='accepted' AND ((a=$1 AND b=$2) OR (a=$2 AND b=$1)) LIMIT 1",
+        [senderId, targetId]
+      );
+      return friends.length > 0;
+    } catch {
+      return true;
+    }
+  }
+
   private async chat(ws: HibernatableWebSocket, player: Player, message: Record<string, unknown>) {
     const body = typeof message.body === 'string' ? message.body.trim().slice(0, MAX_CHAT_LENGTH) : '';
     if (!body) return;
@@ -541,6 +557,7 @@ export class LoftLifeRealtime {
       if(!handle){error(ws,'bad_request','A recipient handle is required');return;}
       const rows=await this.database().query('SELECT id,handle FROM ll_accounts WHERE handle=$1 LIMIT 1',[handle]) as Array<{id:string;handle:string}>;
       if(!rows[0]){error(ws,'not_found','No player with that handle');return;}
+      if(!(await this.dmAllowed(player.userId,rows[0].id))){error(ws,'forbidden','This player only accepts messages from friends');return;}
       const target=rows[0];
       if(target.id===player.userId){error(ws,'bad_request','You cannot message yourself');return;}
       const blocked=await this.database().query('SELECT 1 FROM ll_blocks WHERE (user_id=$1 AND blocked_id=$2) OR (user_id=$2 AND blocked_id=$1) LIMIT 1',[player.userId,target.id]);

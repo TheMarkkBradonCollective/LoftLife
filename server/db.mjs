@@ -57,6 +57,11 @@ CREATE TABLE IF NOT EXISTS profiles (
   display_name TEXT NOT NULL,
   avatar_json  TEXT NOT NULL,
   bio          TEXT NOT NULL DEFAULT '',
+  -- Voice range + microphone mode + sensitivity, synced to the account.
+  voice_json   TEXT NOT NULL DEFAULT '{}',
+  -- Keybindings and touch layout, synced per account.
+  controls_json TEXT NOT NULL DEFAULT '{}',
+  controls_updated_at INTEGER NOT NULL DEFAULT 0,
   updated_at   INTEGER NOT NULL
 );
 
@@ -166,6 +171,20 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 CREATE INDEX IF NOT EXISTS chat_scope ON chat_messages(scope, scope_id, created_at DESC);
 
+-- Per-account preferences and per-conversation read markers for the platform UI.
+CREATE TABLE IF NOT EXISTS account_settings (
+  user_id    TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  data_json  TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS dm_reads (
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  peer_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  last_read_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, peer_id)
+);
+
 CREATE TABLE IF NOT EXISTS reports (
   id             TEXT PRIMARY KEY,
   reporter_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -185,6 +204,22 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS audit_created ON audit_log(created_at DESC);
 `);
+
+// Databases created before voice preferences existed keep their rows; the
+// column is added in place instead of requiring a rebuild.
+const profileColumns = db
+  .prepare('PRAGMA table_info(profiles)')
+  .all()
+  .map((row) => row.name);
+if (!profileColumns.includes('voice_json')) {
+  db.exec("ALTER TABLE profiles ADD COLUMN voice_json TEXT NOT NULL DEFAULT '{}'");
+}
+if (!profileColumns.includes('controls_json')) {
+  db.exec("ALTER TABLE profiles ADD COLUMN controls_json TEXT NOT NULL DEFAULT '{}'");
+}
+if (!profileColumns.includes('controls_updated_at')) {
+  db.exec('ALTER TABLE profiles ADD COLUMN controls_updated_at INTEGER NOT NULL DEFAULT 0');
+}
 
 /** Run `fn` inside an IMMEDIATE transaction; rolls back on any throw. */
 export function tx(fn) {

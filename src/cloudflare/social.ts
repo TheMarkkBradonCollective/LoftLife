@@ -1,3 +1,5 @@
+import { canViewProfileWith, settingsFor } from './platform';
+
 type Sql = { query(query: string, params?: unknown[]): Promise<unknown[]> };
 type User = { id: string; handle: string; role: string };
 type Row = Record<string, unknown>;
@@ -11,6 +13,7 @@ export async function handleSocialRoute(request:Request,sql:Sql,user:User|null):
   const handle=decodeURIComponent(path.slice('/api/profiles/'.length)).toLowerCase();
   const rows=await sql.query('SELECT a.id,a.handle,a.display_name,p.bio,p.avatar_json,p.updated_at,a.created_at FROM ll_accounts a JOIN ll_profiles p ON p.user_id=a.id WHERE a.handle=$1 LIMIT 1',[handle]) as Row[];
   if(!rows[0])return fail('No player with that handle.',404,'not_found');
+  if(!(await canViewProfileWith(sql,user?.id??null,String(rows[0].id))))return fail('This profile is private.',403,'forbidden');
   let avatar=null;try{avatar=JSON.parse(String(rows[0].avatar_json));}catch{}
   return json({userId:rows[0].id,handle:rows[0].handle,displayName:rows[0].display_name,bio:rows[0].bio,avatar,createdAt:Number(rows[0].created_at),updatedAt:Number(rows[0].updated_at)});
  }
@@ -41,6 +44,7 @@ export async function handleSocialRoute(request:Request,sql:Sql,user:User|null):
    await sql.query("UPDATE ll_friendships SET status='accepted' WHERE a=$1 AND b=$2",[a,b]);
    return json({status:'accepted'});
   }
+  if((await settingsFor(sql,other)).privacy.friendRequests!=='everyone')return fail('This player is not accepting friend requests.',403,'forbidden');
   await sql.query("INSERT INTO ll_friendships(a,b,status,requested_by,created_at) VALUES($1,$2,'pending',$3,$4)",[a,b,user.id,Date.now()]);
   return json({status:'pending'});
  }

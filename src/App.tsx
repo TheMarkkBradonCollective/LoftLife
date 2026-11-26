@@ -1,11 +1,14 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   Armchair,
   BedDouble,
   BookOpen,
   Camera,
   ChevronDown,
   ChevronUp,
+  Cloud,
+  CloudOff,
   Coffee,
   Copy,
   DoorOpen,
@@ -15,11 +18,15 @@ import {
   Frame,
   Gamepad2,
   Hand,
+  HardDrive,
   Home,
   ArrowUp,
   LampDesk,
   LampFloor,
   Layers,
+  Loader2,
+  LogIn,
+  LogOut,
   Map as MapIcon,
   MessageCircle,
   Monitor,
@@ -28,6 +35,7 @@ import {
   Paintbrush,
   PencilRuler,
   RotateCw,
+  Settings,
   Sofa,
   Sparkles,
   Sprout,
@@ -43,26 +51,36 @@ import {
   Volume2,
   VolumeX,
   Footprints,
-  Mic,
-  MicOff,
   X,
 } from 'lucide-react';
+import { AuthGate } from './components/AuthGate';
 import { AvatarModal } from './components/AvatarModal';
 import { CityMapModal } from './components/CityMapModal';
 import { ElevatorPanelModal } from './components/ElevatorPanelModal';
 import { HotelDoorTerminalModal } from './components/HotelDoorTerminalModal';
-import type { CameraPresetRequest } from './components/RoomViewport';
+import { RoomSettingsModal } from './components/RoomSettingsModal';
+import { SyncConflictModal } from './components/SyncConflictModal';
 import { SocialHud } from './components/SocialHud';
+import { PlatformNotice } from './components/PlatformNotice';
+import { WorldMenu } from './components/WorldMenu';
 import { TouchControls } from './components/TouchControls';
-import { isTouchDevice } from './game/touchInput';
+import { useDeviceEnvironment } from './game/platform';
+import { MOBILE_GAMEPLAY_MESSAGE } from '../shared/device-platform.mjs';
 
 // Three.js is only needed once the world renders; lazy-loading keeps the
 // sign-in wall light.
 const RoomViewport = lazy(() =>
   import('./components/RoomViewport').then((module) => ({ default: module.RoomViewport }))
 );
-import { api } from './net/api';
+import { api, type WorldSummary } from './net/api';
+import { MIC_MODE_INFO, VOICE_RANGE_INFO } from '../shared/voice-controls.mjs';
+import { isEditableElement } from '../shared/desktop-shortcuts.mjs';
+import { bindingMatchesEvent } from '../shared/keybindings.mjs';
+import { useKeybindings } from './game/keybindings';
+import { wallAxis } from '../shared/room-walls.mjs';
 import { useSession } from './session';
+import { useSettings } from './platform/settings';
+import type { GameEntry } from './platform/types';
 import { sfx } from './game/audio';
 import {
   DEFAULT_AVATAR,
@@ -94,6 +112,13 @@ import type {
 
 const STORAGE_KEY = 'loftlife_room_state_v1';
 const LEGACY_STORAGE_KEY = 'loftline_room_state_v1';
+// Copies kept when a device/account conflict is settled, so the losing side is
+// never destroyed. Local only; never uploaded.
+const ACCOUNT_BACKUP_KEY = 'loftlife_account_suite_backup_v1';
+const DEVICE_BACKUP_KEY = 'loftlife_device_suite_backup_v1';
+// Voice range and microphone mode both live in the session (see
+// shared/voice-controls.mjs), so desktop keys and phone controls share one
+// state. These are only presentation labels.
 
 interface SavedState {
   items: PlacedItem[];
@@ -130,6 +155,87 @@ function loadSavedState(): SavedState {
     avatar: DEFAULT_AVATAR,
     roomName: preset.name,
   };
+}
+
+interface SuiteSnapshot {
+  items: PlacedItem[];
+  surfaces: RoomSurfaceConfig;
+  mood: LightingMood;
+  roomName: string;
+  avatar: AvatarConfig;
+}
+
+const avatarFingerprint = (avatar: AvatarConfig) =>
+  [
+    avatar.name,
+    avatar.skinTone,
+    avatar.hairStyle,
+    avatar.hairColor,
+    avatar.topStyle,
+    avatar.topColor,
+    avatar.bottomColor,
+    avatar.shoeColor,
+    avatar.accessory,
+  ].join(':');
+
+/** Identity of a suite + character, ignoring server/local id churn. */
+function suiteFingerprint(state: SuiteSnapshot): string {
+  const items = state.items
+    .map((item) =>
+      [
+        item.catalogId,
+        item.gx,
+        item.gz,
+        item.rot,
+        item.wall ?? '',
+        item.color,
+        item.active === false ? 'off' : 'on',
+      ].join(':')
+    )
+    .sort()
+    .join('|');
+  return [
+    state.roomName.trim(),
+    state.mood,
+    state.surfaces.floor,
+    state.surfaces.wall,
+    avatarFingerprint(state.avatar),
+    items,
+  ].join('::');
+}
+
+function defaultSnapshot(): SuiteSnapshot {
+  const preset = ROOM_PRESETS[0];
+  return {
+    items: preset.items,
+    surfaces: preset.surfaces,
+    mood: preset.mood,
+    roomName: preset.name,
+    avatar: DEFAULT_AVATAR,
+  };
+}
+
+/** A save that still matches the starting loft is not progress worth a prompt. */
+function hasDeviceProgress(saved: SavedState): boolean {
+  try {
+    return suiteFingerprint(saved) !== suiteFingerprint(defaultSnapshot());
+  } catch {
+    return true;
+  }
+}
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  return isEditableElement(el);
+}
+
+function keepBackup(key: string, payload: Record<string, unknown>) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ savedAt: new Date().toISOString(), ...payload }));
+  } catch {
+    // A full quota must not block the choice; the main save still applies.
+  }
 }
 
 function getCategoryIcon(catalogId: string) {
@@ -190,8 +296,23 @@ const CATEGORY_TABS: { id: 'all' | FurnitureCategory; label: string }[] = [
   { id: 'wall', label: 'Wall' },
 ];
 
-export default function App() {
+function readPortraitOrientation(): boolean {
+  if (typeof window === 'undefined') return true;
+  const query = window.matchMedia?.('(orientation: portrait)');
+  if (query) return query.matches;
+  return window.innerHeight >= window.innerWidth;
+}
+
+interface AppProps {
+  /** Which destination the platform opened; the dashboard is never rendered here. */
+  entry?: GameEntry;
+  /** Return to the LoftLife platform without destroying the account session. */
+  onExitPlatform?: () => void;
+}
+
+export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const session = useSession();
+  const { settings } = useSettings();
 
   // Server-owned state wins when signed in; localStorage stays the offline path.
   // Read once on mount — later edits flow through state and the save effects below.
@@ -209,7 +330,9 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const [location, setLocation] = useState<WorldLocation>('room');
+  const [location, setLocation] = useState<WorldLocation>(
+    entry?.kind === 'city' ? 'world' : 'room'
+  );
   const [hallwayFloor, setHallwayFloor] = useState<number>(PLAYER_SUITE_FLOOR);
   const [unlockedRooms, setUnlockedRooms] = useState<string[]>([]);
   const [mainDoorUnlocked, setMainDoorUnlocked] = useState<boolean>(false);
@@ -219,20 +342,35 @@ export default function App() {
   const [doorTerminalOpen, setDoorTerminalOpen] = useState(false);
   const [elevatorModalOpen, setElevatorModalOpen] = useState(false);
 
-  const touchDevice = useMemo(() => isTouchDevice(), []);
-  const [viewMode, setViewMode] = useState<ViewMode>(() => (isTouchDevice() ? 'play' : 'isometric'));
-  const [mode, setMode] = useState<GameMode>('walk');
+  // Runtime environment decides controls and gameplay access. Width is never
+  // used: a narrow desktop window stays a desktop, and a mobile PWA is still a
+  // mobile browser rather than the Android APK.
+  const device = useDeviceEnvironment();
+  const gameplayAllowed = device.gameplayAllowed;
+  const touchDevice = device.controls === 'touch';
+  // Only phones and tablets derive the camera from orientation. A hybrid
+  // desktop that briefly uses its touchscreen must keep the view the player
+  // already chose.
+  const mobileRuntime = device.deviceClass === 'mobile' || device.deviceClass === 'tablet';
+  const [isPortrait, setIsPortrait] = useState<boolean>(() => readPortraitOrientation());
+  const [viewMode, setViewMode] = useState<ViewMode>(() =>
+    mobileRuntime ? (readPortraitOrientation() ? 'isometric' : 'play') : 'isometric'
+  );
+  const [mode, setMode] = useState<GameMode>(() =>
+    entry?.kind === 'suite' && entry.edit ? 'edit' : gameplayAllowed ? 'walk' : 'edit'
+  );
   const [items, setItems] = useState<PlacedItem[]>(initial.items);
   const [history, setHistory] = useState<PlacedItem[][]>([]);
   const [surfaces, setSurfaces] = useState<RoomSurfaceConfig>(initial.surfaces);
   const [mood, setMood] = useState<LightingMood>(initial.mood);
   const [roomName, setRoomName] = useState<string>(initial.roomName);
   const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(initial.avatar);
-  const [activeWorld, setActiveWorld] = useState<{
-    id: string;
-    name: string;
-    canEdit: boolean;
-  } | null>(null);
+  const [activeWorld, setActiveWorld] = useState<WorldSummary | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const controls = useKeybindings({
+    online: session.status === 'online',
+    userId: session.user?.id ?? null,
+  });
 
   // Walk & Emote state
   const [activeEmote, setActiveEmote] = useState<EmoteType>('idle');
@@ -254,14 +392,71 @@ export default function App() {
   const [movingUid, setMovingUid] = useState<string | null>(null);
 
   // UI Chrome state
-  const [dockCollapsed, setDockCollapsed] = useState(() => isTouchDevice());
+  const [dockCollapsed, setDockCollapsed] = useState(() => device.controls === 'touch');
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
+  const [roomSettingsOpen, setRoomSettingsOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  // Signed in, but the device suite and the account suite disagree. Writes to
+  // the account are paused until the player picks one.
+  const [conflict, setConflict] = useState<{ device: SavedState; account: SuiteSnapshot } | null>(
+    null
+  );
+  const [conflictOpen, setConflictOpen] = useState(false);
+  const [syncPaused, setSyncPaused] = useState(false);
+  // Account writes stay blocked until the screen has adopted the account copy,
+  // so a stale device mirror can never be pushed over it on boot.
+  const onlineReadyRef = useRef(false);
   const [cityMapOpen, setCityMapOpen] = useState(false);
   const [cityStreet, setCityStreet] = useState('M St & 15th St');
   const [muted, setMuted] = useState(false);
-  const [cameraPreset, setCameraPreset] = useState<CameraPresetRequest | null>(null);
-  const [cameraToggle, setCameraToggle] = useState<'overview' | 'closeup'>('overview');
+  // Z toggles the camera distance only: close avatar view vs wide room view.
+  const [closeZoom, setCloseZoom] = useState(false);
+  // F toggles Follow Character in Isometric Mode; Play View always follows.
+  const [followCharacter, setFollowCharacter] = useState(true);
   const playerPoseRef = useRef({ x: 0, z: 0, yaw: 0 });
+
+  // Dev-only probe so each runtime can be exercised without guessing from CSS.
+  useEffect(() => {
+    if (!(import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) return;
+    (window as unknown as Record<string, unknown>).__loftlife_env = device;
+  }, [device]);
+
+  useEffect(() => {
+    const update = () => setIsPortrait(readPortraitOrientation());
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    const query = window.matchMedia?.('(orientation: portrait)');
+    query?.addEventListener?.('change', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+      query?.removeEventListener?.('change', update);
+    };
+  }, []);
+
+  // Phones and tablets derive the camera from orientation. Editing pins
+  // isometric so taps land on the grid, and rotating back restores the
+  // orientation view. A desktop touchscreen keeps its chosen camera mode.
+  useEffect(() => {
+    if (!mobileRuntime || mode === 'edit') return;
+    setViewMode(isPortrait ? 'isometric' : 'play');
+  }, [mobileRuntime, isPortrait, mode]);
+
+  // Mobile browsers and unsupported runtimes get the loft manager only: no
+  // walking, no worlds, no second camera. This is enforced in app state, not
+  // just by hiding the entry buttons.
+  useEffect(() => {
+    if (gameplayAllowed) return;
+    setActiveWorld(null);
+    setActiveResident(null);
+    setLocation('room');
+    setMode('edit');
+    setViewMode('isometric');
+    setSelectedUid(null);
+    setPlacingCatalogId(null);
+    setMovingUid(null);
+  }, [gameplayAllowed]);
 
   // Persist locally always; mirror to the account when signed in.
   useEffect(() => {
@@ -280,22 +475,103 @@ export default function App() {
       // Ignore storage quota errors
     }
 
-    if (session.status !== 'online') return;
+    if (session.status !== 'online' || syncPaused || !onlineReadyRef.current) return;
     const state = { name: roomName, items, surfaces, mood };
     if (activeWorld) {
       if (activeWorld.canEdit) session.saveWorldState(activeWorld.id, state);
     } else {
       session.saveRoomState(state);
     }
-  }, [items, surfaces, mood, avatarConfig, roomName, activeWorld, session.status]);
+  }, [items, surfaces, mood, avatarConfig, roomName, activeWorld, session.status, syncPaused]);
 
   // Character appearance is part of the persistent account. Skip the write when
   // the local outfit already matches the account (e.g. just after sign-in).
   useEffect(() => {
-    if (session.status !== 'online' || !session.profile) return;
+    if (session.status !== 'online' || !session.profile || syncPaused || !onlineReadyRef.current)
+      return;
     if (JSON.stringify(session.profile.avatar) === JSON.stringify(avatarConfig)) return;
     session.saveAvatar(avatarConfig);
-  }, [avatarConfig, session.status, session.profile]);
+  }, [avatarConfig, session.status, session.profile, syncPaused]);
+
+  // The character lives on this device until the player chooses to go online.
+  // Signing up adopts that local character. Signing in to an existing account
+  // must never replace device progress silently: a difference opens the sync
+  // dialog and pauses account writes until it is settled.
+  const previousStatusRef = useRef(session.status);
+  useEffect(() => {
+    const previous = previousStatusRef.current;
+    previousStatusRef.current = session.status;
+    if (session.status !== 'online' || previous === 'online') return;
+
+    if (session.justRegistered) {
+      const saved = loadSavedState();
+      setAvatarConfig(saved.avatar);
+      setItems(saved.items);
+      setSurfaces(saved.surfaces);
+      setMood(saved.mood);
+      setRoomName(saved.roomName);
+      session.clearJustRegistered();
+      setConflict(null);
+      setConflictOpen(false);
+      setSyncPaused(false);
+      onlineReadyRef.current = true;
+      showHint('Offline character brought online');
+      return;
+    }
+
+    if (!session.suite || !session.profile) {
+      onlineReadyRef.current = true;
+      return;
+    }
+    const account: SuiteSnapshot = {
+      items: session.suite.items,
+      surfaces: session.suite.surfaces,
+      mood: session.suite.mood,
+      roomName: session.suite.name,
+      avatar: session.profile.avatar,
+    };
+
+    // Only an explicit sign-in (offline -> online) can collide with progress
+    // made on this device; restoring a token on boot is the account's own copy.
+    if (previous === 'offline') {
+      const device = loadSavedState();
+      if (hasDeviceProgress(device) && suiteFingerprint(device) !== suiteFingerprint(account)) {
+        setConflict({ device, account });
+        setConflictOpen(true);
+        setSyncPaused(true);
+        onlineReadyRef.current = true;
+        showHint('This device has a different suite than your account');
+        return;
+      }
+    }
+
+    setItems(account.items);
+    setSurfaces(account.surfaces);
+    setMood(account.mood);
+    setRoomName(account.roomName);
+    setAvatarConfig(account.avatar);
+    setConflict(null);
+    setConflictOpen(false);
+    setSyncPaused(false);
+    onlineReadyRef.current = true;
+    showHint('Signed in · online character loaded');
+  }, [
+    session.status,
+    session.justRegistered,
+    session.suite,
+    session.profile,
+    session.clearJustRegistered,
+    // showHint only touches timer refs, so it is stable enough to leave out here.
+  ]);
+
+  // Leaving the account behind also drops any pending choice.
+  useEffect(() => {
+    if (session.status === 'online') return;
+    onlineReadyRef.current = false;
+    setConflict(null);
+    setConflictOpen(false);
+    setSyncPaused(false);
+  }, [session.status]);
 
   // Stream position/emote to the realtime gateway while online.
   useEffect(() => {
@@ -315,27 +591,6 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [session.status, session.setPose, session.setVoiceAnchor, location, activeEmote]);
 
-  // Push-to-talk: hold T while voice is enabled.
-  useEffect(() => {
-    if (session.voiceStatus !== 'ready') return;
-    const onDown = (event: KeyboardEvent) => {
-      if (event.code !== 'KeyT' || event.repeat) return;
-      const active = document.activeElement;
-      if (active && ['INPUT', 'TEXTAREA'].includes(active.tagName)) return;
-      session.setPushToTalk(true);
-    };
-    const onUp = (event: KeyboardEvent) => {
-      if (event.code === 'KeyT') session.setPushToTalk(false);
-    };
-    window.addEventListener('keydown', onDown);
-    window.addEventListener('keyup', onUp);
-    return () => {
-      window.removeEventListener('keydown', onDown);
-      window.removeEventListener('keyup', onUp);
-      session.setPushToTalk(false);
-    };
-  }, [session.voiceStatus, session.setPushToTalk]);
-
   const showHint = useCallback((text: string | null) => {
     setWalkHint(text);
     if (hintTimerRef.current) window.clearTimeout(hintTimerRef.current);
@@ -350,8 +605,49 @@ export default function App() {
     npcChatTimerRef.current = window.setTimeout(() => setNpcChat(null), 5500);
   }, []);
 
+  /** Keep the on-device suite and upload it, after the player confirms. */
+  const keepDeviceSuite = useCallback(() => {
+    if (!conflict) return;
+    // Upload what is on screen now, not the snapshot taken when the dialog
+    // opened: the player may have kept editing while it was dismissed.
+    keepBackup(ACCOUNT_BACKUP_KEY, { suite: conflict.account });
+    setConflict(null);
+    setConflictOpen(false);
+    setSyncPaused(false);
+    session.saveRoomState({ name: roomName, items, surfaces, mood });
+    session.saveAvatar(avatarConfig);
+    showHint('Device suite kept · syncing to your account');
+  }, [conflict, session, showHint, roomName, items, surfaces, mood, avatarConfig]);
+
+  /** Load the account suite, after copying the device one aside. */
+  const useAccountSuite = useCallback(() => {
+    if (!conflict) return;
+    const { device, account } = conflict;
+    keepBackup(DEVICE_BACKUP_KEY, { suite: device });
+    setItems(account.items);
+    setSurfaces(account.surfaces);
+    setMood(account.mood);
+    setRoomName(account.roomName);
+    setAvatarConfig(account.avatar);
+    setConflict(null);
+    setConflictOpen(false);
+    setSyncPaused(false);
+    showHint('Account suite loaded · device copy saved locally');
+  }, [conflict, showHint]);
+
+  const retryOnlineSave = useCallback(() => {
+    if (session.status !== 'online' || syncPaused) return;
+    session.saveRoomState({ name: roomName, items, surfaces, mood });
+    session.saveAvatar(avatarConfig);
+    showHint('Trying to save again…');
+  }, [session, syncPaused, roomName, items, surfaces, mood, avatarConfig, showHint]);
+
   const handleChangeLocation = useCallback(
     (next: WorldLocation) => {
+      if (!gameplayAllowed && next !== 'room') {
+        showHint(MOBILE_GAMEPLAY_MESSAGE);
+        return;
+      }
       sfx.playToggle(next === 'world');
       setLocation(next);
       setNpcChat(null);
@@ -365,7 +661,11 @@ export default function App() {
         setCityMapOpen(false);
       }
       if (next === 'world') {
-        showHint('Main City · Walk to Hotel Main Entrance & press E for Keycard / Guest Intercom');
+        showHint(
+          touchDevice
+            ? 'Main City · Tap the street to walk · Tap the Hotel doors for Keycard / Intercom'
+            : 'Main City · Walk to Hotel Main Entrance & press E for Keycard / Guest Intercom'
+        );
       } else if (next === 'lobby') {
         showHint('Main Lobby · Walk into the North brass elevator to ride to Floors 2–4');
       } else if (next === 'hallway') {
@@ -374,10 +674,14 @@ export default function App() {
       } else if (next === 'room') {
         setActiveResident(null);
         setHallwayFloor(PLAYER_SUITE_FLOOR);
-        showHint(`${roomName} (Suite ${PLAYER_SUITE_NUMBER}) · Walk to West door & press E for Keycard`);
+        showHint(
+          touchDevice
+            ? `${roomName} (Suite ${PLAYER_SUITE_NUMBER}) · Tap the West door for your Keycard`
+            : `${roomName} (Suite ${PLAYER_SUITE_NUMBER}) · Walk to West door & press E for Keycard`
+        );
       }
     },
-    [hallwayFloor, roomName, showHint]
+    [gameplayAllowed, hallwayFloor, roomName, showHint, touchDevice]
   );
 
   const handleUnlockRoomDoor = useCallback(() => {
@@ -396,6 +700,10 @@ export default function App() {
 
   const handleEnterSuiteFromHallway = useCallback(
     (roomNumber: string) => {
+      if (!gameplayAllowed) {
+        showHint(MOBILE_GAMEPLAY_MESSAGE);
+        return;
+      }
       if (roomNumber === PLAYER_SUITE_NUMBER) {
         setActiveResident(null);
         handleChangeLocation('room');
@@ -407,11 +715,15 @@ export default function App() {
         setTargetVisitResident(null);
         setLocation('resident_room');
         setMode('walk');
-        showHint(`Entered ${res.name}'s Suite ${res.roomNumber} · Press E near ${res.name} to chat`);
+        showHint(
+          touchDevice
+            ? `Entered ${res.name}'s Suite ${res.roomNumber} · Tap ${res.name} to chat`
+            : `Entered ${res.name}'s Suite ${res.roomNumber} · Press E near ${res.name} to chat`
+        );
         showNpcChat(res.name, res.greeting);
       }
     },
-    [handleChangeLocation, showHint, showNpcChat]
+    [gameplayAllowed, handleChangeLocation, showHint, showNpcChat, touchDevice]
   );
 
   const handleUnlockMainWithKeycard = useCallback(() => {
@@ -447,6 +759,11 @@ export default function App() {
 
   const handleArriveFloor = useCallback(
     (floor: 'L' | 2 | 3 | 4) => {
+      if (!gameplayAllowed) {
+        setElevatorModalOpen(false);
+        showHint(MOBILE_GAMEPLAY_MESSAGE);
+        return;
+      }
       setElevatorModalOpen(false);
       if (floor === 'L') {
         handleChangeLocation('lobby');
@@ -458,19 +775,23 @@ export default function App() {
         showHint(`Arrived on Floor ${floor} · Walk down the hallway to Suites ${floor}01–${floor}04`);
       }
     },
-    [handleChangeLocation, showHint]
+    [gameplayAllowed, handleChangeLocation, showHint]
   );
 
   /** Load a player-created world into the room builder. */
   const handleEnterWorld = useCallback(
     async (worldId: string) => {
+      if (!gameplayAllowed) {
+        showHint(MOBILE_GAMEPLAY_MESSAGE);
+        return;
+      }
       try {
         const world = await api.world(worldId);
         if (!world.canEnter || !world.items) {
           showHint('You do not have access to that world');
           return;
         }
-        setActiveWorld({ id: world.id, name: world.name, canEdit: world.canEdit });
+        setActiveWorld(world);
         setItems(world.items);
         if (world.surfaces) setSurfaces(world.surfaces);
         setMood(world.mood ?? 'morning');
@@ -490,13 +811,35 @@ export default function App() {
         showHint(error instanceof Error ? error.message : 'Could not enter that world');
       }
     },
-    [session, showHint]
+    [gameplayAllowed, session, showHint]
   );
+
+  // Apply the destination the platform asked for, once per mount. A world entry
+  // still validates access through the API; a failure leaves the player in the suite.
+  const entryAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!entry || entryAppliedRef.current) return;
+    entryAppliedRef.current = true;
+    if (entry.kind === 'city') {
+      setLocation('world');
+      session.enterCity();
+      showHint('TheCity · walk to the Grand Hotel entrance and press E for the keycard');
+    } else if (entry.kind === 'suite') {
+      setLocation('room');
+      if (entry.edit) setMode('edit');
+      session.enterCity();
+      showHint(entry.edit ? 'Edit Room · place furniture, then walk to explore' : 'Welcome to your suite');
+    } else if (entry.kind === 'world') {
+      void handleEnterWorld(entry.worldId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** Return from a player world to the hotel suite. */
   const handleLeaveWorld = useCallback(() => {
     setActiveWorld(null);
-    const suite = session.suite;
+    // While a conflict is unresolved the device suite is the truth on screen.
+    const suite = conflict ? null : session.suite;
     if (suite) {
       setItems(suite.items);
       setSurfaces(suite.surfaces);
@@ -510,7 +853,42 @@ export default function App() {
     setMovingUid(null);
     session.enterCity();
     showHint('Back in your suite');
-  }, [session, showHint]);
+  }, [session, showHint, conflict]);
+
+  const handleWorldUpdated = useCallback((updated: WorldSummary) => {
+    setActiveWorld((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
+    if (updated.name) setRoomName(updated.name);
+  }, []);
+
+  /** Confirm-leave path: flush the latest build state, then restore the suite. */
+  const handleLeaveWorldConfirmed = useCallback(async () => {
+    if (!activeWorld) return;
+    if (activeWorld.canEdit && session.status === 'online') {
+      try {
+        await api.saveWorldState(activeWorld.id, { items, surfaces, mood });
+      } catch {
+        showHint('World could not sync before leaving · the saved copy is unchanged');
+      }
+    }
+    handleLeaveWorld();
+  }, [activeWorld, session.status, items, surfaces, mood, showHint, handleLeaveWorld]);
+
+  /** M-menu travel: player worlds leave first, then Main City. */
+  const handleTravelCity = useCallback(() => {
+    if (activeWorld) {
+      handleLeaveWorld();
+      setLocation('world');
+      session.enterCity();
+      showHint('Main City · press M for the map and world menu');
+      return;
+    }
+    handleChangeLocation('world');
+  }, [activeWorld, handleLeaveWorld, session, handleChangeLocation, showHint]);
+
+  const handleTravelSuite = useCallback(() => {
+    if (activeWorld) handleLeaveWorld();
+    handleChangeLocation('room');
+  }, [activeWorld, handleLeaveWorld, handleChangeLocation]);
 
   const pushHistory = useCallback((prevItems: PlacedItem[]) => {
     setHistory((h) => [...h.slice(-19), prevItems]);
@@ -529,6 +907,10 @@ export default function App() {
   }, []);
 
   const handleModeSwitch = (next: GameMode) => {
+    if (next === 'walk' && !gameplayAllowed) {
+      showHint(MOBILE_GAMEPLAY_MESSAGE);
+      return;
+    }
     sfx.playClick();
     setMode(next);
     if (next === 'walk') {
@@ -542,6 +924,10 @@ export default function App() {
   };
 
   const handleTogglePlayView = useCallback(() => {
+    if (!gameplayAllowed) {
+      showHint(MOBILE_GAMEPLAY_MESSAGE);
+      return;
+    }
     sfx.playClick();
     setViewMode((prev) => {
       const next = prev === 'play' ? 'isometric' : 'play';
@@ -551,13 +937,13 @@ export default function App() {
         setPlacingCatalogId(null);
         setMovingUid(null);
         setAvatarModalOpen(false);
-        showHint('Play View · WASD move · Click or drag mouse to look · Esc unlocks cursor');
+        showHint('Play View · WASD move · drag to look · Z close/wide');
       } else {
-        showHint('Isometric View');
+        showHint('Isometric View · click to walk · WASD pans · F follow · Z zoom');
       }
       return next;
     });
-  }, [showHint]);
+  }, [gameplayAllowed, showHint]);
 
   const handlePlaceItem = useCallback(
     (candidate: Omit<PlacedItem, 'uid'>) => {
@@ -572,7 +958,7 @@ export default function App() {
   );
 
   const handleFinishMove = useCallback(
-    (uid: string, gx: number, gz: number, rot: 0 | 1 | 2 | 3, wall?: 'north' | 'west') => {
+    (uid: string, gx: number, gz: number, rot: 0 | 1 | 2 | 3, wall?: PlacedItem['wall']) => {
       pushHistory(items);
       setItems((prev) =>
         prev.map((it) => (it.uid === uid ? { ...it, gx, gz, rot, wall } : it))
@@ -675,11 +1061,8 @@ export default function App() {
       }
       if (e.key === 'h' || e.key === 'H') {
         setDockCollapsed((c) => !c);
-      } else if (e.key === 'v' || e.key === 'V') {
+      } else if ((e.key === 'v' || e.key === 'V') && gameplayAllowed) {
         handleTogglePlayView();
-      } else if ((e.key === 'm' || e.key === 'M') && location === 'world') {
-        sfx.playClick();
-        setCityMapOpen((o) => !o);
       } else if (e.key === 'Escape' && cityMapOpen) {
         setCityMapOpen(false);
       } else if (mode === 'edit') {
@@ -709,7 +1092,8 @@ export default function App() {
           let nextGx = selectedItem.gx;
           let nextGz = selectedItem.gz;
           if (selectedCatalog.layer === 'wall') {
-            if (selectedItem.wall === 'west') {
+            // Wall items slide along their own wall: X on north/south, Z on east/west.
+            if (wallAxis(selectedItem.wall ?? 'north') === 'z') {
               nextGz = snapGrid(
                 Math.max(0, Math.min(GRID_SIZE - selectedCatalog.size[0], selectedItem.gz + dz))
               );
@@ -792,33 +1176,56 @@ export default function App() {
 
   const handleBoardTransit = useCallback(
     (lineId: string, stopId: string) => {
-      setViewMode('play');
+      if (!gameplayAllowed) {
+        showHint(MOBILE_GAMEPLAY_MESSAGE);
+        return;
+      }
+      // Riding needs the chase camera, except in portrait where isometric is pinned.
+      if (!(touchDevice && isPortrait)) setViewMode('play');
       setMode('walk');
       const sent = session.boardTransit(lineId, stopId);
       if (!sent) showHint('Connecting… try boarding again in a moment');
     },
-    [session, showHint]
+    [gameplayAllowed, session, showHint, touchDevice, isPortrait]
   );
 
   const handleExitTransit = useCallback(() => {
     session.exitTransit();
   }, [session]);
 
-  const toggleVoice = useCallback(async () => {
-    if (session.voiceStatus === 'ready') {
-      session.disableVoice();
-      showHint('Voice off');
+  /** R (and the mobile range button) cycle Off → Whisper → Talk → Shout → Off. */
+  const cycleRange = useCallback(() => {
+    const next = session.cycleVoiceRange();
+    sfx.playClick();
+    const info = VOICE_RANGE_INFO[next];
+    showHint(`Voice range · ${info.label}${info.meters ? ` (${info.meters} m)` : ''}`);
+  }, [session, showHint]);
+
+  /** Z toggles a distance change only; angle, target and follow are untouched. */
+  const toggleCloseZoom = useCallback(() => {
+    sfx.playClick();
+    const next = !closeZoom;
+    setCloseZoom(next);
+    showHint(
+      next ? 'Close view · Z returns to the wide room view' : 'Wide room view · Z zooms in close'
+    );
+  }, [closeZoom, showHint]);
+
+  /** F changes only Follow Character, and only in Isometric Mode. */
+  const toggleFollowCharacter = useCallback(() => {
+    if (viewMode === 'play') {
+      showHint('Play View always follows · V switches to Isometric for camera-free mode');
       return;
     }
-    const next = await session.enableVoice();
-    if (next === 'denied') {
-      showHint('Microphone permission denied — text chat still works');
-    } else if (next === 'unsupported') {
-      showHint('This browser does not support voice chat');
-    } else if (next === 'ready') {
-      showHint('Voice on · hold T (or the mic button) to talk');
-    }
-  }, [session, showHint]);
+    sfx.playClick();
+    const next = !followCharacter;
+    setFollowCharacter(next);
+    showHint(
+      next
+        ? 'Following your avatar · WASD pans temporarily, F stops following'
+        : 'Camera free · WASD pans freely, F follows your avatar again'
+    );
+  }, [followCharacter, showHint, viewMode]);
 
   const filteredCatalog = useMemo(() => {
     if (categoryFilter === 'all') return FURNITURE_CATALOG;
@@ -833,7 +1240,169 @@ export default function App() {
   const hudPanelClass =
     'bg-[#0b100d]/95 text-slate-100 border-[#39ff14]/30 neon-panel-glow';
 
-  const anyModalOpen = avatarModalOpen || cityMapOpen || doorTerminalOpen || elevatorModalOpen;
+  const canEditRoom = location === 'room' && (!activeWorld || activeWorld.canEdit);
+
+  const anyModalOpen =
+    avatarModalOpen ||
+    cityMapOpen ||
+    doorTerminalOpen ||
+    elevatorModalOpen ||
+    roomSettingsOpen ||
+    authOpen ||
+    menuOpen ||
+    conflictOpen;
+
+  // Android back closes the top layer first, then minimizes the app. The
+  // wrapper dispatches `loftlife:native-back`; Cordova WebViews use the
+  // standard `backbutton` event. Browsers are left alone.
+  useEffect(() => {
+    if (!device.androidApp) return;
+    const bridge = (window as unknown as {
+      LoftLifeAndroid?: { minimizeApp?: () => void };
+      LoftLifeAndroidApp?: { minimizeApp?: () => void };
+    });
+    const closeTopLayer = (): boolean => {
+      if (conflictOpen) {
+        setConflictOpen(false);
+        return true;
+      }
+      if (authOpen) {
+        setAuthOpen(false);
+        return true;
+      }
+      if (menuOpen) {
+        setMenuOpen(false);
+        return true;
+      }
+      if (roomSettingsOpen) {
+        setRoomSettingsOpen(false);
+        return true;
+      }
+      if (avatarModalOpen) {
+        setAvatarModalOpen(false);
+        return true;
+      }
+      if (cityMapOpen) {
+        setCityMapOpen(false);
+        return true;
+      }
+      if (doorTerminalOpen) {
+        setDoorTerminalOpen(false);
+        return true;
+      }
+      if (elevatorModalOpen) {
+        setElevatorModalOpen(false);
+        return true;
+      }
+      return false;
+    };
+    const onBack = (event: Event) => {
+      if (closeTopLayer()) {
+        event.preventDefault();
+        return;
+      }
+      const native = bridge.LoftLifeAndroid ?? bridge.LoftLifeAndroidApp;
+      if (native?.minimizeApp) {
+        event.preventDefault();
+        native.minimizeApp();
+      }
+    };
+    window.addEventListener('loftlife:native-back', onBack);
+    document.addEventListener('backbutton', onBack);
+    return () => {
+      window.removeEventListener('loftlife:native-back', onBack);
+      document.removeEventListener('backbutton', onBack);
+    };
+  }, [
+    device.androidApp,
+    conflictOpen,
+    authOpen,
+    menuOpen,
+    roomSettingsOpen,
+    avatarModalOpen,
+    cityMapOpen,
+    doorTerminalOpen,
+    elevatorModalOpen,
+  ]);
+
+  // Desktop shortcuts. T drives whichever microphone mode is selected, R
+  // cycles the voice range, C toggles the shared chat panel, Z toggles the
+  // close/wide camera distance and F toggles Isometric follow. Shared
+  // resolver: nothing fires while typing or in a dialog, and the furniture
+  // builder keeps R for rotating.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) return;
+      if (isTypingTarget(document.activeElement)) return;
+      // M is handled before the dialog gate so it can close its own menu.
+      if (bindingMatchesEvent(controls.bindings.menu, event)) {
+        if (anyModalOpen && !menuOpen) return;
+        event.preventDefault();
+        sfx.playClick();
+        setMenuOpen((open) => !open);
+        return;
+      }
+      if (anyModalOpen) return;
+      if (bindingMatchesEvent(controls.bindings.zoom, event)) {
+        event.preventDefault();
+        toggleCloseZoom();
+      } else if (bindingMatchesEvent(controls.bindings.playToggle, event)) {
+        if (!gameplayAllowed) return;
+        event.preventDefault();
+        handleTogglePlayView();
+      } else if (bindingMatchesEvent(controls.bindings.follow, event)) {
+        event.preventDefault();
+        toggleFollowCharacter();
+      } else if (bindingMatchesEvent(controls.bindings.voice, event)) {
+        event.preventDefault();
+        sfx.playClick();
+        if (session.voice.range === 'off') {
+          showHint(`Voice range is Off — press ${controls.bindings.voiceRange ? 'the range key' : 'the range key'} to pick Whisper, Talk or Shout`);
+          return;
+        }
+        void session.pressMicrophone();
+      } else if (mode !== 'edit' && bindingMatchesEvent(controls.bindings.voiceRange, event)) {
+        event.preventDefault();
+        cycleRange();
+      } else if (bindingMatchesEvent(controls.bindings.chat, event)) {
+        event.preventDefault();
+        sfx.playClick();
+        session.toggleChat();
+      }
+    };
+    // Key-up is deliberately not gated by focus or dialogs, so a held talk key
+    // can never stay latched after the composer steals focus.
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (bindingMatchesEvent(controls.bindings.voice, event)) session.releaseMicrophone();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      session.releaseMicrophone();
+    };
+  }, [
+    anyModalOpen,
+    menuOpen,
+    gameplayAllowed,
+    controls.bindings,
+    cycleRange,
+    handleTogglePlayView,
+    toggleCloseZoom,
+    toggleFollowCharacter,
+    showHint,
+    session.voice.range,
+    session.pressMicrophone,
+    session.releaseMicrophone,
+    session.toggleChat,
+  ]);
+
+  // Switching camera mode or leaving the scene never carries a zoom across.
+  // Follow Character is a player preference, so it survives both.
+  useEffect(() => {
+    setCloseZoom(false);
+  }, [viewMode, location]);
 
   const locationTitle = activeWorld
     ? `${activeWorld.name}${activeWorld.canEdit ? ' · Building' : ' · Visiting'}`
@@ -895,6 +1464,8 @@ export default function App() {
         activeResident={activeResident}
         viewMode={viewMode}
         mode={mode}
+        isTouch={touchDevice}
+        lowPowerGraphics={device.lowPowerGraphics}
         items={items}
         surfaces={surfaces}
         mood={mood}
@@ -906,7 +1477,8 @@ export default function App() {
         placingRotation={placingRotation}
         placingColor={placingColor}
         movingUid={movingUid}
-        cameraPreset={cameraPreset}
+        closeZoom={closeZoom}
+        followCharacter={followCharacter}
         modalOpen={anyModalOpen}
         remotePlayers={remoteInThisScene}
         playerPoseRef={playerPoseRef}
@@ -932,6 +1504,7 @@ export default function App() {
         onUnlockRoomDoor={handleUnlockRoomDoor}
         onUnlockHallwayDoor={handleUnlockHallwayDoor}
         onEnterSuiteFromHallway={handleEnterSuiteFromHallway}
+        graphicsQuality={settings.graphics.quality}
       />
       </Suspense>
 
@@ -943,145 +1516,167 @@ export default function App() {
       )}
 
       {/* Top-Left Brand & Hotel / City Summary */}
-      <div className="fixed top-4 left-4 z-20 pointer-events-auto">
-        <div className={`px-4 py-2.5 rounded-xl border flex items-center gap-3 ${hudPanelClass}`}>
+      <div className="fixed top-4 left-4 z-20 pointer-events-auto max-w-[calc(100vw-2rem)]">
+        <div
+          className={`px-4 py-2.5 rounded-xl border flex items-center gap-3 min-w-0 ${hudPanelClass}`}
+        >
           <span className="font-display text-base font-bold tracking-tight text-[#39ff14] whitespace-nowrap shrink-0">
             LoftLife
           </span>
           <span className="text-xs text-[#39ff14]/45" aria-hidden="true">
             |
           </span>
-          <div className="flex items-center gap-2 text-xs text-slate-200 whitespace-nowrap">
-            <span className="font-medium text-white">{locationTitle}</span>
-            <span className="text-[#39ff14]/60" aria-hidden="true">
+          <div className="flex items-center gap-2 text-xs text-slate-200 min-w-0 whitespace-nowrap">
+            <span className="font-medium text-white truncate max-w-[42vw] sm:max-w-none">
+              {locationTitle}
+            </span>
+            <span className="hidden lg:inline text-[#39ff14]/60" aria-hidden="true">
               ·
             </span>
-            <span className="font-mono-tabular text-slate-300">{locationSub}</span>
+            <span className="hidden lg:inline font-mono-tabular text-slate-300 truncate">
+              {locationSub}
+            </span>
           </div>
         </div>
       </div>
 
       {/* Top-Right Compact Mode & Utility Bar */}
-      <div className="fixed top-4 right-4 z-20 max-w-[calc(100vw-27rem)] flex flex-wrap items-center justify-end gap-2 pointer-events-auto">
-        {/* Leave a player-created world and restore the hotel suite */}
-        {activeWorld && (
+      <div
+        className={`fixed top-[4.5rem] sm:top-4 right-3 sm:right-4 z-20 max-w-[calc(100vw-1.5rem)] sm:max-w-[calc(100vw-27rem)] flex items-center gap-2 pointer-events-auto ${
+          touchDevice
+            ? 'flex-nowrap justify-start overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&_button]:min-h-10 [&_button]:min-w-10'
+            : 'flex-wrap justify-end'
+        }`}
+      >
+        {onExitPlatform && (
           <button
             type="button"
-            onClick={handleLeaveWorld}
-            className="px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-[#ffb878] text-[#1a1005] border-[#ffb878] hover:bg-[#ffc894]"
+            onClick={() => {
+              // A player-built world has its own save-confirm path; finish it
+              // before the platform takes over so edits are not discarded.
+              if (activeWorld) {
+                void handleLeaveWorldConfirmed().then(() => onExitPlatform?.());
+              } else {
+                onExitPlatform?.();
+              }
+            }}
+            title="Leave this destination and return to the LoftLife platform"
+            aria-label="Exit to LoftLife"
+            className="px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-[#0b100d]/95 text-slate-200 border-white/15 hover:bg-[#131d17]"
           >
-            <Home className="w-3.5 h-3.5" />
-            Leave {activeWorld.name}
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Exit to LoftLife</span>
           </button>
         )}
-        {/* Exit to Main World / Return to My Suite Quick Travel */}
-        <button
-          type="button"
-          onClick={() => {
-            if (activeWorld) {
-              handleLeaveWorld();
-              setLocation('world');
-              session.enterCity();
-              return;
-            }
-            handleChangeLocation(location === 'world' ? 'room' : 'world');
-          }}
-          className={`px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-            location === 'world'
-              ? 'bg-[#39ff14] text-[#051205] border-[#39ff14] hover:bg-[#5bff3b] neon-btn-glow'
-              : 'bg-[#111914] text-[#39ff14] border-[#39ff14]/45 hover:bg-[#19261d]'
-          }`}
-        >
-          {location === 'world' ? (
-            <>
-              <Home className="w-3.5 h-3.5" />
-              Return to Suite {PLAYER_SUITE_NUMBER}
-            </>
-          ) : (
-            <>
-              <DoorOpen className="w-3.5 h-3.5" />
-              Main City
-            </>
-          )}
-        </button>
 
-        {/* City Grid Map Toggle (when in Main City) */}
-        {location === 'world' && (
+        {/* Offline is the default; this is the door to the shared world. */}
+        {session.status !== 'online' && (
           <button
             type="button"
             onClick={() => {
               sfx.playClick();
-              setCityMapOpen((v) => !v);
+              setAuthOpen(true);
             }}
-            className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-              cityMapOpen
-                ? 'bg-[#39ff14] text-[#051205] border-[#39ff14] neon-btn-glow'
-                : hudPanelClass
-            }`}
+            className="px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-[#111914] text-[#39ff14] border-[#39ff14]/45 hover:bg-[#19261d]"
           >
-            <MapIcon className="w-3.5 h-3.5" />
-            City Map (M)
+            <LogIn className="w-3.5 h-3.5" />
+            Play online
           </button>
         )}
 
-        {/* Isometric vs Third-Person GTA Play View Switcher */}
-        <div className={`p-1 rounded-xl border flex items-center gap-1 ${hudPanelClass}`}>
+        {/* Persistence status: local-only, uploading, synced, or waiting on a choice. */}
+        {conflict ? (
           <button
             type="button"
-            onClick={() => {
-              if (viewMode !== 'isometric') handleTogglePlayView();
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-              viewMode === 'isometric'
-                ? 'bg-[#39ff14] text-[#051205]'
-                : 'text-slate-300 hover:bg-white/10'
-            }`}
+            onClick={() => setConflictOpen(true)}
+            title="Your device suite differs from your account"
+            className="px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-amber-400/15 text-amber-300 border-amber-400/45 hover:bg-amber-400/25"
           >
-            <Eye className="w-3.5 h-3.5" />
-            Isometric
+            <AlertTriangle className="w-3.5 h-3.5" />
+            Sync paused
           </button>
+        ) : session.status !== 'online' ? (
+          <span
+            title="Character and suite are saved in this browser"
+            className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 ${hudPanelClass}`}
+          >
+            <HardDrive className="w-3.5 h-3.5 text-[#39ff14]" />
+            Local
+          </span>
+        ) : session.syncState === 'error' ? (
           <button
             type="button"
-            onClick={() => {
-              if (viewMode !== 'play') handleTogglePlayView();
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-              viewMode === 'play'
-                ? 'bg-[#39ff14] text-[#051205]'
-                : 'text-slate-300 hover:bg-white/10'
-            }`}
+            onClick={retryOnlineSave}
+            title={session.syncError ?? 'Saving to your account failed'}
+            className="px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-red-500/15 text-red-200 border-red-500/40 hover:bg-red-500/25"
           >
-            <Gamepad2 className="w-3.5 h-3.5" />
-            Play View
+            <CloudOff className="w-3.5 h-3.5" />
+            Not saved
           </button>
-        </div>
+        ) : (
+          <span
+            title="Character and suite are saved to your account"
+            className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 ${hudPanelClass}`}
+          >
+            {session.syncState === 'saving' ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-[#39ff14]" />
+            ) : (
+              <Cloud className="w-3.5 h-3.5 text-[#39ff14]" />
+            )}
+            {session.syncState === 'saving'
+              ? 'Saving…'
+              : session.syncState === 'synced'
+              ? 'Synced'
+              : 'Connected'}
+          </span>
+        )}
 
-        {/* Walk / Edit Room Mode Segmented Switch (only inside My Suite) */}
-        {location === 'room' && (!activeWorld || activeWorld.canEdit) && (
+        {/* Desktop entry point; the APK uses its touch Map button. */}
+        {gameplayAllowed && device.desktop && !touchDevice && (
+          <button
+            type="button"
+            onClick={() => {
+              sfx.playClick();
+              setMenuOpen(true);
+            }}
+            aria-label="Map and world menu"
+            className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${hudPanelClass}`}
+          >
+            <MapIcon className="w-3.5 h-3.5 text-[#39ff14]" />
+            Map &amp; World <span className="text-[10px] text-slate-400">(M)</span>
+          </button>
+        )}
+
+        {/* Camera switcher is desktop-only: phones derive the view from orientation. */}
+        {device.desktop && !touchDevice && (
           <div className={`p-1 rounded-xl border flex items-center gap-1 ${hudPanelClass}`}>
             <button
               type="button"
-              onClick={() => handleModeSwitch('walk')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-                mode === 'walk'
+              onClick={() => {
+                if (viewMode !== 'isometric') handleTogglePlayView();
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
+                viewMode === 'isometric'
                   ? 'bg-[#39ff14] text-[#051205]'
                   : 'text-slate-300 hover:bg-white/10'
               }`}
             >
-              <Footprints className="w-3.5 h-3.5" />
-              Walk
+              <Eye className="w-3.5 h-3.5" />
+              Isometric
             </button>
             <button
               type="button"
-              onClick={() => handleModeSwitch('edit')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-                mode === 'edit'
+              onClick={() => {
+                if (viewMode !== 'play') handleTogglePlayView();
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
+                viewMode === 'play'
                   ? 'bg-[#39ff14] text-[#051205]'
                   : 'text-slate-300 hover:bg-white/10'
               }`}
             >
-              <PencilRuler className="w-3.5 h-3.5" />
-              Edit Room
+              <Gamepad2 className="w-3.5 h-3.5" />
+              Play View
             </button>
           </div>
         )}
@@ -1115,44 +1710,42 @@ export default function App() {
           ))}
         </div>
 
+        {/* Owners get one tap into furnishing; visitors never see this. */}
+        {canEditRoom && mode === 'walk' && (
+          <button
+            type="button"
+            onClick={() => {
+              sfx.playClick();
+              handleModeSwitch('edit');
+            }}
+            aria-label="Edit suite"
+            title="Edit this suite's furniture and finishes"
+            className="px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-[#39ff14] text-[#051205] border-[#39ff14] hover:bg-[#5bff3b] neon-btn-glow"
+          >
+            <PencilRuler className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Edit suite</span>
+          </button>
+        )}
+
         {/* Camera & Avatar & Sound */}
         <div className={`p-1 rounded-xl border flex items-center gap-1 ${hudPanelClass}`}>
           <button
             type="button"
-            title={
-              session.voiceStatus === 'ready'
-                ? 'Voice on · hold T to talk · click to turn off'
-                : session.voiceStatus === 'denied'
-                ? 'Microphone blocked in this browser'
-                : 'Turn on proximity voice'
-            }
-            aria-label={session.voiceStatus === 'ready' ? 'Turn voice off' : 'Turn voice on'}
+            title="Room settings · Walk, Edit and controls"
+            aria-label="Room settings"
+            aria-expanded={roomSettingsOpen}
             onClick={() => {
               sfx.playClick();
-              void toggleVoice();
+              setRoomSettingsOpen((v) => !v);
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-              session.voiceStatus === 'ready'
-                ? 'bg-sky-500 text-white'
-                : session.voiceStatus === 'denied'
-                ? 'bg-red-500/20 text-red-200'
-                : 'text-slate-200 hover:bg-white/10'
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+              roomSettingsOpen
+                ? 'bg-[#39ff14] text-[#051205]'
+                : 'text-slate-300 hover:bg-white/10 hover:text-[#39ff14]'
             }`}
           >
-            {session.voiceStatus === 'ready' ? (
-              <Mic className="w-3.5 h-3.5" />
-            ) : (
-              <MicOff className="w-3.5 h-3.5" />
-            )}
-            {session.voiceStatus === 'requesting'
-              ? 'Mic…'
-              : session.voiceStatus === 'ready'
-              ? session.voicePushToTalk
-                ? 'Talking'
-                : 'Voice'
-              : 'Voice'}
+            <Settings className="w-3.5 h-3.5" />
           </button>
-
           <button
             type="button"
             onClick={() => {
@@ -1166,23 +1759,25 @@ export default function App() {
             }`}
           >
             <User className="w-3.5 h-3.5" />
-            Avatar
+            <span className="hidden sm:inline">Avatar</span>
           </button>
 
-          <button
-            type="button"
-            title={cameraToggle === 'overview' ? 'Zoom to Avatar' : 'Room Overview'}
-            aria-label="Toggle camera zoom"
-            onClick={() => {
-              sfx.playClick();
-              const next = cameraToggle === 'overview' ? 'closeup' : 'overview';
-              setCameraToggle(next);
-              setCameraPreset({ id: Date.now(), type: next });
-            }}
-            className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-slate-300 hover:bg-white/10 hover:text-[#39ff14]"
-          >
-            <Camera className="w-3.5 h-3.5" />
-          </button>
+          {!touchDevice && (
+            <button
+              type="button"
+              title={closeZoom ? 'Wide room view (Z)' : 'Close avatar view (Z)'}
+              aria-label={closeZoom ? 'Wide room view' : 'Close avatar view'}
+              aria-pressed={closeZoom}
+              onClick={toggleCloseZoom}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                closeZoom
+                  ? 'bg-[#39ff14] text-[#051205]'
+                  : 'text-slate-300 hover:bg-white/10 hover:text-[#39ff14]'
+              }`}
+            >
+              <Camera className="w-3.5 h-3.5" />
+            </button>
+          )}
 
           <button
             type="button"
@@ -1203,7 +1798,7 @@ export default function App() {
 
       {/* Transient Walk / Action Hint Banner */}
       {walkHint && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+        <div className="fixed top-[11.75rem] sm:top-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none max-w-[92vw]">
           <div className={`px-3.5 py-1.5 rounded-lg border text-xs font-medium text-[#d8ffd0] ${hudPanelClass}`}>
             {walkHint}
           </div>
@@ -1212,7 +1807,7 @@ export default function App() {
 
       {/* Proximity Action Prompt (Isometric Walk & Play View) */}
       {proximityPrompt && !anyModalOpen && (
-        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+        <div className="fixed bottom-52 sm:bottom-28 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
           <div className="px-4 py-2 rounded-xl bg-[#39ff14] text-[#051205] font-bold text-xs border border-[#8eff78] neon-btn-glow">
             {proximityPrompt}
           </div>
@@ -1221,7 +1816,7 @@ export default function App() {
 
       {/* NPC Dialogue Toast */}
       {npcChat && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 w-[min(460px,90vw)] pointer-events-auto">
+        <div className="fixed bottom-52 sm:bottom-24 left-1/2 -translate-x-1/2 z-30 w-[min(460px,90vw)] pointer-events-auto">
           <div className={`px-4 py-3 rounded-xl border flex items-start justify-between gap-3 ${hudPanelClass}`}>
             <div className="flex items-start gap-2.5">
               <MessageCircle className="w-4 h-4 mt-0.5 text-[#39ff14] shrink-0" />
@@ -1264,7 +1859,7 @@ export default function App() {
               </span>
               <span className="opacity-75">
                 {placingCatalogItem?.layer === 'wall'
-                  ? 'Click North or West wall'
+                  ? 'Click any wall (N, S, E or W)'
                   : 'Click floor tile to place'}
               </span>
             </div>
@@ -1478,7 +2073,23 @@ export default function App() {
               </div>
 
               <div className="text-xs opacity-70 flex items-center gap-2 whitespace-nowrap">
-                {viewMode === 'play' ? (
+                {!gameplayAllowed ? (
+                  <span>
+                    Loft manager · this runtime is not supported for walking; manage your suite here
+                  </span>
+                ) : touchDevice ? (
+                  <span>
+                    {location === 'world'
+                      ? 'Tap street to walk · Tap a LoftLine stop to board · Tap Hotel doors for Keycard'
+                      : location === 'lobby'
+                      ? 'Tap floor to walk · Tap the brass elevator'
+                      : location === 'hallway'
+                      ? 'Tap a numbered door for Keycard / Ring · Tap the elevator'
+                      : location === 'resident_room'
+                      ? `Visiting Suite ${activeResident?.roomNumber} · Tap ${activeResident?.name} to chat`
+                      : 'Tap floor to walk · Tap furniture to use it · Tap the West door for Keycard'}
+                  </span>
+                ) : viewMode === 'play' ? (
                   <>
                     <span>WASD move (camera auto-follows) · Shift sprint · Space jump</span>
                     <span aria-hidden="true">·</span>
@@ -1488,15 +2099,15 @@ export default function App() {
                   </>
                 ) : location === 'world' ? (
                   <>
-                    <span>Click street or WASD + Shift sprint</span>
+                    <span>Click street to walk · WASD pans · Shift sprint</span>
                     <span aria-hidden="true">·</span>
-                    <span>M City Map</span>
+                    <span>M Map &amp; World</span>
                     <span aria-hidden="true">·</span>
                     <span>At Hotel Door: press E for Keycard or Ring Active User</span>
                   </>
                 ) : location === 'lobby' ? (
                   <>
-                    <span>Click floor or WASD</span>
+                    <span>Click floor to walk · WASD pans</span>
                     <span aria-hidden="true">·</span>
                     <span>North Elevator → Floors 2–4</span>
                     <span aria-hidden="true">·</span>
@@ -1520,7 +2131,7 @@ export default function App() {
                   </>
                 ) : (
                   <>
-                    <span>Click floor or WASD</span>
+                    <span>Click floor to walk · WASD pans · F follow · Z zoom · M menu</span>
                     <span aria-hidden="true">·</span>
                     <span>West Door: press E to enter Keycard → Lobby &amp; Elevator</span>
                   </>
@@ -1606,6 +2217,14 @@ export default function App() {
                   >
                     <Eraser className="w-3.5 h-3.5" />
                     Clear Floor
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleModeSwitch('walk')}
+                    className="px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors whitespace-nowrap bg-[#39ff14] text-[#051205] hover:bg-[#5bff3b] neon-btn-glow"
+                  >
+                    <Footprints className="w-3.5 h-3.5" />
+                    Done
                   </button>
                 </div>
               </div>
@@ -1799,16 +2418,99 @@ export default function App() {
 
       {/* Mobile virtual stick, drag-look and contextual buttons */}
       <TouchControls
-        active={touchDevice && !anyModalOpen && session.status === 'online'}
-        lookEnabled={viewMode === 'play'}
-        voiceEnabled={session.voiceStatus === 'ready'}
+        active={device.controls === 'touch' && !anyModalOpen && session.status !== 'loading'}
+        voice={session.voice}
+        chatOpen={session.chatOpen}
+        onCycleRange={cycleRange}
+        onMicPress={() => {
+          void session.pressMicrophone();
+        }}
+        onMicRelease={session.releaseMicrophone}
+        onToggleChat={() => {
+          sfx.playClick();
+          session.toggleChat();
+        }}
+        onOpenVoiceSettings={() => {
+          sfx.playClick();
+          setRoomSettingsOpen(true);
+        }}
         onEmote={() => triggerEmote(activeEmote === 'dance' ? 'wave' : 'dance')}
-        onTalkStart={() => session.setPushToTalk(true)}
-        onTalkEnd={() => session.setPushToTalk(false)}
+        viewMode={viewMode}
+        closeZoom={closeZoom}
+        followCharacter={followCharacter}
+        onToggleZoom={toggleCloseZoom}
+        onToggleFollow={toggleFollowCharacter}
+        onOpenMenu={() => {
+          sfx.playClick();
+          setMenuOpen(true);
+        }}
+        actionLabel={proximityPrompt}
+        lookEnabled={viewMode === 'play' && touchDevice}
+        layout={controls.touch}
       />
 
       {/* Community: chat, presence, friends, shop and worlds */}
-      <SocialHud onEnterWorld={handleEnterWorld} />
+      <SocialHud onEnterWorld={handleEnterWorld} gameplayAllowed={gameplayAllowed} />
+
+      {/* Unsupported runtimes see the dashboard + loft manager only. */}
+      {!gameplayAllowed && <PlatformNotice platformLabel={device.label} />}
+
+      {/* Device vs account suite: nothing moves until the player chooses */}
+      {conflict && (
+        <SyncConflictModal
+          open={conflictOpen}
+          device={{
+            roomName: conflict.device.roomName,
+            itemCount: conflict.device.items.length,
+            avatarName: conflict.device.avatar.name,
+            moodLabel: conflict.device.mood,
+          }}
+          account={{
+            roomName: conflict.account.roomName,
+            itemCount: conflict.account.items.length,
+            avatarName: conflict.account.avatar.name,
+            moodLabel: conflict.account.mood,
+          }}
+          onKeepDevice={keepDeviceSuite}
+          onUseAccount={useAccountSuite}
+          onDecideLater={() => setConflictOpen(false)}
+        />
+      )}
+
+      {/* Sign in / create the account that turns the local character online */}
+      {authOpen && <AuthGate onClose={() => setAuthOpen(false)} />}
+
+      {/* Room Settings: Walk / Edit live in its Controls section */}
+      <RoomSettingsModal
+        open={roomSettingsOpen}
+        roomName={roomName}
+        itemCount={items.length}
+        mode={mode}
+        canEdit={canEditRoom}
+        touchDevice={touchDevice}
+        gameplayAllowed={gameplayAllowed}
+        platformLabel={device.label}
+        isPortrait={isPortrait}
+        voice={session.voice}
+        onEnableVoice={session.enableVoice}
+        onDisableVoice={session.disableVoice}
+        onCycleVoiceRange={cycleRange}
+        onVoiceRangeChange={session.setVoiceRange}
+        onMicModeChange={session.setMicMode}
+        onVoiceSensitivityChange={session.setVoiceSensitivity}
+        onVoiceInputDeviceChange={session.setVoiceInputDevice}
+        getVoiceLevel={session.getVoiceLevel}
+        onVoicePermissionHint={showHint}
+        onEnterEdit={() => {
+          setRoomSettingsOpen(false);
+          handleModeSwitch('edit');
+        }}
+        onExitEdit={() => {
+          setRoomSettingsOpen(false);
+          handleModeSwitch('walk');
+        }}
+        onClose={() => setRoomSettingsOpen(false)}
+      />
 
       {/* Avatar Character Studio Modal */}
       <AvatarModal
@@ -1827,6 +2529,53 @@ export default function App() {
         currentStreet={cityStreet}
         playerPoseRef={playerPoseRef}
         onClose={() => setCityMapOpen(false)}
+      />
+
+      {/* Central M menu: map, world info, management, leave and controls. */}
+      <WorldMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        location={location}
+        world={activeWorld}
+        suite={session.suite}
+        roomName={roomName}
+        items={items}
+        userHandle={session.profile?.handle ?? session.user?.handle ?? avatarConfig.name}
+        userRole={session.user?.role ?? 'player'}
+        viewMode={viewMode}
+        closeZoom={closeZoom}
+        followCharacter={followCharacter}
+        playerPoseRef={playerPoseRef}
+        instance={
+          session.instance
+            ? {
+                id: session.instance.id,
+                kind: session.instance.kind,
+                worldId: (session.instance as { worldId?: string | null }).worldId ?? null,
+                count: session.instance.count,
+                capacity: session.instance.capacity,
+              }
+            : null
+        }
+        players={remoteInThisScene.map((player) => ({
+          handle: player.handle,
+          displayName: '',
+        }))}
+        bindings={controls.bindings}
+        touch={controls.touch}
+        syncing={controls.syncing}
+        syncError={controls.syncError}
+        onSetBinding={controls.setBinding}
+        onResetBinding={controls.resetOne}
+        onResetAllBindings={controls.resetAll}
+        onSetTouch={controls.setTouch}
+        onResetTouch={controls.resetTouch}
+        onWorldUpdated={handleWorldUpdated}
+        onTravelCity={handleTravelCity}
+        onTravelSuite={handleTravelSuite}
+        onLeaveWorld={handleLeaveWorldConfirmed}
+        onOpenCityMap={() => setCityMapOpen(true)}
+        onEditRoom={() => handleModeSwitch('edit')}
       />
 
       {/* Hotel Main Door Keycard & Up/Down Active Resident Ring Terminal */}

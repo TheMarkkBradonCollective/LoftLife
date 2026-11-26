@@ -1,38 +1,179 @@
-import React, { useRef, useState } from 'react';
-import { ArrowUp, FastForward, Hand, Mic, Sparkles } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  ArrowUp,
+  Camera,
+  FastForward,
+  Hand,
+  Maximize2,
+  Map as MapIcon,
+  MessageCircle,
+  Mic,
+  MicOff,
+  Minimize2,
+  Settings,
+  Sparkles,
+  UserCheck,
+  UserX,
+} from 'lucide-react';
 import { touchInput } from '../game/touchInput';
+import { MIC_MODE_INFO, VOICE_RANGE_INFO } from '../../shared/voice-controls.mjs';
+import type { VoiceSnapshot } from '../session';
+import type { ViewMode } from '../game/types';
 
 interface TouchControlsProps {
   /** Hidden while a modal is open so taps reach the dialog. */
   active: boolean;
-  /** Drag-look is only meaningful in third-person Play View. */
-  lookEnabled: boolean;
-  voiceEnabled: boolean;
+  /** Shared voice state: identical to what the desktop keys and settings use. */
+  voice: VoiceSnapshot;
+  chatOpen: boolean;
+  onCycleRange: () => void;
+  onMicPress: () => void;
+  onMicRelease: () => void;
+  onToggleChat: () => void;
+  onOpenVoiceSettings: () => void;
   onEmote: () => void;
-  onTalkStart: () => void;
-  onTalkEnd: () => void;
+  /** Isometric pans with the stick; Play View walks with it. */
+  viewMode: ViewMode;
+  /** Z state, shown on the touch zoom button. */
+  closeZoom: boolean;
+  /** F state (Isometric only); Play View always follows. */
+  followCharacter: boolean;
+  onToggleZoom: () => void;
+  onToggleFollow: () => void;
+  /** Opens the same M Map & World Menu. */
+  onOpenMenu: () => void;
+  /** Context label from the viewport; null when nothing is in reach. */
+  actionLabel: string | null;
+  /** Dedicated drag-look area, only in third-person Play View. */
+  lookEnabled: boolean;
+  /** Account/local touch layout preferences. */
+  layout: { size: 'sm' | 'md' | 'lg'; handedness: 'right' | 'left'; opacity: number };
 }
 
-const STICK_RADIUS = 46;
+const STICK_RADIUS = 48;
+const STICK_SIZE = 136;
+
+const VOICE_RANGE_STYLE: Record<string, string> = {
+  off: 'bg-[#0b100d]/85 text-slate-400 border-white/15',
+  whisper: 'bg-sky-500/25 text-sky-100 border-sky-400/50',
+  talk: 'bg-sky-500 text-white border-sky-300',
+  shout: 'bg-amber-400 text-[#1a1005] border-amber-200',
+};
+
+function actionText(label: string | null): string | null {
+  if (!label) return null;
+  const text = label
+    .replace(/^Tap\s*·?\s*/i, '')
+    .replace(/^Press E\s*·?\s*/i, '')
+    .trim();
+  return text || null;
+}
+
+const INDICATOR_STYLE: Record<VoiceSnapshot['indicator'], { label: string; dot: string }> = {
+  off: { label: 'Mic off', dot: 'bg-slate-500' },
+  unavailable: { label: 'No mic', dot: 'bg-slate-500' },
+  denied: { label: 'Blocked', dot: 'bg-red-500' },
+  requesting: { label: 'Allow mic…', dot: 'bg-amber-400 animate-pulse' },
+  'range-off': { label: 'Range off', dot: 'bg-slate-400' },
+  idle: { label: 'Ready', dot: 'bg-sky-400' },
+  transmitting: { label: 'Live', dot: 'bg-[#39ff14] animate-pulse' },
+  muted: { label: 'Muted', dot: 'bg-amber-400' },
+  suspended: { label: 'Paused', dot: 'bg-amber-400' },
+};
 
 /**
- * Mobile controls: a virtual stick, a drag-look pad and contextual buttons.
- * Everything feeds `touchInput`, which the viewport's render loop already reads.
+ * Mobile controls: a virtual stick plus contextual buttons.
+ *
+ * Camera drag-look is handled by the viewport canvas itself (a drag rotates,
+ * a tap interacts), so there is deliberately no full-screen look pad here:
+ * an overlay would swallow every tap on the right half of the scene.
+ *
+ * Voice range, microphone mode and transmission all come from the shared
+ * session state, so the phone and the desktop keyboard can never disagree.
+ * Everything movement-related feeds `touchInput`, which the viewport's render
+ * loop already reads.
  */
 export const TouchControls: React.FC<TouchControlsProps> = ({
   active,
-  lookEnabled,
-  voiceEnabled,
+  voice,
+  chatOpen,
+  onCycleRange,
+  onMicPress,
+  onMicRelease,
+  onToggleChat,
+  onOpenVoiceSettings,
   onEmote,
-  onTalkStart,
-  onTalkEnd,
+  viewMode,
+  closeZoom,
+  followCharacter,
+  onToggleZoom,
+  onToggleFollow,
+  onOpenMenu,
+  actionLabel,
+  lookEnabled,
+  layout,
 }) => {
   const stickRef = useRef<HTMLDivElement>(null);
   const stickPointer = useRef<number | null>(null);
+  const micPointer = useRef<number | null>(null);
   const lookPointer = useRef<number | null>(null);
   const lookLast = useRef({ x: 0, y: 0 });
   const [knob, setKnob] = useState({ x: 0, y: 0 });
   const [sprint, setSprint] = useState(false);
+  const [micHeld, setMicHeld] = useState(false);
+  // On a narrow portrait phone the right-aligned camera row is wider than the
+  // free space beside the movement stick. Lift it above the stick and the
+  // voice bubble instead of letting the two overlap.
+  const [compactPortrait, setCompactPortrait] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      window.innerWidth < 640 &&
+      window.innerHeight >= window.innerWidth
+  );
+
+  useEffect(() => {
+    const update = () =>
+      setCompactPortrait(window.innerWidth < 640 && window.innerHeight >= window.innerWidth);
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+    };
+  }, []);
+
+  // A modal can open mid-drag; the matching pointerup never arrives, so release
+  // everything instead of leaving the character walking on its own.
+  useEffect(() => {
+    if (active) return;
+    stickPointer.current = null;
+    micPointer.current = null;
+    lookPointer.current = null;
+    setKnob({ x: 0, y: 0 });
+    setSprint(false);
+    setMicHeld(false);
+    onMicRelease();
+    touchInput.moveX = 0;
+    touchInput.moveZ = 0;
+    touchInput.sprint = false;
+    touchInput.jump = false;
+    touchInput.lookDx = 0;
+    touchInput.lookDy = 0;
+    // onMicRelease is a stable session callback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+
+  useEffect(
+    () => () => {
+      touchInput.moveX = 0;
+      touchInput.moveZ = 0;
+      touchInput.sprint = false;
+      touchInput.jump = false;
+      touchInput.lookDx = 0;
+      touchInput.lookDy = 0;
+    },
+    []
+  );
 
   if (!active) return null;
 
@@ -44,12 +185,12 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
     const dx = clientX - cx;
     const dy = clientY - cy;
     const distance = Math.hypot(dx, dy);
-    const scale = distance > STICK_RADIUS ? STICK_RADIUS / distance : 1;
+    const scale = distance > stickRadius ? stickRadius / distance : 1;
     const kx = dx * scale;
     const ky = dy * scale;
     setKnob({ x: kx, y: ky });
-    touchInput.moveX = kx / STICK_RADIUS;
-    touchInput.moveZ = ky / STICK_RADIUS;
+    touchInput.moveX = kx / stickRadius;
+    touchInput.moveZ = ky / stickRadius;
   };
 
   const releaseStick = () => {
@@ -65,12 +206,53 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
     touchInput.sprint = next;
   };
 
+  const requestedScale = layout.size === 'sm' ? 0.86 : layout.size === 'lg' ? 1.16 : 1;
+  // A narrow portrait phone cannot fit four large buttons beside a large stick;
+  // keep the layout usable by treating Large as Standard there.
+  const sizeScale = compactPortrait ? Math.min(requestedScale, 1) : requestedScale;
+  const stickSize = Math.round(STICK_SIZE * sizeScale);
+  const stickRadius = STICK_RADIUS * sizeScale;
+  const knobSize = Math.round(56 * sizeScale);
+  const leftHanded = layout.handedness === 'left';
+  const stickSide = leftHanded
+    ? { right: 'calc(20px + env(safe-area-inset-right, 0px))' }
+    : { left: 'calc(20px + env(safe-area-inset-left, 0px))' };
+  const leftSide = { left: 'calc(16px + env(safe-area-inset-left, 0px))' };
+  const infoSide = { right: 'calc(16px + env(safe-area-inset-right, 0px))' };
+  const otherSide = leftHanded ? leftSide : infoSide;
+  // Right-handed: camera and voice stack on the right, above the stick.
+  // Left-handed portrait: voice stays above the right-side stick and the
+  // camera row moves left so it cannot collide with it. In left-handed
+  // landscape the camera sits above the stick on the right and the voice moves
+  // left, above the context row, which keeps both off the top bar.
+  const cameraOnLeft = leftHanded && compactPortrait;
+  const cameraCentered = !compactPortrait;
+  const voiceOnLeft = leftHanded && !compactPortrait;
+  const cameraSide = cameraOnLeft ? leftSide : infoSide;
+  const voiceSide = voiceOnLeft ? leftSide : infoSide;
+  const voiceBottom = leftHanded && compactPortrait ? 17 : 9.75;
+  // Landscape puts the camera row in the free bottom-center band between the
+  // stick and the context buttons. Portrait stacks it above the voice bubble
+  // on one side.
+  const cameraBottom = compactPortrait ? (leftHanded ? 22.5 : 17) : 6;
+  const range = VOICE_RANGE_INFO[voice.range];
+  const micMode = MIC_MODE_INFO[voice.micMode];
+  const indicator = INDICATOR_STYLE[voice.indicator];
+  const contextLabel = actionText(actionLabel);
+
   return (
     <>
-      {/* Drag-look pad (right half, above the dock) */}
+      {/* Dedicated camera area: a compact strip above the stick. The rest of
+          the canvas stays free for taps, so this never swallows interactions. */}
       {lookEnabled && (
         <div
-          className="fixed right-0 top-24 bottom-40 w-1/2 z-20 touch-none"
+          role="application"
+          aria-label="Camera look area — drag to rotate the camera"
+          className="fixed z-30 left-2 top-[14%] h-[20%] w-14 rounded-2xl border border-[#39ff14]/30 bg-[#0b100d]/55 backdrop-blur-sm touch-none select-none"
+          style={{
+            left: 'calc(8px + env(safe-area-inset-left, 0px))',
+            opacity: layout.opacity / 100,
+          }}
           onPointerDown={(event) => {
             lookPointer.current = event.pointerId;
             lookLast.current = { x: event.clientX, y: event.clientY };
@@ -90,13 +272,28 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
           onPointerCancel={() => {
             lookPointer.current = null;
           }}
-        />
+          onLostPointerCapture={() => {
+            lookPointer.current = null;
+          }}
+        >
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 pointer-events-none text-[#39ff14]/80">
+            <Camera className="w-4 h-4" />
+            <span className="text-[9px] font-bold uppercase tracking-widest">Look</span>
+          </div>
+        </div>
       )}
 
       {/* Virtual stick */}
       <div
         ref={stickRef}
-        className="fixed left-5 bottom-24 z-40 w-[124px] h-[124px] rounded-full border border-[#39ff14]/40 bg-[#0b100d]/70 backdrop-blur-sm touch-none"
+        className="fixed bottom-24 z-40 rounded-full border border-[#39ff14]/40 bg-[#0b100d]/70 backdrop-blur-sm touch-none select-none"
+        style={{
+          width: stickSize,
+          height: stickSize,
+          opacity: layout.opacity / 100,
+          bottom: 'calc(6rem + env(safe-area-inset-bottom, 0px))',
+          ...stickSide,
+        }}
         onPointerDown={(event) => {
           stickPointer.current = event.pointerId;
           event.currentTarget.setPointerCapture(event.pointerId);
@@ -108,56 +305,225 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         }}
         onPointerUp={releaseStick}
         onPointerCancel={releaseStick}
-        aria-label="Movement stick"
+        onLostPointerCapture={releaseStick}
+        aria-label={viewMode === 'play' ? 'Movement stick' : 'Camera pan stick'}
+        role="slider"
+        aria-valuetext={viewMode === 'play' ? 'Movement' : 'Camera pan'}
       >
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <span className="text-[9px] uppercase tracking-widest text-[#39ff14]/45">Move</span>
+          <span className="text-[9px] uppercase tracking-widest text-[#39ff14]/45">
+            {viewMode === 'play' ? 'Move' : 'Pan'}
+          </span>
         </div>
         <div
-          className="absolute left-1/2 top-1/2 w-12 h-12 rounded-full bg-[#39ff14]/85 border border-[#8eff78] pointer-events-none"
-          style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }}
+          className="absolute left-1/2 top-1/2 rounded-full bg-[#39ff14]/85 border border-[#8eff78] pointer-events-none"
+          style={{
+            width: knobSize,
+            height: knobSize,
+            transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))`,
+          }}
         />
       </div>
 
-      {/* Contextual buttons */}
-      <div className="fixed right-5 bottom-24 z-40 flex flex-col items-end gap-2">
-        {voiceEnabled && (
+      {/* Grouped voice bubble: range, microphone mode and status in one place */}
+      <div
+        className="fixed z-40 flex flex-col items-end gap-1.5"
+        style={{
+          ...voiceSide,
+          bottom: `calc(${voiceBottom}rem + env(safe-area-inset-bottom, 0px))`,
+          opacity: layout.opacity / 100,
+          transform: `scale(${sizeScale})`,
+          transformOrigin: voiceOnLeft ? 'bottom left' : 'bottom right',
+        }}
+      >
+        <div className="flex items-stretch rounded-2xl border border-[#39ff14]/30 bg-[#0b100d]/90 backdrop-blur-sm overflow-hidden shadow-lg">
           <button
             type="button"
-            aria-label="Push to talk"
-            className="w-14 h-14 rounded-full bg-sky-500 text-white border border-sky-300 shadow-lg flex items-center justify-center touch-none active:scale-95"
+            onClick={onCycleRange}
+            aria-label={`Voice range ${range.label}. Tap to change.`}
+            className={`min-w-[4.75rem] px-3 py-2.5 border-r border-white/10 flex flex-col items-start justify-center active:scale-[0.97] transition-colors ${VOICE_RANGE_STYLE[voice.range]}`}
+          >
+            <span className="text-[9px] uppercase tracking-widest opacity-70">Range</span>
+            <span className="text-xs font-bold leading-tight">{range.label}</span>
+            <span className="text-[9px] font-mono-tabular opacity-70">
+              {range.meters ? `${range.meters} m` : 'silent'}
+            </span>
+          </button>
+
+          <button
+            type="button"
             onPointerDown={(event) => {
               event.currentTarget.setPointerCapture(event.pointerId);
-              onTalkStart();
+              micPointer.current = event.pointerId;
+              setMicHeld(true);
+              onMicPress();
             }}
-            onPointerUp={onTalkEnd}
-            onPointerCancel={onTalkEnd}
-            onPointerLeave={onTalkEnd}
+            onPointerUp={() => {
+              micPointer.current = null;
+              setMicHeld(false);
+              onMicRelease();
+            }}
+            onPointerCancel={() => {
+              micPointer.current = null;
+              setMicHeld(false);
+              onMicRelease();
+            }}
+            onLostPointerCapture={() => {
+              if (micPointer.current === null) return;
+              micPointer.current = null;
+              setMicHeld(false);
+              onMicRelease();
+            }}
+            aria-label={`${micMode.label}. ${micMode.mobile} Status: ${indicator.label}.`}
+            aria-pressed={voice.transmitting}
+            className={`w-16 px-2 py-2 flex flex-col items-center justify-center gap-0.5 touch-none active:scale-[0.97] transition-colors ${
+              voice.transmitting
+                ? 'bg-[#39ff14] text-[#051205]'
+                : voice.muted || voice.suspended
+                ? 'bg-amber-400/20 text-amber-200'
+                : voice.status === 'ready'
+                ? 'bg-[#101713] text-slate-200'
+                : 'bg-[#101713] text-slate-400'
+            } ${micHeld ? 'ring-2 ring-inset ring-sky-300/70' : ''}`}
           >
-            <Mic className="w-6 h-6" />
+            {voice.status === 'denied' || voice.status === 'unsupported' ? (
+              <MicOff className="w-5 h-5" />
+            ) : (
+              <Mic className="w-5 h-5" />
+            )}
+            <span className="text-[9px] font-semibold leading-none">{indicator.label}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenVoiceSettings}
+            aria-label="Microphone mode and audio settings"
+            className="w-8 flex items-center justify-center border-l border-white/10 text-slate-400 active:scale-[0.97]"
+          >
+            <Settings className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <span className="px-1 text-[9px] font-medium text-slate-400 bg-black/45 rounded">
+          {micMode.label}
+        </span>
+      </div>
+
+      {/* Camera controls: Follow (isometric only) and Close/Wide zoom. Both
+          are independent, mirror the F and Z keys, and stay out of the way of
+          the canvas gestures. */}
+      <div
+        className="fixed z-40 flex items-center gap-1.5"
+        style={{
+          ...(cameraCentered ? {} : cameraSide),
+          ...(cameraCentered ? { left: '50%', translate: '-50% 0' } : {}),
+          // Larger controls grow upward; lift this row so it never covers the
+          // voice bubble below it (and vice versa when left-handed).
+          bottom: `calc(${cameraBottom}rem + env(safe-area-inset-bottom, 0px))`,
+          opacity: layout.opacity / 100,
+          transform: `scale(${sizeScale})`,
+          transformOrigin: cameraCentered
+            ? 'bottom center'
+            : cameraOnLeft
+            ? 'bottom left'
+            : 'bottom right',
+        }}
+      >
+        <button
+          type="button"
+          aria-label={
+            contextLabel ? `Interact: ${contextLabel}` : 'Nothing to interact with nearby'
+          }
+          aria-disabled={!contextLabel}
+          disabled={!contextLabel}
+          onClick={() => {
+            if (contextLabel) touchInput.interact = true;
+          }}
+          className={`h-10 px-2.5 rounded-xl border flex items-center gap-1.5 text-[10px] font-bold active:scale-95 transition-colors ${
+            contextLabel
+              ? 'bg-[#39ff14] text-[#051205] border-[#8eff78]'
+              : 'bg-[#0b100d]/85 text-slate-500 border-white/15'
+          }`}
+        >
+          <Hand className="w-3.5 h-3.5" />
+          {contextLabel ? 'Use' : 'Action'}
+        </button>
+
+        {viewMode === 'isometric' && (
+          <button
+            type="button"
+            aria-label={followCharacter ? 'Stop following the avatar' : 'Follow the avatar'}
+            aria-pressed={followCharacter}
+            onClick={onToggleFollow}
+            className={`h-10 px-2.5 rounded-xl border flex items-center gap-1.5 text-[10px] font-bold active:scale-95 transition-colors ${
+              followCharacter
+                ? 'bg-[#39ff14] text-[#051205] border-[#8eff78]'
+                : 'bg-[#0b100d]/85 text-slate-200 border-[#39ff14]/40'
+            }`}
+          >
+            {followCharacter ? <UserCheck className="w-3.5 h-3.5" /> : <UserX className="w-3.5 h-3.5" />}
+            {followCharacter ? 'Follow' : 'Free'}
           </button>
         )}
         <button
           type="button"
-          aria-label="Interact"
-          className="w-16 h-16 rounded-full bg-[#39ff14] text-[#051205] border border-[#8eff78] shadow-lg flex items-center justify-center active:scale-95"
-          onClick={() => {
-            touchInput.interact = true;
-          }}
+          aria-label="Map and world menu"
+          onClick={onOpenMenu}
+          className="h-10 w-10 rounded-xl border bg-[#0b100d]/85 text-slate-200 border-[#39ff14]/40 flex items-center justify-center active:scale-95"
         >
-          <Hand className="w-7 h-7" />
+          <MapIcon className="w-4 h-4" />
         </button>
+        <button
+          type="button"
+          aria-label={closeZoom ? 'Switch to the wide room view' : 'Switch to the close avatar view'}
+          aria-pressed={closeZoom}
+          onClick={onToggleZoom}
+          className={`h-10 px-2.5 rounded-xl border flex items-center gap-1.5 text-[10px] font-bold active:scale-95 transition-colors ${
+            closeZoom
+              ? 'bg-[#39ff14] text-[#051205] border-[#8eff78]'
+              : 'bg-[#0b100d]/85 text-slate-200 border-[#39ff14]/40'
+          }`}
+        >
+          {closeZoom ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+          {closeZoom ? 'Wide' : 'Close'}
+        </button>
+      </div>
+
+      {/* Contextual buttons */}
+      <div
+        className={`fixed bottom-24 z-40 flex flex-col gap-2 ${leftHanded ? 'items-start' : 'items-end'}`}
+        style={{
+          ...otherSide,
+          bottom: 'calc(6rem + env(safe-area-inset-bottom, 0px))',
+          opacity: layout.opacity / 100,
+          transform: `scale(${sizeScale})`,
+          transformOrigin: leftHanded ? 'bottom left' : 'bottom right',
+        }}
+      >
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            aria-label={chatOpen ? 'Close chat' : 'Open chat'}
+            aria-pressed={chatOpen}
+            onClick={onToggleChat}
+            className={`w-12 h-12 rounded-full border flex items-center justify-center active:scale-95 ${
+              chatOpen
+                ? 'bg-[#39ff14] text-[#051205] border-[#8eff78]'
+                : 'bg-[#0b100d]/85 text-[#39ff14] border-[#39ff14]/40'
+            }`}
+          >
+            <MessageCircle className="w-5 h-5" />
+          </button>
           <button
             type="button"
             aria-label="Toggle sprint"
             aria-pressed={sprint}
+            onClick={toggleSprint}
             className={`w-12 h-12 rounded-full border flex items-center justify-center active:scale-95 ${
               sprint
                 ? 'bg-[#39ff14] text-[#051205] border-[#8eff78]'
                 : 'bg-[#0b100d]/85 text-[#39ff14] border-[#39ff14]/40'
             }`}
-            onClick={toggleSprint}
           >
             <FastForward className="w-5 h-5" />
           </button>

@@ -13,11 +13,21 @@
   html, body, #root {
     width: 100%;
     height: 100%;
+    /* Dynamic viewport units keep the HUD inside mobile browser toolbars and
+       the Android APK WebView. */
+    height: 100dvh;
     margin: 0;
     padding: 0;
     overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
     background-color: #070a09;
     font-family: var(--font-sans);
+  }
+
+  canvas {
+    touch-action: none;
   }
 }
 
@@ -45,4 +55,62 @@
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Platform preferences (Settings -> Accessibility) */
+html.loftlife-large-text {
+  font-size: 17px;
+}
+
+html.loftlife-high-contrast [class*='text-slate-5'] {
+  color: #d7e2da !important;
+}
+html.loftlife-high-contrast [class*='text-slate-4'] {
+  color: #e6eee9 !important;
+}
+html.loftlife-high-contrast [class*='border-white/'] {
+  border-color: rgba(255, 255, 255, 0.26) !important;
+}
+html.loftlife-high-contrast [class*='bg-[#0c1210]'] {
+  background-color: #08120c !important;
+}
+
+html.loftlife-reduce-motion *,
+html.loftlife-reduce-motion *::before,
+html.loftlife-reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* Scrollbars inside the platform shell */
+main::-webkit-scrollbar,
+.overflow-y-auto::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+main::-webkit-scrollbar-thumb,
+.overflow-y-auto::-webkit-scrollbar-thumb {
+  background: rgba(57, 255, 20, 0.18);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+main::-webkit-scrollbar-thumb:hover,
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: rgba(57, 255, 20, 0.32);
+  background-clip: content-box;
+}
+main::-webkit-scrollbar-track,
+.overflow-y-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (max-width: 1023px) {
+  main::-webkit-scrollbar,
+  .overflow-y-auto::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
 }

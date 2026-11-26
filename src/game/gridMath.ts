@@ -1,5 +1,12 @@
 import { getCatalogItem, GRID_SIZE } from './catalog';
 import type { PlacedItem } from './types';
+import {
+  normalizeWallSide,
+  wallAllowsPlacement,
+  wallAxis,
+  wallItemTransform,
+} from '../../shared/room-walls.mjs';
+import type { WallSide } from './types';
 
 export const SNAP_STEP = 0.5;
 
@@ -38,23 +45,15 @@ export function getItemWorldTransform(placed: PlacedItem): {
   if (!cat) return { x: 0, y: 0, z: 0, rotY: 0 };
 
   if (cat.layer === 'wall') {
-    const wallY = cat.wallHeight ?? 1.85;
-    if (placed.wall === 'west') {
-      const centerZ = -GRID_SIZE / 2 + placed.gz + cat.size[0] / 2;
-      return {
-        x: -GRID_SIZE / 2 + 0.06,
-        y: wallY,
-        z: centerZ,
-        rotY: Math.PI / 2,
-      };
-    }
-    const centerX = -GRID_SIZE / 2 + placed.gx + cat.size[0] / 2;
-    return {
-      x: centerX,
-      y: wallY,
-      z: -GRID_SIZE / 2 + 0.06,
-      rotY: 0,
-    };
+    const wall = normalizeWallSide(placed.wall) as WallSide;
+    const along = wallAxis(wall) === 'x' ? placed.gx : placed.gz;
+    return wallItemTransform({
+      wall,
+      start: along,
+      span: cat.size[0],
+      height: cat.wallHeight ?? 1.85,
+      gridSize: GRID_SIZE,
+    });
   }
 
   const [ew, ed] = getEffectiveSize(placed.catalogId, placed.rot);
@@ -76,27 +75,19 @@ export function isValidPlacement(
 
   if (cat.layer === 'wall') {
     const span = cat.size[0];
-    if (candidate.wall === 'west') {
-      if (candidate.gz < 0 || candidate.gz + span > GRID_SIZE) return false;
-      // Avoid west wall panoramic window opening (tiles 3..10) and suite door (tiles 11..13)
-      const overlapsWindowOrDoor = candidate.gz < 13 && candidate.gz + span > 3;
-      if (overlapsWindowOrDoor) return false;
-      return !existingItems.some((other) => {
-        if (other.uid === candidate.uid) return false;
-        const otherCat = getCatalogItem(other.catalogId);
-        if (!otherCat || otherCat.layer !== 'wall' || other.wall !== 'west') return false;
-        return candidate.gz < other.gz + otherCat.size[0] - 0.01 && candidate.gz + span > other.gz + 0.01;
-      });
-    } else {
-      // North wall
-      if (candidate.gx < 0 || candidate.gx + span > GRID_SIZE) return false;
-      return !existingItems.some((other) => {
-        if (other.uid === candidate.uid) return false;
-        const otherCat = getCatalogItem(other.catalogId);
-        if (!otherCat || otherCat.layer !== 'wall' || other.wall === 'west') return false;
-        return candidate.gx < other.gx + otherCat.size[0] - 0.01 && candidate.gx + span > other.gx + 0.01;
-      });
-    }
+    const wall = normalizeWallSide(candidate.wall) as WallSide;
+    const onX = wallAxis(wall) === 'x';
+    const start = onX ? candidate.gx : candidate.gz;
+    // Window openings (west + south) and the west suite door reject overlap.
+    if (!wallAllowsPlacement(wall, start, span, GRID_SIZE)) return false;
+    return !existingItems.some((other) => {
+      if (other.uid === candidate.uid) return false;
+      const otherCat = getCatalogItem(other.catalogId);
+      if (!otherCat || otherCat.layer !== 'wall') return false;
+      if (normalizeWallSide(other.wall) !== wall) return false;
+      const otherStart = onX ? other.gx : other.gz;
+      return start < otherStart + otherCat.size[0] - 0.01 && start + span > otherStart + 0.01;
+    });
   }
 
   const [ew, ed] = getEffectiveSize(candidate.catalogId, candidate.rot);

@@ -3,6 +3,7 @@ import { handleWorldRoute } from './worlds';
 import { handleSocialRoute } from './social';
 import { handleEconomyRoute } from './economy';
 import { handleTransitRoute } from './transit';
+import { handlePlatformRoute } from './platform';
 export { LoftLifeRealtime } from './realtime';
 import {
   hashPassword,
@@ -15,6 +16,8 @@ import {
   verifyAuthToken,
   verifyPassword,
 } from '../../shared/auth-core.mjs';
+import { normalizeVoicePreferences } from '../../shared/voice-controls.mjs';
+import { normalizeControlsPayload } from '../../shared/keybindings.mjs';
 
 /**
  * Cloudflare Worker: static assets, Neon-backed game APIs and Durable Object realtime.
@@ -150,6 +153,17 @@ const SCHEMA_STATEMENTS = [
      expires_at BIGINT NOT NULL
    )`,
   `CREATE INDEX IF NOT EXISTS ll_sessions_account ON ll_sessions(account_id)`,
+  `CREATE TABLE IF NOT EXISTS ll_account_settings (
+     user_id TEXT PRIMARY KEY REFERENCES ll_accounts(id) ON DELETE CASCADE,
+     data_json TEXT NOT NULL,
+     updated_at BIGINT NOT NULL
+   )`,
+  `CREATE TABLE IF NOT EXISTS ll_dm_reads (
+     user_id TEXT NOT NULL REFERENCES ll_accounts(id) ON DELETE CASCADE,
+     peer_id TEXT NOT NULL REFERENCES ll_accounts(id) ON DELETE CASCADE,
+     last_read_at BIGINT NOT NULL,
+     PRIMARY KEY (user_id, peer_id)
+   )`,
 ];
 
 let schemaReady: Promise<void> | null = null;
@@ -417,6 +431,7 @@ function profileView(account: AccountRow, row?: Record<string, unknown>) {
     displayName: String(row?.display_name ?? account.display_name ?? account.handle),
     bio: String(row?.bio ?? ''),
     avatar: parseJsonField(row?.avatar_json, safeAvatar(undefined, account.display_name || account.handle)),
+    voice: normalizeVoicePreferences(parseJsonField(row?.voice_json, {})),
   };
 }
 function suiteView(row?: Record<string, unknown>) {
@@ -527,13 +542,39 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
     const body = await readJson(request);
     const displayName = validateDisplayName(body.displayName ?? account.display_name, account.handle);
     const bio = typeof body.bio === 'string' ? body.bio.replace(/[\\u0000-\\u001f\\u007f]/g,'').trim().slice(0,160) : undefined;
-    const rows = await sql.query('SELECT avatar_json,bio FROM ll_profiles WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
+    const rows = await sql.query('SELECT avatar_json,bio,voice_json FROM ll_profiles WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
     const avatar = body.avatar === undefined ? parseJsonField(rows[0]?.avatar_json,safeAvatar(undefined,displayName)) : safeAvatar(body.avatar,displayName);
+    // Voice preferences are only written when the client sends them, so an
+    // outfit save cannot reset the microphone mode.
+    const voice = body.voice === undefined
+      ? normalizeVoicePreferences(parseJsonField(rows[0]?.voice_json, {}))
+      : normalizeVoicePreferences(body.voice);
     await Promise.all([
       sql.query('UPDATE ll_accounts SET display_name=$1 WHERE id=$2',[displayName,account.id]),
-      sql.query('UPDATE ll_profiles SET display_name=$1,avatar_json=$2,bio=$3,updated_at=$4 WHERE user_id=$5',[displayName,JSON.stringify(avatar),bio ?? String(rows[0]?.bio ?? ''),Date.now(),account.id]),
+      sql.query('UPDATE ll_profiles SET display_name=$1,avatar_json=$2,bio=$3,voice_json=$4,updated_at=$5 WHERE user_id=$6',[displayName,JSON.stringify(avatar),bio ?? String(rows[0]?.bio ?? ''),JSON.stringify(voice),Date.now(),account.id]),
     ]);
-    return json({userId:account.id,handle:account.handle,displayName,bio:bio ?? String(rows[0]?.bio ?? ''),avatar});
+    return json({userId:account.id,handle:account.handle,displayName,bio:bio ?? String(rows[0]?.bio ?? ''),avatar,voice});
+  }
+  if (path === '/api/preferences/controls' && sql && account) {
+    if (request.method === 'GET') {
+      const rows = await sql.query(
+        'SELECT controls_json,controls_updated_at FROM ll_profiles WHERE user_id=$1 LIMIT 1',
+        [account.id]
+      ) as Array<Record<string, unknown>>;
+      let stored: Record<string, unknown> = {};
+      try { stored = parseJsonField(rows[0]?.controls_json, {}); } catch { stored = {}; }
+      return json(normalizeControlsPayload({ ...stored, updatedAt: Number(rows[0]?.controls_updated_at) || 0 }));
+    }
+    if (request.method === 'PUT') {
+      const body = await readJson(request);
+      const normalized = normalizeControlsPayload(body);
+      const updatedAt = Date.now();
+      await sql.query(
+        'UPDATE ll_profiles SET controls_json=$1,controls_updated_at=$2 WHERE user_id=$3',
+        [JSON.stringify({ bindings: normalized.bindings, touch: normalized.touch }), updatedAt, account.id]
+      );
+      return json({ ...normalized, updatedAt });
+    }
   }
   if (path === '/api/inventory' && request.method === 'GET' && sql && account) {
     const rows = await sql.query('SELECT kind,catalog_id,qty,acquired_at FROM ll_inventory WHERE user_id=$1 ORDER BY acquired_at DESC',[account.id]) as Array<Record<string,unknown>>;
@@ -566,7 +607,7 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
       if (![raw.gx,raw.gz,raw.rot].every(Number.isInteger) || Number(raw.gx)<0 || Number(raw.gx)>14 || Number(raw.gz)<0 || Number(raw.gz)>14 || Number(raw.rot)<0 || Number(raw.rot)>3) return fail(`Invalid placement at index ${i}.`,400,'invalid_input');
       const color = typeof raw.color==='string' && /^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color.toLowerCase() : '#e6dfd3';
       const item: Record<string,unknown> = {uid,catalogId:raw.catalogId,gx:raw.gx,gz:raw.gz,rot:raw.rot,color};
-      if (raw.wall==='north'||raw.wall==='west') item.wall=raw.wall;
+      if (raw.wall==='north'||raw.wall==='south'||raw.wall==='east'||raw.wall==='west') item.wall=raw.wall;
       if (typeof raw.active==='boolean') item.active=raw.active;
       items.push(item);
     }
@@ -654,6 +695,14 @@ export default {
         if (!env.REALTIME) return fail('Realtime Durable Object binding is not configured.',503,'realtime_unconfigured');
         const id = env.REALTIME.idFromName('party:global');
         return env.REALTIME.get(id).fetch(new Request('https://loftlife-internal/internal/party/presence-snapshot'));
+      }
+
+      if (url.pathname === '/api/settings' || url.pathname.startsWith('/api/messages/')) {
+        const auth = await currentAccount(request, env);
+        const sql = auth?.sql ?? (await database(env));
+        if (!sql) return fail('DATABASE_URL is not configured.', 503, 'unconfigured');
+        const platformResponse = await handlePlatformRoute(request, sql, auth?.account ?? null);
+        if (platformResponse) return platformResponse;
       }
 
       if (url.pathname.startsWith('/api/')) {
