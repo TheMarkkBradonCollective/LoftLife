@@ -519,45 +519,63 @@ export class LoftLifeRealtime {
       return;
     }
     const scope = String(message.scope ?? 'city');
-    if (!['city', 'world', 'local', 'party'].includes(scope)) {
-      error(ws, 'unsupported_scope', 'Direct messages are not migrated to edge yet');
+    if (!['city','world','local','dm','party'].includes(scope)) {
+      error(ws,'unsupported_scope','Unknown chat scope');
       return;
     }
     const world = player.instanceId.startsWith('world:');
     let dbScope = world ? 'world' : 'city';
     let scopeId = world ? player.instanceId.slice(6) : 'main';
-    let partyMemberIds: string[] = [];
-    if (scope === 'party') {
-      const namespace = this.env.REALTIME;
-      if (!namespace) { error(ws,'party_unavailable','Party service is not configured'); return; }
-      const partyResponse = await namespace.get(namespace.idFromName('party:global')).fetch(new Request('https://loftlife-internal/internal/party/state',{
+    let recipients: string[] = [];
+    let to: {userId:string;handle:string}|undefined;
+    let partyId: string|undefined;
+    if (scope === 'dm') {
+      const handle=String(message.to??'').replace(/^@/,'').trim().toLowerCase();
+      if(!handle){error(ws,'bad_request','A recipient handle is required');return;}
+      const rows=await this.database().query('SELECT id,handle FROM ll_accounts WHERE handle=$1 LIMIT 1',[handle]) as Array<{id:string;handle:string}>;
+      if(!rows[0]){error(ws,'not_found','No player with that handle');return;}
+      const target=rows[0];
+      if(target.id===player.userId){error(ws,'bad_request','You cannot message yourself');return;}
+      const blocked=await this.database().query('SELECT 1 FROM ll_blocks WHERE (user_id=$1 AND blocked_id=$2) OR (user_id=$2 AND blocked_id=$1) LIMIT 1',[player.userId,target.id]);
+      if(blocked.length){error(ws,'forbidden','This conversation is unavailable');return;}
+      const [a,b]=player.userId<target.id?[player.userId,target.id]:[target.id,player.userId];
+      dbScope='dm';scopeId=`${a}|${b}`;recipients=[player.userId,target.id];to={userId:target.id,handle:target.handle};
+    } else if (scope === 'party') {
+      const namespace=this.env.REALTIME;
+      if(!namespace){error(ws,'party_unavailable','Party service is not configured');return;}
+      const response=await namespace.get(namespace.idFromName('party:global')).fetch(new Request('https://loftlife-internal/internal/party/state',{
         method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({userId:player.userId}),
       }));
-      const partyState = await partyResponse.json() as {party?:{id:string;members:Array<{userId:string}>}};
-      if (!partyState.party) { error(ws,'not_in_party','Join a party before using party chat'); return; }
-      if (message.scopeId && message.scopeId !== partyState.party.id) { error(ws,'forbidden','You are not in that party'); return; }
-      dbScope = 'party';
-      scopeId = partyState.party.id;
-      partyMemberIds = partyState.party.members.map(member=>member.userId);
+      const state=await response.json() as {party?:{id:string;members:Array<{userId:string}>}};
+      if(!state.party){error(ws,'not_in_party','Join a party before using party chat');return;}
+      if(message.scopeId&&message.scopeId!==state.party.id){error(ws,'forbidden','You are not in that party');return;}
+      dbScope='party';scopeId=state.party.id;partyId=state.party.id;recipients=state.party.members.map(member=>member.userId);
     }
-    const id = crypto.randomUUID();
+    const id=crypto.randomUUID();
     await this.database().query(
       'INSERT INTO ll_chat_messages (id, scope, scope_id, user_id, body, created_at) VALUES ($1,$2,$3,$4,$5,$6)',
-      [id, dbScope, scopeId, player.userId, body, now]
+      [id,dbScope,scopeId,player.userId,body,now]
     );
-    const event = { t: 'chat', scope, body, from: { userId: player.userId, handle: player.handle, displayName: player.name }, at: now, id, scopeId };
-    if (scope === 'local') {
-      for (const peer of this.ctx.getWebSockets()) {
-        const other = peer.deserializeAttachment() as Player | undefined;
-        if (other?.instanceId === player.instanceId && Math.hypot(other.x-player.x, other.z-player.z) <= 24) send(peer, event);
+    const mode=String(message.mode??'say');
+    const event={t:'chat',scope,mode,body,from:{userId:player.userId,handle:player.handle,displayName:player.name},to,at:now,id,scopeId};
+    if(scope==='local'){
+      const range=mode==='whisper'?6:mode==='shout'?60:24;
+      for(const peer of this.ctx.getWebSockets()){
+        const other=peer.deserializeAttachment() as Player|undefined;
+        if(other?.instanceId===player.instanceId&&Math.hypot(other.x-player.x,other.z-player.z)<=range)send(peer,{...event,range});
       }
-    } else if (scope === 'party') {
-      for (const peer of this.ctx.getWebSockets()) {
-        const other = peer.deserializeAttachment() as Player | undefined;
-        if (other?.userId && partyMemberIds.includes(other.userId)) send(peer,event);
+    } else if(scope==='dm'||scope==='party'){
+      const namespace=this.env.REALTIME;
+      if(namespace){
+        const endpoint=scope==='party'?'/internal/party/chat':'/internal/relay';
+        const payload=scope==='party'?{partyId,userId:player.userId,message:event}:{userIds:recipients,message:event};
+        const response=await namespace.get(namespace.idFromName('party:global')).fetch(new Request(`https://loftlife-internal${endpoint}`,{
+          method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload),
+        }));
+        if(!response.ok){error(ws,'chat_delivery_failed','Message could not be delivered');return;}
       }
-    } else this.broadcast(player.instanceId, event);
-    ws.serializeAttachment({ ...player, lastChatAt: now });
+    } else this.broadcast(player.instanceId,event);
+    ws.serializeAttachment({...player,lastChatAt:now});
   }
 
   async webSocketClose(ws: HibernatableWebSocket, code: number, reason: string) {
