@@ -298,7 +298,7 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
             <p className="text-xs text-slate-500">
               {tab === 'mine'
                 ? 'You have not built a world yet. Create one above — it opens straight into build mode.'
-                : 'No published worlds yet. Be the first to open one to the city.'}
+                : 'No Live cities yet. Be the first to make a city Live.'}
             </p>
           )}
 
