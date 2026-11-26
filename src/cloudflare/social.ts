@@ -31,7 +31,7 @@ export async function handleSocialRoute(request:Request,sql:Sql,user:User|null):
   const targets=await sql.query('SELECT id FROM ll_accounts WHERE handle=$1 LIMIT 1',[String(body.handle??'').toLowerCase()]) as Array<{id:string}>;
   if(!targets[0])return fail('No player with that handle.',404,'not_found');
   const other=targets[0].id;if(other===user.id)return fail('You cannot add yourself.',400,'bad_request');
-  const blocked=await sql.query('SELECT 1 FROM ll_blocks WHERE user_id=$1 AND blocked_id=$2 LIMIT 1',[other,user.id]);
+  const blocked=await sql.query('SELECT 1 FROM ll_blocks WHERE (user_id=$1 AND blocked_id=$2) OR (user_id=$2 AND blocked_id=$1) LIMIT 1',[other,user.id]);
   if(blocked.length)return fail('This player is not accepting requests.',403,'forbidden');
   const [a,b]=pair(user.id,other);
   const existing=await sql.query('SELECT status,requested_by FROM ll_friendships WHERE a=$1 AND b=$2 LIMIT 1',[a,b]) as Array<{status:string;requested_by:string}>;
