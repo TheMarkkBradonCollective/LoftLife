@@ -1,73 +1,47 @@
 # Guest City, airport arrival, and hotel rollout
 
-This document breaks issue #8 into implementation gates. It is deliberately a planning artifact, not a claim that guest play or airport travel is implemented.
-
-## Current constraints found on main
-
-- PlatformApp routes guests only to the signed-in dashboard flow; GameHost requires an account session for TheCity.
-- AuthGate offers account sign-in/registration and local offline play, not a shared guest identity.
-- The session provider has only anonymous/online/offline account states.
-- The realtime gateway authenticates WebSocket connections through account tokens and uses account IDs for chat, presence, blocking, and party operations.
-- City chat is currently part of the authenticated realtime protocol. A browser-only guest flag would therefore be insecure and would not create a true shared visitor.
-- Hotel placement and room allocation are part of the Three.js city builder; room persistence/permissions are account-backed.
-
-## Required implementation sequence
-
-### 1. Server-authoritative guest identity (blocking foundation)
-- Add short-lived guest sessions with cryptographically random opaque tokens, hashed at rest, expiry, revocation, and rate limits.
-- Validate and normalize the guest-selected display name on the server.
-- Expose a distinct guest principal (kind: guest) that can join only the public TheCity instance.
-- Include guest identity and immutable guest status in realtime player/presence/chat payloads.
-- Permit public city chat only. Reject DMs, party/group messaging, friend operations, profile/account APIs, private worlds, suite APIs, purchases, and room invitations at the server boundary.
-- Ensure guest tokens cannot be interpreted as account tokens and cannot be upgraded into accounts.
-
-### 2. Client session and public landing
-- Add a signed-out landing screen with only Sign In and Visit as Guest.
-- Sign In opens the existing account auth flow.
-- Visit as Guest asks for a display name, obtains a server guest token, and enters TheCity using the same shared city realtime instance as registered players.
-- Render names as [chosen name] · Guest above avatars and in public chat.
-- Keep account-only dashboard navigation and actions unavailable to guests.
-
-### 3. Guest-local room persistence
-- Separate guest-local room/character keys from account suite keys.
-- Persist only in local browser/device storage; never call suite/world save APIs for guests.
-- Do not allocate a public hotel door or permit room visits/invites for guest rooms.
-- Keep local room fixtures (closet/bathroom) while retaining existing customization rules.
-- Explain that clearing browser data or changing devices can remove a guest room.
-
-### 4. Airport travel and city layout
-- Add airport arrival and departure interaction points; entering TheCity starts at arrivals and leaving uses airport departure.
-- Remove M-menu and shortcut exits that bypass departure, while retaining disconnect/recovery handling.
-- Remove suite/main-city jump-spawn buttons and teleport shortcuts.
-- Move the hotel near the airport and connect it to walkable streets/map navigation.
-- Add an in-world airport clothing shop.
-- Ensure arrival/departure save and reconnect paths are safe.
-
-### 5. Registered resident hotel allocation
-- Add a deterministic account-to-room allocation model: 10 rooms per floor, five on each side, unique and stable per account.
-- Add floors as required.
-- Enforce room ownership and visitor permissions on the backend.
-- Preserve current account suite save and invite behavior.
-
-## Acceptance tests before merge
-- Guest token expiry/revocation, malformed names, rate limits, and token/role spoofing.
-- Guest and account players appear together in one live city instance.
-- Guest public chat is attributed to the chosen name plus server-owned Guest status.
-- Guest DM, party, friend, profile, private-world, suite, purchase, and invite attempts are denied server-side.
-- Guest room save survives refresh on the same browser and never reaches account APIs or public hotel listings.
-- Account room allocation is stable, unique, and correctly rolls over to new floors.
-- Arrival/departure flow handles reconnects without silently teleporting or losing saved state.
-- Existing account auth, world permissions, camera/movement, four-wall rooms, voice, offline-first behavior, and all supported runtimes remain intact, including mobile-browser gameplay.
-- Full test, lint, typecheck (if configured), build, and Cloudflare validation pass; document which checks were run.
+This document records the implementation state of issue #8. It distinguishes code present in this PR from deployment and product work that still requires verification.
 
 ## Implemented in this PR
-- A simple signed-out landing page with Sign In and Visit as Guest.
-- A guest-selected display name and a separate 12-hour, revocable, server-issued guest token stored independently from account credentials.
-- Durable Object validation of guest tokens before entry; guests can join only the shared TheCity instance.
-- Guest identity is server-labelled as `Guest · [display name]` in player and chat payloads.
-- Guest city and nearby chat is live-broadcast to the shared city without inserting guest messages into account-owned chat history.
-- Server-side rejection of guest DMs, party actions, private voice signalling, and world entry; guest-only UI hides account social tabs and account tools.
-- Guest token restoration across refresh and explicit guest-session revocation when leaving.
 
-## Remaining work in this PR's requested scope
-Airport arrival/departure interactions, moving the hotel, deterministic room allocation, airport clothing shop, local-only guest suite entry/fixtures, and closet/bathroom interaction remain unimplemented. They must be completed before this PR can be considered a full implementation of issue #8.
+### Guest access and public landing
+- Signed-out visitors see a simple LoftLife landing page with only **Sign In** and **Visit as Guest** as primary actions.
+- Guest visitors choose a display name before entry.
+- The Worker issues a separate, signed, 12-hour guest token; its session identifier is hashed at rest, can be revoked, and is checked again when the realtime socket joins.
+- Guests enter the same shared `city:main` Durable Object as registered players. The server only accepts guest principals into TheCity.
+- Server-authored player and chat identity uses `Guest · [chosen display name]`; the guest flag is not client-controlled.
+- Guests can use city chat and nearby chat. Realtime server handlers reject guest DMs, party actions, private voice signalling, and entry into private worlds. Account-only HTTP APIs still require a registered account session.
+- Guest sessions are distinct from account sessions and are not silently converted into accounts. Leaving the airport departure flow revokes the guest session.
+
+### Guest personal room
+- Guests can enter their own isolated local room through the hotel's guest entrance; the room is not allocated a public hotel door and does not appear in the resident directory.
+- Guest room furniture, surfaces, mood, and avatar changes are saved in a separate browser-local storage key. They are not sent to account suite APIs or exposed as a visitable room.
+- Guest rooms cannot receive visitors or invitations. Clearing browser storage or changing devices can remove the local room.
+- Guest rooms include built-in closet and bathroom fixtures. Closet interaction opens owned-clothing selection; bathroom mirror and the in-world salon open hair and makeup choices.
+- Saved outfit presets are unlimited and currently stored locally on the device.
+
+### Airport and city travel
+- TheCity arrival spawn is at the airport.
+- The airport has walk-up clothing and departure counters. The clothing counter opens the clothing shop; guests can browse but cannot purchase.
+- Leaving TheCity uses the airport's **Take a flight** interaction. Guest departure ends the guest session; registered departure returns to the platform dashboard.
+- The M-menu's direct **Travel to Main City** and **Return to Suite** shortcuts have been removed. Guest-room entry is through the physical hotel entrance, not a menu teleport.
+
+### Hotel and registered suites
+- The Grand Hotel has been relocated to the edge of TheCity beside the airport.
+- Each hotel floor is laid out with ten doors: five on each side of the hallway.
+- A server-side allocation table assigns each registered account a stable, unique room index. Room numbers are derived deterministically at ten rooms per floor, starting on residential floor 5; new accounts continue onto additional floors.
+- Existing suite owners are backfilled in a stable order by the migration. The Worker also creates the allocation table idempotently for installations using runtime schema setup.
+
+## Remaining work before production release
+
+- Apply and verify migration `0007_hotel_room_allocations.sql` against the target Neon database before deploying the Worker.
+- Run end-to-end checks against the actual Cloudflare Worker, Neon database, and Durable Object binding. CI passing does not prove production secrets, migrations, or bindings are configured.
+- Verify airport arrival/departure and hotel paths in the supported desktop, installed-app, and Android runtimes, including reconnect and save recovery.
+- Implement the paid foundational facial-feature makeover service; those features are not exposed in the free bathroom/salon editor.
+- Saved outfit presets are device-local today. Account-synced outfits across devices are not implemented yet.
+- Replace the existing sample hotel resident/intercom directory with live account-backed resident availability and invitation permissions.
+- Confirm the hotel allocation backfill on a production-like database with existing accounts and verify no duplicate room numbers.
+
+## Verification
+
+The GitHub Actions `verify` workflow runs the repository's test, lint, build, and Cloudflare bundle-validation steps. The latest result is shown on PR #9; do not treat this document as a substitute for testing the deployed environment.
