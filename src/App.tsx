@@ -221,7 +221,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     }
     const saved = session.status === 'guest' ? loadSavedState(GUEST_STORAGE_KEY) : loadSavedState();
     if (session.status === 'guest' && session.guestName) {
-      return { ...saved, avatar: { ...saved.avatar, name: `Guest · ${session.guestName}` } };
+      return { ...saved, avatar: { ...saved.avatar, name: `Guest User - ${session.guestName}` } };
     }
     return saved;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1534,7 +1534,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   // Only show players who are actually in this scene (and, for player worlds,
   // in the same world instance).
   const remoteInThisScene = useMemo(() => {
-    if (session.status !== 'online') return [];
+    if (session.status !== 'online' && session.status !== 'guest') return [];
     if (activeWorld) {
       if (session.instance?.worldId !== activeWorld.id) return [];
     } else if (session.instance?.kind === 'world') {

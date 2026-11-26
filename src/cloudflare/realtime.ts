@@ -31,7 +31,7 @@ function send(ws: WebSocket, value: unknown) {
 function publicPlayer(p: Player) {
   return {
     connId: p.connId, userId: p.userId, handle: p.handle,
-    name: p.isGuest ? `Guest · ${p.name}` : p.name, displayName: p.name, isGuest: Boolean(p.isGuest),
+    name: p.isGuest ? `Guest User - ${p.name}` : p.name, displayName: p.name, isGuest: Boolean(p.isGuest),
     avatar: p.avatar, x: p.x, y: p.y, z: p.z, yaw: p.yaw,
     emote: p.emote, location: p.location, riding: p.riding ?? null,
   };
@@ -716,7 +716,7 @@ export class LoftLifeRealtime {
       );
     }
     const mode=String(message.mode??'say');
-    const event={t:'chat',scope,mode,body,from:{userId:player.userId,handle:player.handle,displayName:player.isGuest ? `Guest · ${player.name}` : player.name,isGuest:Boolean(player.isGuest)},to,at:now,id,scopeId};
+    const event={t:'chat',scope,mode,body,from:{userId:player.userId,handle:player.handle,displayName:player.isGuest ? `Guest User - ${player.name}` : player.name,isGuest:Boolean(player.isGuest)},to,at:now,id,scopeId};
     if(scope==='local'){
       const range=mode==='whisper'?6:mode==='shout'?60:24;
       for(const peer of this.ctx.getWebSockets()){
