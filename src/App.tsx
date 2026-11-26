@@ -343,6 +343,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     entry?.kind === 'city' ? 'world' : 'room'
   );
   const [hallwayFloor, setHallwayFloor] = useState<number>(playerSuiteFloor);
+  useEffect(() => { if (session.suite) setHallwayFloor(session.suite.floor); }, [session.suite?.floor]);
   const [unlockedRooms, setUnlockedRooms] = useState<string[]>([]);
   const [mainDoorUnlocked, setMainDoorUnlocked] = useState<boolean>(false);
   const [roomDoorUnlocked, setRoomDoorUnlocked] = useState<boolean>(false);
@@ -2602,6 +2603,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         currentLocation={location}
         currentFloor={hallwayFloor}
         playerSuiteFloor={playerSuiteFloor}
+        playerSuiteNumber={playerSuiteNumber}
         playerName={avatarConfig.name}
         targetVisitResident={targetVisitResident}
         onArriveFloor={handleArriveFloor}

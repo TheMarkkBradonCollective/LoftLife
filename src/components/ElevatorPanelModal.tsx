@@ -9,6 +9,7 @@ interface ElevatorPanelModalProps {
   currentLocation: WorldLocation;
   currentFloor: number;
   playerSuiteFloor: number;
+  playerSuiteNumber: string;
   playerName: string;
   targetVisitResident: ActiveResident | null;
   onArriveFloor: (floor: 'L' | number) => void;
@@ -20,12 +21,13 @@ export const ElevatorPanelModal: React.FC<ElevatorPanelModalProps> = ({
   currentLocation,
   currentFloor,
   playerSuiteFloor,
+  playerSuiteNumber,
   playerName,
   targetVisitResident,
   onArriveFloor,
   onClose,
 }) => {
-  const [travelingTo, setTravelingTo] = useState<'L' | 2 | 3 | 4 | null>(null);
+  const [travelingTo, setTravelingTo] = useState<'L' | number | null>(null);
   const [displayFloor, setDisplayFloor] = useState<string>('L');
   const timerRef = useRef<number | null>(null);
 
@@ -154,13 +156,13 @@ export const ElevatorPanelModal: React.FC<ElevatorPanelModalProps> = ({
                   <div className="min-w-0">
                     <div className="text-sm font-semibold flex items-center gap-2">
                       <span>{stop.label}</span>
-                      {stop.id === PLAYER_SUITE_FLOOR && (
+                      {stop.id === playerSuiteFloor && (
                         <span
                           className={`text-[11px] font-medium inline-flex items-center gap-1 ${
                             travelingTo === stop.id ? 'text-[#051205]' : 'text-[#39ff14]'
                           }`}
                         >
-                          · <Home className="w-3 h-3" /> {playerName} ({PLAYER_SUITE_NUMBER})
+                          · <Home className="w-3 h-3" /> {playerName} ({playerSuiteNumber})
                         </span>
                       )}
                     </div>
