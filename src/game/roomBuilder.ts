@@ -721,6 +721,7 @@ export function buildRoomArchitecture(
   // Built-in personal-room fixtures: wardrobe and bathroom vanity/mirror.
   const fixtureWood = new THREE.MeshStandardMaterial({ color: 0x76543a, roughness: 0.48 });
   const fixtureTrim = new THREE.MeshStandardMaterial({ color: 0xc7a879, roughness: 0.34, metalness: 0.18 });
+  const fixtureHandle = new THREE.MeshStandardMaterial({ color: 0xd4af5a, roughness: 0.24, metalness: 0.86 });
   const fixtureCeramic = new THREE.MeshStandardMaterial({ color: 0xe7e9e7, roughness: 0.2 });
   const mirrorMat = new THREE.MeshPhysicalMaterial({ color: 0xb9d2d5, metalness: 0.82, roughness: 0.08, clearcoat: 1 });
   const closet = new THREE.Group();
@@ -730,7 +731,7 @@ export function buildRoomArchitecture(
   const closetDoors = new THREE.Mesh(new THREE.BoxGeometry(2.0, 2.12, 0.06), fixtureTrim);
   closetDoors.position.set(0, 1.12, -0.44); closet.add(closetDoors);
   for (const x of [-0.48, 0.48]) {
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.22, 8), brassMat);
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.22, 8), fixtureHandle);
     handle.position.set(x, 1.12, -0.49); closet.add(handle);
   }
   roomGroup.add(closet);
