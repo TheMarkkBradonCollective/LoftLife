@@ -3,12 +3,13 @@ import { X, Check, Lock } from 'lucide-react';
 import { HAIR_COLORS, OUTFIT_COLORS } from '../game/catalog';
 import { sfx } from '../game/audio';
 import { api, type ShopEntry } from '../net/api';
-import type { AccessoryId, AvatarConfig, HairStyleId, TopStyleId } from '../game/types';
+import type { AccessoryId, AvatarConfig, HairStyleId, MakeupStyleId, TopStyleId } from '../game/types';
 
 interface AvatarModalProps {
   open: boolean;
   config: AvatarConfig;
   mode: 'hair' | 'closet';
+  outfitStorageKey: string;
   /** Clothing ids the account owns; unowned pieces are locked in the studio. */
   ownedClothing?: string[];
   onChange: (next: AvatarConfig) => void;
@@ -45,11 +46,22 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
   open,
   config,
   mode,
+  outfitStorageKey,
   ownedClothing = [],
   onChange,
   onClose,
 }) => {
   const [clothingShop, setClothingShop] = useState<ShopEntry[]>([]);
+  const [outfitName, setOutfitName] = useState('My Outfit');
+  const [savedOutfits, setSavedOutfits] = useState<Array<{ id: string; name: string; topStyle: TopStyleId; topColor: string; bottomColor: string; shoeColor: string; accessory: AccessoryId }>>([]);
+  useEffect(() => {
+    try { const raw = localStorage.getItem(`loftlife_outfits_${outfitStorageKey}`); setSavedOutfits(raw ? JSON.parse(raw) : []); }
+    catch { setSavedOutfits([]); }
+  }, [outfitStorageKey]);
+  const persistOutfits = (next: typeof savedOutfits) => {
+    setSavedOutfits(next);
+    try { localStorage.setItem(`loftlife_outfits_${outfitStorageKey}`, JSON.stringify(next)); } catch { /* Keep the current session usable if storage is full. */ }
+  };
 
   // Prices are server-owned; the studio only renders them.
   useEffect(() => {
@@ -152,6 +164,16 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          {/* Makeup is a cosmetic preset changed at the bathroom mirror. */}
+          <div className="space-y-2">
+            <span className="block text-xs font-medium text-slate-300">Makeup</span>
+            <div className="grid grid-cols-3 gap-2">
+              {([{id:'natural',label:'Natural'},{id:'soft',label:'Soft'},{id:'bold',label:'Bold'}] as {id:MakeupStyleId;label:string}[]).map((style) => (
+                <button key={style.id} type="button" onClick={() => update({ makeupStyle: style.id })} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${(config.makeupStyle ?? 'natural') === style.id ? 'border-[#39ff14] bg-[#39ff14] text-[#051205]' : 'border-white/12 bg-[#101713] text-slate-200'}`}>{style.label}</button>
+              ))}
             </div>
           </div>
 
@@ -315,6 +337,21 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
                 );
               })}
             </div>
+          </div>
+
+          <div className="space-y-2 border-t border-white/10 pt-4">
+            <div className="text-xs font-semibold text-slate-300">Saved Outfits</div>
+            <div className="flex gap-2">
+              <input value={outfitName} onChange={(event) => setOutfitName(event.target.value)} maxLength={32} aria-label="Outfit name" className="min-w-0 flex-1 rounded-lg border border-white/12 bg-black/30 px-3 py-2 text-xs text-white" />
+              <button type="button" onClick={() => { const name = outfitName.trim() || 'My Outfit'; persistOutfits([...savedOutfits, { id: crypto.randomUUID(), name, topStyle: config.topStyle, topColor: config.topColor, bottomColor: config.bottomColor, shoeColor: config.shoeColor, accessory: config.accessory }]); }} className="rounded-lg bg-[#39ff14] px-3 py-2 text-xs font-bold text-[#051205]">Save</button>
+            </div>
+            {savedOutfits.length === 0 ? <p className="text-[11px] text-slate-500">Save as many outfit combinations as you like on this device.</p> : savedOutfits.map((outfit) => (
+              <div key={outfit.id} className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 p-2">
+                <span className="min-w-0 flex-1 truncate text-xs text-slate-200">{outfit.name}</span>
+                <button type="button" onClick={() => update({ topStyle: outfit.topStyle, topColor: outfit.topColor, bottomColor: outfit.bottomColor, shoeColor: outfit.shoeColor, accessory: outfit.accessory })} className="rounded-md bg-white/10 px-2 py-1 text-[11px]">Wear</button>
+                <button type="button" aria-label={`Delete ${outfit.name}`} onClick={() => persistOutfits(savedOutfits.filter((item) => item.id !== outfit.id))} className="rounded-md bg-white/10 px-2 py-1 text-[11px] text-red-300">Delete</button>
+              </div>
+            ))}
           </div>
             </>
           )}

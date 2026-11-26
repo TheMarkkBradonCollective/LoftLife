@@ -2533,6 +2533,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       <AvatarModal
         open={avatarModalOpen}
         mode={avatarStudioMode}
+        outfitStorageKey={session.status === 'online' ? (session.user?.id ?? 'account') : `guest_${session.guestName ?? 'visitor'}`}
         config={avatarConfig}
         ownedClothing={session.inventory
           .filter((entry) => entry.kind === 'clothing')

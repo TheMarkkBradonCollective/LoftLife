@@ -94,6 +94,7 @@ function safeAvatar(input: unknown, name: string) {
     skinTone: hex(raw.skinTone, DEFAULT_AVATAR.skinTone),
     hairStyle: pick('hairStyle', DEFAULT_AVATAR.hairStyle),
     hairColor: hex(raw.hairColor, DEFAULT_AVATAR.hairColor),
+    makeupStyle: ['natural','soft','bold'].includes(String(raw.makeupStyle)) ? raw.makeupStyle as 'natural'|'soft'|'bold' : 'natural',
     topStyle: pick('topStyle', DEFAULT_AVATAR.topStyle),
     topColor: hex(raw.topColor, DEFAULT_AVATAR.topColor),
     bottomColor: hex(raw.bottomColor, DEFAULT_AVATAR.bottomColor),
