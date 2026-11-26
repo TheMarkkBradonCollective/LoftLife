@@ -1,15 +1,21 @@
-import React from 'react';
-import { X, Check } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, Check, Lock } from 'lucide-react';
 import { HAIR_COLORS, OUTFIT_COLORS, SKIN_TONES } from '../game/catalog';
 import { sfx } from '../game/audio';
+import { api, type ShopEntry } from '../net/api';
 import type { AccessoryId, AvatarConfig, HairStyleId, TopStyleId } from '../game/types';
 
 interface AvatarModalProps {
   open: boolean;
   config: AvatarConfig;
+  /** Clothing ids the account owns; unowned pieces are locked in the studio. */
+  ownedClothing?: string[];
   onChange: (next: AvatarConfig) => void;
   onClose: () => void;
 }
+
+/** Always-free basics so a new character is never stuck in a locked state. */
+const FREE_CLOTHING = new Set(['tee', 'none']);
 
 const HAIR_STYLES: { id: HairStyleId; label: string }[] = [
   { id: 'bob', label: 'Classic Bob' },
@@ -37,10 +43,34 @@ const ACCESSORIES: { id: AccessoryId; label: string }[] = [
 export const AvatarModal: React.FC<AvatarModalProps> = ({
   open,
   config,
+  ownedClothing = [],
   onChange,
   onClose,
 }) => {
+  const [clothingShop, setClothingShop] = useState<ShopEntry[]>([]);
+
+  // Prices are server-owned; the studio only renders them.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    api
+      .shop()
+      .then((result) => {
+        if (!cancelled) setClothingShop(result.clothing ?? []);
+      })
+      .catch(() => {
+        // Without prices the lock badges simply stay price-less.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   if (!open) return null;
+
+  const owned = new Set([...FREE_CLOTHING, ...ownedClothing]);
+  const isLocked = (id: string) => !owned.has(id);
+  const priceFor = (id: string) => clothingShop.find((entry) => entry.id === id);
 
   const update = (patch: Partial<AvatarConfig>) => {
     sfx.playClick();
@@ -169,18 +199,37 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
             <div className="grid grid-cols-2 gap-1.5">
               {TOP_STYLES.map((top) => {
                 const active = config.topStyle === top.id;
+                const locked = isLocked(top.id);
+                const price = priceFor(top.id);
                 return (
                   <button
                     key={top.id}
                     type="button"
-                    onClick={() => update({ topStyle: top.id })}
-                    className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap ${
+                    disabled={locked}
+                    title={
+                      locked
+                        ? `Buy ${top.label} in the Wardrobe shop${price ? ` (${price.currency === 'tongbao' ? '宝' : '元'} ${price.price})` : ''}`
+                        : top.label
+                    }
+                    onClick={() => {
+                      if (locked) return;
+                      update({ topStyle: top.id });
+                    }}
+                    className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap flex items-center justify-center gap-1 ${
                       active
                         ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]'
+                        : locked
+                        ? 'bg-[#0c110e] text-slate-500 border-white/8 cursor-not-allowed'
                         : 'bg-[#101713] text-slate-200 border-white/12 hover:border-[#39ff14]/45'
                     }`}
                   >
-                    {top.label}
+                    {locked && <Lock className="w-3 h-3" />}
+                    <span>{top.label}</span>
+                    {locked && price && (
+                      <span className="text-[10px] font-mono-tabular text-amber-300/80">
+                        {price.currency === 'tongbao' ? '宝' : '元'} {price.price}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -264,18 +313,37 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
             <div className="grid grid-cols-2 gap-1.5">
               {ACCESSORIES.map((acc) => {
                 const active = config.accessory === acc.id;
+                const locked = isLocked(acc.id);
+                const price = priceFor(acc.id);
                 return (
                   <button
                     key={acc.id}
                     type="button"
-                    onClick={() => update({ accessory: acc.id })}
-                    className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap ${
+                    disabled={locked}
+                    title={
+                      locked
+                        ? `Buy ${acc.label} in the Wardrobe shop${price ? ` (${price.currency === 'tongbao' ? '宝' : '元'} ${price.price})` : ''}`
+                        : acc.label
+                    }
+                    onClick={() => {
+                      if (locked) return;
+                      update({ accessory: acc.id });
+                    }}
+                    className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap flex items-center justify-center gap-1 ${
                       active
                         ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]'
+                        : locked
+                        ? 'bg-[#0c110e] text-slate-500 border-white/8 cursor-not-allowed'
                         : 'bg-[#101713] text-slate-200 border-white/12 hover:border-[#39ff14]/45'
                     }`}
                   >
-                    {acc.label}
+                    {locked && <Lock className="w-3 h-3" />}
+                    <span>{acc.label}</span>
+                    {locked && price && (
+                      <span className="text-[10px] font-mono-tabular text-amber-300/80">
+                        {price.currency === 'tongbao' ? '宝' : '元'} {price.price}
+                      </span>
+                    )}
                   </button>
                 );
               })}

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Armchair,
   BedDouble,
@@ -43,22 +43,26 @@ import {
   Volume2,
   VolumeX,
   Footprints,
+  Mic,
+  MicOff,
   X,
 } from 'lucide-react';
-import { AccountModal } from './components/AccountModal';
 import { AvatarModal } from './components/AvatarModal';
 import { CityMapModal } from './components/CityMapModal';
 import { ElevatorPanelModal } from './components/ElevatorPanelModal';
 import { HotelDoorTerminalModal } from './components/HotelDoorTerminalModal';
-import { type CameraPresetRequest, RoomViewport } from './components/RoomViewport';
-import {
-  fetchSession,
-  loginAccount,
-  logoutAccount,
-  openWorldSocket,
-  registerAccount,
-  saveCloudState,
-} from './lib/api';
+import type { CameraPresetRequest } from './components/RoomViewport';
+import { SocialHud } from './components/SocialHud';
+import { TouchControls } from './components/TouchControls';
+import { isTouchDevice } from './game/touchInput';
+
+// Three.js is only needed once the world renders; lazy-loading keeps the
+// sign-in wall light.
+const RoomViewport = lazy(() =>
+  import('./components/RoomViewport').then((module) => ({ default: module.RoomViewport }))
+);
+import { api } from './net/api';
+import { useSession } from './session';
 import { sfx } from './game/audio';
 import {
   DEFAULT_AVATAR,
@@ -74,7 +78,6 @@ import {
 } from './game/catalog';
 import { getEffectiveSize, isValidPlacement, SNAP_STEP, snapGrid } from './game/gridMath';
 import type {
-  AccountProfile,
   ActiveResident,
   AvatarConfig,
   EmoteType,
@@ -82,13 +85,10 @@ import type {
   FurnitureCategory,
   GameMode,
   LightingMood,
-  PersistedPlayerState,
   PlacedItem,
-  RoomAccessMode,
   RoomSurfaceConfig,
   ViewMode,
   WallStyleId,
-  WalletSummary,
   WorldLocation,
 } from './game/types';
 
@@ -191,7 +191,23 @@ const CATEGORY_TABS: { id: 'all' | FurnitureCategory; label: string }[] = [
 ];
 
 export default function App() {
-  const initial = useMemo(() => loadSavedState(), []);
+  const session = useSession();
+
+  // Server-owned state wins when signed in; localStorage stays the offline path.
+  // Read once on mount — later edits flow through state and the save effects below.
+  const initial = useMemo(() => {
+    if (session.suite && session.profile) {
+      return {
+        items: session.suite.items,
+        surfaces: session.suite.surfaces,
+        mood: session.suite.mood,
+        avatar: session.profile.avatar,
+        roomName: session.suite.name,
+      };
+    }
+    return loadSavedState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [location, setLocation] = useState<WorldLocation>('room');
   const [hallwayFloor, setHallwayFloor] = useState<number>(PLAYER_SUITE_FLOOR);
@@ -203,7 +219,8 @@ export default function App() {
   const [doorTerminalOpen, setDoorTerminalOpen] = useState(false);
   const [elevatorModalOpen, setElevatorModalOpen] = useState(false);
 
-  const [viewMode, setViewMode] = useState<ViewMode>('isometric');
+  const touchDevice = useMemo(() => isTouchDevice(), []);
+  const [viewMode, setViewMode] = useState<ViewMode>(() => (isTouchDevice() ? 'play' : 'isometric'));
   const [mode, setMode] = useState<GameMode>('walk');
   const [items, setItems] = useState<PlacedItem[]>(initial.items);
   const [history, setHistory] = useState<PlacedItem[][]>([]);
@@ -211,6 +228,11 @@ export default function App() {
   const [mood, setMood] = useState<LightingMood>(initial.mood);
   const [roomName, setRoomName] = useState<string>(initial.roomName);
   const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(initial.avatar);
+  const [activeWorld, setActiveWorld] = useState<{
+    id: string;
+    name: string;
+    canEdit: boolean;
+  } | null>(null);
 
   // Walk & Emote state
   const [activeEmote, setActiveEmote] = useState<EmoteType>('idle');
@@ -231,19 +253,8 @@ export default function App() {
   const [placingColor, setPlacingColor] = useState<string>('#e6dfd3');
   const [movingUid, setMovingUid] = useState<string | null>(null);
 
-  // Account & Persistent Cloud State (Phase 2)
-  const [account, setAccount] = useState<AccountProfile | null>(null);
-  const [wallet, setWallet] = useState<WalletSummary | null>(null);
-  const [accessMode, setAccessMode] = useState<RoomAccessMode>('friends');
-  const [accountModalOpen, setAccountModalOpen] = useState(false);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [cloudSavePending, setCloudSavePending] = useState(false);
-  const [onlineCount, setOnlineCount] = useState<number>(0);
-  const skipCloudSyncRef = useRef(true);
-  const wsRef = useRef<WebSocket | null>(null);
-
   // UI Chrome state
-  const [dockCollapsed, setDockCollapsed] = useState(false);
+  const [dockCollapsed, setDockCollapsed] = useState(() => isTouchDevice());
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [cityMapOpen, setCityMapOpen] = useState(false);
   const [cityStreet, setCityStreet] = useState('M St & 15th St');
@@ -252,107 +263,78 @@ export default function App() {
   const [cameraToggle, setCameraToggle] = useState<'overview' | 'closeup'>('overview');
   const playerPoseRef = useRef({ x: 0, z: 0, yaw: 0 });
 
-  const applyPersistedState = useCallback((state: PersistedPlayerState) => {
-    skipCloudSyncRef.current = true;
-    setAccount(state.account);
-    setWallet(state.wallet);
-    setAvatarConfig(state.avatar);
-    setRoomName(state.roomName);
-    setAccessMode(state.accessMode);
-    setSurfaces(state.surfaces);
-    setMood(state.mood);
-    setItems(state.items);
-    setHallwayFloor(state.account.floor);
-  }, []);
-
-  // Restore persisted server session on boot
-  useEffect(() => {
-    let active = true;
-    fetchSession()
-      .then((res) => {
-        if (!active) return;
-        if (res?.state) {
-          applyPersistedState(res.state);
-          setOnlineCount(res.onlineCount);
-        } else {
-          setAccountModalOpen(true);
-        }
-      })
-      .finally(() => {
-        if (active) setAuthChecked(true);
-      });
-    return () => {
-      active = false;
-    };
-  }, [applyPersistedState]);
-
-  // Authenticated WebSocket presence connection
-  useEffect(() => {
-    if (!account) {
-      wsRef.current?.close();
-      wsRef.current = null;
-      setOnlineCount(0);
-      return;
-    }
-    const ws = openWorldSocket((count) => setOnlineCount(count));
-    wsRef.current = ws;
-    return () => {
-      ws?.close();
-      if (wsRef.current === ws) wsRef.current = null;
-    };
-  }, [account?.id]);
-
-  useEffect(() => {
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'presence:location', location }));
-    }
-  }, [location]);
-
-  // Persist to localStorage (guest backup)
+  // Persist locally always; mirror to the account when signed in.
   useEffect(() => {
     try {
-      const payload: SavedState = {
-        items,
-        surfaces,
-        mood,
-        avatar: avatarConfig,
-        roomName,
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      if (!activeWorld) {
+        const payload: SavedState = {
+          items,
+          surfaces,
+          mood,
+          avatar: avatarConfig,
+          roomName,
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      }
     } catch {
       // Ignore storage quota errors
     }
-  }, [items, surfaces, mood, avatarConfig, roomName]);
 
-  // Debounced server persistence when signed in
-  useEffect(() => {
-    if (!account) return;
-    if (skipCloudSyncRef.current) {
-      skipCloudSyncRef.current = false;
-      return;
+    if (session.status !== 'online') return;
+    const state = { name: roomName, items, surfaces, mood };
+    if (activeWorld) {
+      if (activeWorld.canEdit) session.saveWorldState(activeWorld.id, state);
+    } else {
+      session.saveRoomState(state);
     }
-    setCloudSavePending(true);
-    const timer = window.setTimeout(() => {
-      void saveCloudState({
-        avatar: avatarConfig,
-        roomName,
-        accessMode,
-        surfaces,
-        mood,
-        items,
-      })
-        .then((res) => {
-          setWallet(res.state.wallet);
-          setOnlineCount(res.onlineCount);
-        })
-        .catch(() => {
-          // Keep editing fluid; retry on next edit
-        })
-        .finally(() => setCloudSavePending(false));
-    }, 700);
-    return () => window.clearTimeout(timer);
-  }, [account, avatarConfig, roomName, accessMode, surfaces, mood, items]);
+  }, [items, surfaces, mood, avatarConfig, roomName, activeWorld, session.status]);
+
+  // Character appearance is part of the persistent account. Skip the write when
+  // the local outfit already matches the account (e.g. just after sign-in).
+  useEffect(() => {
+    if (session.status !== 'online' || !session.profile) return;
+    if (JSON.stringify(session.profile.avatar) === JSON.stringify(avatarConfig)) return;
+    session.saveAvatar(avatarConfig);
+  }, [avatarConfig, session.status, session.profile]);
+
+  // Stream position/emote to the realtime gateway while online.
+  useEffect(() => {
+    if (session.status !== 'online') return;
+    const timer = window.setInterval(() => {
+      const pose = playerPoseRef.current;
+      session.setPose({
+        x: pose.x,
+        y: 0,
+        z: pose.z,
+        yaw: pose.yaw,
+        location,
+        emote: activeEmote,
+      });
+      session.setVoiceAnchor({ x: pose.x, z: pose.z, location });
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, [session.status, session.setPose, session.setVoiceAnchor, location, activeEmote]);
+
+  // Push-to-talk: hold T while voice is enabled.
+  useEffect(() => {
+    if (session.voiceStatus !== 'ready') return;
+    const onDown = (event: KeyboardEvent) => {
+      if (event.code !== 'KeyT' || event.repeat) return;
+      const active = document.activeElement;
+      if (active && ['INPUT', 'TEXTAREA'].includes(active.tagName)) return;
+      session.setPushToTalk(true);
+    };
+    const onUp = (event: KeyboardEvent) => {
+      if (event.code === 'KeyT') session.setPushToTalk(false);
+    };
+    window.addEventListener('keydown', onDown);
+    window.addEventListener('keyup', onUp);
+    return () => {
+      window.removeEventListener('keydown', onDown);
+      window.removeEventListener('keyup', onUp);
+      session.setPushToTalk(false);
+    };
+  }, [session.voiceStatus, session.setPushToTalk]);
 
   const showHint = useCallback((text: string | null) => {
     setWalkHint(text);
@@ -478,6 +460,57 @@ export default function App() {
     },
     [handleChangeLocation, showHint]
   );
+
+  /** Load a player-created world into the room builder. */
+  const handleEnterWorld = useCallback(
+    async (worldId: string) => {
+      try {
+        const world = await api.world(worldId);
+        if (!world.canEnter || !world.items) {
+          showHint('You do not have access to that world');
+          return;
+        }
+        setActiveWorld({ id: world.id, name: world.name, canEdit: world.canEdit });
+        setItems(world.items);
+        if (world.surfaces) setSurfaces(world.surfaces);
+        setMood(world.mood ?? 'morning');
+        setRoomName(world.name);
+        setLocation('room');
+        setMode(world.canEdit ? 'edit' : 'walk');
+        setSelectedUid(null);
+        setPlacingCatalogId(null);
+        setMovingUid(null);
+        await session.enterWorld(worldId);
+        showHint(
+          world.canEdit
+            ? `${world.name} · you can build here — use Edit Room to place furniture`
+            : `${world.name} · visiting only`
+        );
+      } catch (error) {
+        showHint(error instanceof Error ? error.message : 'Could not enter that world');
+      }
+    },
+    [session, showHint]
+  );
+
+  /** Return from a player world to the hotel suite. */
+  const handleLeaveWorld = useCallback(() => {
+    setActiveWorld(null);
+    const suite = session.suite;
+    if (suite) {
+      setItems(suite.items);
+      setSurfaces(suite.surfaces);
+      setMood(suite.mood);
+      setRoomName(suite.name);
+    }
+    setLocation('room');
+    setMode('walk');
+    setSelectedUid(null);
+    setPlacingCatalogId(null);
+    setMovingUid(null);
+    session.enterCity();
+    showHint('Back in your suite');
+  }, [session, showHint]);
 
   const pushHistory = useCallback((prevItems: PlacedItem[]) => {
     setHistory((h) => [...h.slice(-19), prevItems]);
@@ -732,6 +765,61 @@ export default function App() {
     setEmoteTriggerId((id) => id + 1);
   };
 
+  /** Seat position on the server-owned bus, so the local avatar rides along. */
+  const ridingVehiclePose = useMemo(() => {
+    if (!session.riding) return null;
+    const vehicle = session.transitVehicles.find((entry) => entry.id === session.riding!.vehicleId);
+    if (!vehicle) return null;
+    const seat = session.riding.seat ?? 0;
+    const lateral = seat % 2 === 0 ? -0.62 : 0.62;
+    const along = 1.35 - Math.floor(seat / 2) * 1.25;
+    const forwardX = Math.sin(vehicle.heading);
+    const forwardZ = Math.cos(vehicle.heading);
+    const rightX = Math.cos(vehicle.heading);
+    const rightZ = -Math.sin(vehicle.heading);
+    return {
+      x: vehicle.x + rightX * lateral + forwardX * along,
+      y: 0.34,
+      z: vehicle.z + rightZ * lateral + forwardZ * along,
+      heading: vehicle.heading,
+    };
+  }, [session.riding, session.transitVehicles]);
+
+  const ridingState = session.riding;
+  const ridingLabel = ridingState
+    ? session.transitVehicles.find((vehicle) => vehicle.id === ridingState.vehicleId)?.label
+    : undefined;
+
+  const handleBoardTransit = useCallback(
+    (lineId: string, stopId: string) => {
+      setViewMode('play');
+      setMode('walk');
+      const sent = session.boardTransit(lineId, stopId);
+      if (!sent) showHint('Connecting… try boarding again in a moment');
+    },
+    [session, showHint]
+  );
+
+  const handleExitTransit = useCallback(() => {
+    session.exitTransit();
+  }, [session]);
+
+  const toggleVoice = useCallback(async () => {
+    if (session.voiceStatus === 'ready') {
+      session.disableVoice();
+      showHint('Voice off');
+      return;
+    }
+    const next = await session.enableVoice();
+    if (next === 'denied') {
+      showHint('Microphone permission denied — text chat still works');
+    } else if (next === 'unsupported') {
+      showHint('This browser does not support voice chat');
+    } else if (next === 'ready') {
+      showHint('Voice on · hold T (or the mic button) to talk');
+    }
+  }, [session, showHint]);
+
   const filteredCatalog = useMemo(() => {
     if (categoryFilter === 'all') return FURNITURE_CATALOG;
     return FURNITURE_CATALOG.filter((item) => item.category === categoryFilter);
@@ -745,37 +833,59 @@ export default function App() {
   const hudPanelClass =
     'bg-[#0b100d]/95 text-slate-100 border-[#39ff14]/30 neon-panel-glow';
 
-  const anyModalOpen =
-    avatarModalOpen || cityMapOpen || doorTerminalOpen || elevatorModalOpen || accountModalOpen;
+  const anyModalOpen = avatarModalOpen || cityMapOpen || doorTerminalOpen || elevatorModalOpen;
 
-  const activeSuiteNumber = account?.suiteNumber ?? PLAYER_SUITE_NUMBER;
-  const activeSuiteFloor = account?.floor ?? PLAYER_SUITE_FLOOR;
+  const locationTitle = activeWorld
+    ? `${activeWorld.name}${activeWorld.canEdit ? ' · Building' : ' · Visiting'}`
+    : location === 'world'
+    ? 'Main City'
+    : location === 'lobby'
+    ? 'Hotel Lobby'
+    : location === 'hallway'
+    ? `Floor ${hallwayFloor} Hallway`
+    : location === 'resident_room' && activeResident
+    ? `${activeResident.name}'s Suite ${activeResident.roomNumber}`
+    : `Suite ${PLAYER_SUITE_NUMBER} · ${roomName}`;
 
-  const locationTitle =
-    location === 'world'
-      ? 'Main City'
-      : location === 'lobby'
-      ? 'Hotel Lobby'
-      : location === 'hallway'
-      ? `Floor ${hallwayFloor} Hallway`
-      : location === 'resident_room' && activeResident
-      ? `${activeResident.name}'s Suite ${activeResident.roomNumber}`
-      : `Suite ${activeSuiteNumber} · ${roomName}`;
+  const locationSub = activeWorld
+    ? `Player world · ${items.length} items · ${session.presenceOnline} online`
+    : location === 'world'
+    ? cityStreet
+    : location === 'lobby'
+    ? 'Floor 1 · Concierge & Elevator'
+    : location === 'hallway'
+    ? `Suites ${hallwayFloor}01–${hallwayFloor}04`
+    : location === 'resident_room' && activeResident
+    ? `Floor ${activeResident.floor} · Guest Visit`
+    : `Floor ${PLAYER_SUITE_FLOOR} · ${items.length} items`;
 
-  const locationSub =
-    location === 'world'
-      ? cityStreet
-      : location === 'lobby'
-      ? 'Floor 1 · Concierge & Elevator'
-      : location === 'hallway'
-      ? `Suites ${hallwayFloor}01–${hallwayFloor}04`
-      : location === 'resident_room' && activeResident
-      ? `Floor ${activeResident.floor} · Guest Visit`
-      : `Floor ${activeSuiteFloor} · ${items.length} items`;
+  // Only show players who are actually in this scene (and, for player worlds,
+  // in the same world instance).
+  const remoteInThisScene = useMemo(() => {
+    if (session.status !== 'online') return [];
+    if (activeWorld) {
+      if (session.instance?.worldId !== activeWorld.id) return [];
+    } else if (session.instance?.kind === 'world') {
+      return [];
+    }
+    return session.remotePlayers.filter(
+      (player) =>
+        player.location === location ||
+        // Riders on the bus are still in the city scene.
+        (location === 'world' && player.location === 'transit')
+    );
+  }, [session.status, session.remotePlayers, session.instance, activeWorld, location]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden select-none">
-      {/* Full-Screen 3D Canvas */}
+      {/* Full-Screen 3D Canvas (lazy-loaded: the sign-in wall ships no Three.js) */}
+      <Suspense
+        fallback={
+          <div className="fixed inset-0 bg-[#070b08] flex items-center justify-center">
+            <span className="text-sm text-[#39ff14] tracking-wide">Loading LoftLife…</span>
+          </div>
+        }
+      >
       <RoomViewport
         location={location}
         hallwayFloor={hallwayFloor}
@@ -798,7 +908,14 @@ export default function App() {
         movingUid={movingUid}
         cameraPreset={cameraPreset}
         modalOpen={anyModalOpen}
+        remotePlayers={remoteInThisScene}
         playerPoseRef={playerPoseRef}
+        transitLines={session.transitLines}
+        transitVehicles={session.transitVehicles}
+        ridingVehicle={ridingVehiclePose}
+        ridingLabel={ridingLabel ?? null}
+        onBoardTransit={handleBoardTransit}
+        onExitTransit={handleExitTransit}
         onChangeLocation={handleChangeLocation}
         onSelectItem={setSelectedUid}
         onPlaceItem={handlePlaceItem}
@@ -816,6 +933,7 @@ export default function App() {
         onUnlockHallwayDoor={handleUnlockHallwayDoor}
         onEnterSuiteFromHallway={handleEnterSuiteFromHallway}
       />
+      </Suspense>
 
       {/* Functional Aiming Reticle when Pointer-Locked in Play View */}
       {viewMode === 'play' && pointerLocked && (
@@ -824,8 +942,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Top-Left Brand, Location & Resident Account */}
-      <div className="fixed top-4 left-4 z-20 flex flex-wrap items-center gap-2 pointer-events-auto">
+      {/* Top-Left Brand & Hotel / City Summary */}
+      <div className="fixed top-4 left-4 z-20 pointer-events-auto">
         <div className={`px-4 py-2.5 rounded-xl border flex items-center gap-3 ${hudPanelClass}`}>
           <span className="font-display text-base font-bold tracking-tight text-[#39ff14] whitespace-nowrap shrink-0">
             LoftLife
@@ -841,49 +959,33 @@ export default function App() {
             <span className="font-mono-tabular text-slate-300">{locationSub}</span>
           </div>
         </div>
-
-        <button
-          type="button"
-          onClick={() => {
-            sfx.playClick();
-            setAccountModalOpen(true);
-          }}
-          className={`px-3.5 py-2.5 rounded-xl border text-xs font-semibold flex items-center gap-2 transition-colors whitespace-nowrap shrink-0 ${
-            account
-              ? `${hudPanelClass} hover:border-[#39ff14]/60`
-              : 'bg-[#39ff14] text-[#051205] border-[#39ff14] hover:bg-[#5bff3b] neon-btn-glow'
-          }`}
-        >
-          <span
-            className={`w-2 h-2 rounded-full ${
-              !account
-                ? 'bg-[#051205]'
-                : cloudSavePending
-                ? 'bg-amber-400 animate-pulse'
-                : 'bg-[#39ff14]'
-            }`}
-          />
-          {account ? (
-            <>
-              <span>@{account.username}</span>
-              {onlineCount > 0 && (
-                <span className="text-[11px] font-mono-tabular text-slate-400">
-                  · {onlineCount} online
-                </span>
-              )}
-            </>
-          ) : (
-            <span>{authChecked ? 'Sign In / Save' : 'Loading...'}</span>
-          )}
-        </button>
       </div>
 
       {/* Top-Right Compact Mode & Utility Bar */}
-      <div className="fixed top-4 right-4 z-20 flex flex-wrap items-center justify-end gap-2 pointer-events-auto">
+      <div className="fixed top-4 right-4 z-20 max-w-[calc(100vw-27rem)] flex flex-wrap items-center justify-end gap-2 pointer-events-auto">
+        {/* Leave a player-created world and restore the hotel suite */}
+        {activeWorld && (
+          <button
+            type="button"
+            onClick={handleLeaveWorld}
+            className="px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-[#ffb878] text-[#1a1005] border-[#ffb878] hover:bg-[#ffc894]"
+          >
+            <Home className="w-3.5 h-3.5" />
+            Leave {activeWorld.name}
+          </button>
+        )}
         {/* Exit to Main World / Return to My Suite Quick Travel */}
         <button
           type="button"
-          onClick={() => handleChangeLocation(location === 'world' ? 'room' : 'world')}
+          onClick={() => {
+            if (activeWorld) {
+              handleLeaveWorld();
+              setLocation('world');
+              session.enterCity();
+              return;
+            }
+            handleChangeLocation(location === 'world' ? 'room' : 'world');
+          }}
           className={`px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
             location === 'world'
               ? 'bg-[#39ff14] text-[#051205] border-[#39ff14] hover:bg-[#5bff3b] neon-btn-glow'
@@ -955,7 +1057,7 @@ export default function App() {
         </div>
 
         {/* Walk / Edit Room Mode Segmented Switch (only inside My Suite) */}
-        {location === 'room' && (
+        {location === 'room' && (!activeWorld || activeWorld.canEdit) && (
           <div className={`p-1 rounded-xl border flex items-center gap-1 ${hudPanelClass}`}>
             <button
               type="button"
@@ -1015,6 +1117,42 @@ export default function App() {
 
         {/* Camera & Avatar & Sound */}
         <div className={`p-1 rounded-xl border flex items-center gap-1 ${hudPanelClass}`}>
+          <button
+            type="button"
+            title={
+              session.voiceStatus === 'ready'
+                ? 'Voice on · hold T to talk · click to turn off'
+                : session.voiceStatus === 'denied'
+                ? 'Microphone blocked in this browser'
+                : 'Turn on proximity voice'
+            }
+            aria-label={session.voiceStatus === 'ready' ? 'Turn voice off' : 'Turn voice on'}
+            onClick={() => {
+              sfx.playClick();
+              void toggleVoice();
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
+              session.voiceStatus === 'ready'
+                ? 'bg-sky-500 text-white'
+                : session.voiceStatus === 'denied'
+                ? 'bg-red-500/20 text-red-200'
+                : 'text-slate-200 hover:bg-white/10'
+            }`}
+          >
+            {session.voiceStatus === 'ready' ? (
+              <Mic className="w-3.5 h-3.5" />
+            ) : (
+              <MicOff className="w-3.5 h-3.5" />
+            )}
+            {session.voiceStatus === 'requesting'
+              ? 'Mic…'
+              : session.voiceStatus === 'ready'
+              ? session.voicePushToTalk
+                ? 'Talking'
+                : 'Voice'
+              : 'Voice'}
+          </button>
+
           <button
             type="button"
             onClick={() => {
@@ -1659,10 +1797,26 @@ export default function App() {
         </div>
       </div>
 
+      {/* Mobile virtual stick, drag-look and contextual buttons */}
+      <TouchControls
+        active={touchDevice && !anyModalOpen && session.status === 'online'}
+        lookEnabled={viewMode === 'play'}
+        voiceEnabled={session.voiceStatus === 'ready'}
+        onEmote={() => triggerEmote(activeEmote === 'dance' ? 'wave' : 'dance')}
+        onTalkStart={() => session.setPushToTalk(true)}
+        onTalkEnd={() => session.setPushToTalk(false)}
+      />
+
+      {/* Community: chat, presence, friends, shop and worlds */}
+      <SocialHud onEnterWorld={handleEnterWorld} />
+
       {/* Avatar Character Studio Modal */}
       <AvatarModal
         open={avatarModalOpen}
         config={avatarConfig}
+        ownedClothing={session.inventory
+          .filter((entry) => entry.kind === 'clothing')
+          .map((entry) => entry.catalogId)}
         onChange={setAvatarConfig}
         onClose={() => setAvatarModalOpen(false)}
       />
@@ -1694,74 +1848,6 @@ export default function App() {
         targetVisitResident={targetVisitResident}
         onArriveFloor={handleArriveFloor}
         onClose={() => setElevatorModalOpen(false)}
-      />
-
-      {/* Persistent Resident Account Portal */}
-      <AccountModal
-        open={accountModalOpen}
-        canDismiss={true}
-        account={account}
-        wallet={wallet}
-        roomName={roomName}
-        accessMode={accessMode}
-        hasLocalRoomToImport={Boolean(localStorage.getItem(STORAGE_KEY))}
-        localSnapshot={{
-          avatar: avatarConfig,
-          roomName,
-          surfaces,
-          mood,
-          items,
-        }}
-        onRegister={async ({ username, email, displayName, password, importLocal }) => {
-          const res = await registerAccount({
-            username,
-            email,
-            displayName,
-            password,
-            importState: importLocal
-              ? {
-                  avatar: avatarConfig,
-                  roomName,
-                  surfaces,
-                  mood,
-                  items,
-                }
-              : undefined,
-          });
-          applyPersistedState(res.state);
-          setOnlineCount(res.onlineCount);
-          setAccountModalOpen(false);
-          showHint(`Welcome @${res.state.account.username} · Suite ${res.state.account.suiteNumber} saved!`);
-        }}
-        onLogin={async ({ identifier, password }) => {
-          const res = await loginAccount({ identifier, password });
-          applyPersistedState(res.state);
-          setOnlineCount(res.onlineCount);
-          setAccountModalOpen(false);
-          showHint(`Signed in as @${res.state.account.username} · Suite ${res.state.account.suiteNumber}`);
-        }}
-        onLogout={async () => {
-          await logoutAccount();
-          setAccount(null);
-          setWallet(null);
-          setOnlineCount(0);
-          setAccountModalOpen(false);
-          showHint('Signed out · Local guest mode active');
-        }}
-        onUpdateAccountSettings={async (patch) => {
-          const res = await saveCloudState({
-            displayName: patch.displayName,
-            avatar: avatarConfig,
-            roomName: patch.roomName,
-            accessMode: patch.accessMode,
-            surfaces,
-            mood,
-            items,
-          });
-          applyPersistedState(res.state);
-          setOnlineCount(res.onlineCount);
-        }}
-        onClose={() => setAccountModalOpen(false)}
       />
     </div>
   );

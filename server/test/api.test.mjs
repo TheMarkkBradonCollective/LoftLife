@@ -1,0 +1,674 @@
+/**
+ * End-to-end API + realtime tests against a real server and a real SQLite file
+ * in a temp directory. Run with: npm test
+ */
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test, { after, before } from 'node:test';
+import WebSocket from 'ws';
+
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'loftlife-test-'));
+process.env.LOFTLIFE_DATA_DIR = dataDir;
+process.env.LOFTLIFE_INSTANCE_CAPACITY = '40';
+// The suite creates many accounts from one address; production keeps the
+// default of 12 auth attempts per minute per IP.
+process.env.LOFTLIFE_AUTH_RATE_MAX = '500';
+
+let startServer;
+let closeDb;
+let server;
+let base;
+
+before(async () => {
+  ({ startServer } = await import('../index.mjs'));
+  ({ closeDb } = await import('../db.mjs'));
+  const started = await startServer({ port: 0 });
+  server = started.server;
+  base = `http://127.0.0.1:${started.port}`;
+});
+
+after(async () => {
+  await new Promise((resolve) => server.close(resolve));
+  closeDb?.();
+  fs.rmSync(dataDir, { recursive: true, force: true });
+});
+
+/* ------------------------------- helpers ------------------------------- */
+
+let counter = 0;
+const uniq = () => `${Date.now().toString(36)}${(counter += 1)}`;
+
+async function api(method, route, { token, body } = {}) {
+  const response = await fetch(`${base}${route}`, {
+    method,
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  const json = text ? JSON.parse(text) : null;
+  return { status: response.status, json };
+}
+
+async function newAccount(overrides = {}) {
+  const handle = overrides.handle ?? `p${uniq()}`;
+  const res = await api('POST', '/api/auth/register', {
+    body: {
+      handle,
+      email: `${handle}@example.test`,
+      password: 'correct-horse-battery',
+      displayName: overrides.displayName ?? handle,
+    },
+  });
+  assert.equal(res.status, 201, JSON.stringify(res.json));
+  return { handle, token: res.json.token, user: res.json.user };
+}
+
+function makeClient(port) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const queue = [];
+  const waiters = [];
+
+  ws.on('message', (raw) => {
+    const msg = JSON.parse(raw.toString());
+    const index = waiters.findIndex((waiter) => waiter.pred(msg));
+    if (index >= 0) {
+      const [waiter] = waiters.splice(index, 1);
+      clearTimeout(waiter.timer);
+      waiter.resolve(msg);
+    } else {
+      queue.push(msg);
+    }
+  });
+
+  const opened = new Promise((resolve, reject) => {
+    ws.once('open', resolve);
+    ws.once('error', reject);
+  });
+
+  return {
+    ws,
+    opened,
+    send(payload) {
+      ws.send(JSON.stringify(payload));
+    },
+    waitFor(pred, timeoutMs = 4000) {
+      const found = queue.findIndex(pred);
+      if (found >= 0) return Promise.resolve(queue.splice(found, 1)[0]);
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          const index = waiters.findIndex((waiter) => waiter.timer === timer);
+          if (index >= 0) waiters.splice(index, 1);
+          reject(new Error('Timed out waiting for a realtime message'));
+        }, timeoutMs);
+        waiters.push({ pred, resolve, timer });
+      });
+    },
+    close() {
+      ws.close();
+    },
+  };
+}
+
+/* --------------------------------- tests -------------------------------- */
+
+test('health endpoint responds', async () => {
+  const res = await api('GET', '/api/health');
+  assert.equal(res.status, 200);
+  assert.equal(res.json.ok, true);
+});
+
+test('registration validates input and rejects duplicates', async () => {
+  const short = await api('POST', '/api/auth/register', {
+    body: { handle: 'ab', email: 'a@b.test', password: 'longenoughpassword' },
+  });
+  assert.equal(short.status, 400);
+
+  const weak = await api('POST', '/api/auth/register', {
+    body: { handle: 'validhandle', email: 'a@b.test', password: 'short' },
+  });
+  assert.equal(weak.status, 400);
+
+  const account = await newAccount();
+  const dupe = await api('POST', '/api/auth/register', {
+    body: {
+      handle: account.handle,
+      email: 'other@example.test',
+      password: 'correct-horse-battery',
+    },
+  });
+  assert.equal(dupe.status, 409);
+});
+
+test('new account gets a wallet, welcome grant, suite and default wardrobe', async () => {
+  const account = await newAccount();
+  const me = await api('GET', '/api/auth/me', { token: account.token });
+  assert.equal(me.status, 200);
+  assert.equal(me.json.wallet.yuanzi, 500);
+  assert.equal(me.json.wallet.tongbao, 25);
+  assert.equal(me.json.suite.number, '402');
+  assert.equal(me.json.profile.avatar.topStyle, 'tee');
+
+  const history = await api('GET', '/api/economy/history', { token: account.token });
+  assert.equal(history.json.length, 2);
+  assert.ok(history.json.every((entry) => entry.reason === 'welcome_grant'));
+});
+
+test('login works and rejects a wrong password', async () => {
+  const account = await newAccount();
+  const ok = await api('POST', '/api/auth/login', {
+    body: { identifier: account.handle, password: 'correct-horse-battery' },
+  });
+  assert.equal(ok.status, 200);
+
+  const bad = await api('POST', '/api/auth/login', {
+    body: { identifier: account.handle, password: 'wrong-password-here' },
+  });
+  assert.equal(bad.status, 401);
+});
+
+test('protected routes require a token', async () => {
+  const res = await api('GET', '/api/economy/wallet');
+  assert.equal(res.status, 401);
+  const forged = await api('GET', '/api/economy/wallet', { token: 'not-a-real-token' });
+  assert.equal(forged.status, 401);
+});
+
+test('purchases are server-priced, idempotent and reject overspend', async () => {
+  const account = await newAccount();
+  const key = `pur_${uniq()}`;
+
+  const bought = await api('POST', '/api/economy/purchase', {
+    token: account.token,
+    body: { catalogId: 'plush_sofa', idempotencyKey: key },
+  });
+  assert.equal(bought.status, 200);
+  assert.equal(bought.json.wallet.yuanzi, 500 - 120);
+  assert.equal(bought.json.item.price, 120);
+
+  // Replaying the same key must not charge twice.
+  const replay = await api('POST', '/api/economy/purchase', {
+    token: account.token,
+    body: { catalogId: 'plush_sofa', idempotencyKey: key },
+  });
+  assert.equal(replay.status, 200);
+  assert.equal(replay.json.duplicate, true);
+  assert.equal(replay.json.wallet.yuanzi, 380);
+
+  // The client cannot dictate the price.
+  const cheap = await api('POST', '/api/economy/purchase', {
+    token: account.token,
+    body: { catalogId: 'espresso_bar', price: 1, idempotencyKey: `pur_${uniq()}` },
+  });
+  assert.equal(cheap.status, 200);
+  assert.equal(cheap.json.wallet.yuanzi, 380 - 320);
+
+  const overspend = await api('POST', '/api/economy/purchase', {
+    token: account.token,
+    body: { catalogId: 'fireplace', idempotencyKey: `pur_${uniq()}` },
+  });
+  assert.equal(overspend.status, 402);
+  assert.equal(overspend.json.code, 'insufficient_funds');
+
+  const unknown = await api('POST', '/api/economy/purchase', {
+    token: account.token,
+    body: { catalogId: 'free_money', idempotencyKey: `pur_${uniq()}` },
+  });
+  assert.equal(unknown.status, 404);
+});
+
+test('wardrobe is enforced against owned clothing', async () => {
+  const account = await newAccount();
+  const me = await api('GET', '/api/auth/me', { token: account.token });
+  const avatar = { ...me.json.profile.avatar, topStyle: 'blazer' };
+
+  const denied = await api('PATCH', '/api/profile', { token: account.token, body: { avatar } });
+  assert.equal(denied.status, 403);
+
+  const buy = await api('POST', '/api/economy/purchase', {
+    token: account.token,
+    body: { catalogId: 'blazer', idempotencyKey: `pur_${uniq()}` },
+  });
+  assert.equal(buy.status, 200);
+  assert.equal(buy.json.wallet.tongbao, 25 - 6);
+
+  const allowed = await api('PATCH', '/api/profile', { token: account.token, body: { avatar } });
+  assert.equal(allowed.status, 200);
+  assert.equal(allowed.json.avatar.topStyle, 'blazer');
+});
+
+test('suite saves validate furniture and persist', async () => {
+  const account = await newAccount();
+
+  const invalid = await api('PUT', '/api/suite', {
+    token: account.token,
+    body: {
+      items: [{ uid: 'a', catalogId: 'not_real', gx: 1, gz: 1, rot: 0, color: '#ffffff' }],
+      surfaces: { floor: 'terrazzo', wall: 'sage_plaster' },
+      mood: 'night',
+    },
+  });
+  assert.equal(invalid.status, 400);
+
+  const outOfRange = await api('PUT', '/api/suite', {
+    token: account.token,
+    body: {
+      items: [{ uid: 'a', catalogId: 'plush_sofa', gx: 99, gz: 1, rot: 0, color: '#ffffff' }],
+    },
+  });
+  assert.equal(outOfRange.status, 400);
+
+  const ok = await api('PUT', '/api/suite', {
+    token: account.token,
+    body: {
+      name: 'Neon Loft',
+      items: [{ uid: 'a', catalogId: 'plush_sofa', gx: 3, gz: 4, rot: 2, color: '#e6dfd3' }],
+      surfaces: { floor: 'terrazzo', wall: 'sage_plaster' },
+      mood: 'night',
+    },
+  });
+  assert.equal(ok.status, 200);
+
+  const me = await api('GET', '/api/auth/me', { token: account.token });
+  assert.equal(me.json.suite.name, 'Neon Loft');
+  assert.equal(me.json.suite.items.length, 1);
+  assert.equal(me.json.suite.mood, 'night');
+});
+
+test('world access modes gate entry and editing', async () => {
+  const owner = await newAccount();
+  const friend = await newAccount();
+  const stranger = await newAccount();
+
+  const created = await api('POST', '/api/worlds', {
+    token: owner.token,
+    body: { name: 'Rooftop Club', kind: 'club', access: 'friends' },
+  });
+  assert.equal(created.status, 201);
+  const worldId = created.json.id;
+  assert.equal(created.json.canEdit, true);
+
+  // Unpublished + friends-only: nobody else gets in.
+  const deniedEntry = await api('GET', `/api/worlds/${worldId}/entry`, { token: stranger.token });
+  assert.equal(deniedEntry.status, 403);
+
+  // Become friends, then the friend may enter.
+  const request = await api('POST', '/api/friends/request', {
+    token: friend.token,
+    body: { handle: owner.handle },
+  });
+  assert.equal(request.json.status, 'pending');
+  const accept = await api('POST', '/api/friends/accept', {
+    token: owner.token,
+    body: { userId: friend.user.id },
+  });
+  assert.equal(accept.json.status, 'accepted');
+
+  const friendEntry = await api('GET', `/api/worlds/${worldId}/entry`, { token: friend.token });
+  assert.equal(friendEntry.status, 200);
+
+  // A friend still cannot build in someone else's world.
+  const friendEdit = await api('PUT', `/api/worlds/${worldId}/state`, {
+    token: friend.token,
+    body: { items: [] },
+  });
+  assert.equal(friendEdit.status, 403);
+
+  // Owner can grant build rights explicitly.
+  const collab = await api('POST', `/api/worlds/${worldId}/collaborators`, {
+    token: owner.token,
+    body: { handle: friend.handle },
+  });
+  assert.equal(collab.status, 200);
+  assert.equal(collab.json.collaborators.length, 1);
+
+  const editorSave = await api('PUT', `/api/worlds/${worldId}/state`, {
+    token: friend.token,
+    body: {
+      items: [{ uid: 'x', catalogId: 'bar_stool', gx: 1, gz: 1, rot: 0, color: '#e6dfd3' }],
+      mood: 'golden',
+    },
+  });
+  assert.equal(editorSave.status, 200);
+
+  // Publishing with public access opens it to anyone.
+  await api('PATCH', `/api/worlds/${worldId}`, {
+    token: owner.token,
+    body: { access: 'public', published: true },
+  });
+  const publicEntry = await api('GET', `/api/worlds/${worldId}/entry`, { token: stranger.token });
+  assert.equal(publicEntry.status, 200);
+
+  const discovered = await api('GET', '/api/worlds?q=Rooftop', { token: stranger.token });
+  assert.ok(discovered.json.some((world) => world.id === worldId));
+  assert.equal(discovered.json.find((world) => world.id === worldId).canEdit, false);
+
+  // Only the owner can delete.
+  const strangerDelete = await api('DELETE', `/api/worlds/${worldId}`, { token: stranger.token });
+  assert.equal(strangerDelete.status, 403);
+  const ownerDelete = await api('DELETE', `/api/worlds/${worldId}`, { token: owner.token });
+  assert.equal(ownerDelete.status, 200);
+});
+
+test('private and invite-only worlds behave differently', async () => {
+  const owner = await newAccount();
+  const guest = await newAccount();
+
+  const priv = await api('POST', '/api/worlds', {
+    token: owner.token,
+    body: { name: 'Private Studio', access: 'private' },
+  });
+  const privateEntry = await api('GET', `/api/worlds/${priv.json.id}/entry`, {
+    token: guest.token,
+  });
+  assert.equal(privateEntry.status, 403);
+
+  const inviteWorld = await api('POST', '/api/worlds', {
+    token: owner.token,
+    body: { name: 'Invite Loft', access: 'invite' },
+  });
+  const before = await api('GET', `/api/worlds/${inviteWorld.json.id}/entry`, { token: guest.token });
+  assert.equal(before.status, 403);
+
+  await api('POST', `/api/worlds/${inviteWorld.json.id}/invite`, {
+    token: owner.token,
+    body: { handle: guest.handle },
+  });
+  const afterInvite = await api('GET', `/api/worlds/${inviteWorld.json.id}/entry`, {
+    token: guest.token,
+  });
+  assert.equal(afterInvite.status, 200);
+});
+
+test('blocking removes friendship and hides the player from search', async () => {
+  const a = await newAccount();
+  const b = await newAccount();
+  await api('POST', '/api/friends/request', { token: a.token, body: { handle: b.handle } });
+
+  const found = await api('GET', `/api/players?q=${b.handle}`, { token: a.token });
+  assert.equal(found.json.length, 1);
+
+  const blocked = await api('POST', '/api/blocks', { token: a.token, body: { handle: b.handle } });
+  assert.equal(blocked.status, 200);
+
+  const hidden = await api('GET', `/api/players?q=${b.handle}`, { token: a.token });
+  assert.equal(hidden.json.length, 0);
+
+  const friends = await api('GET', '/api/friends', { token: a.token });
+  assert.equal(friends.json.length, 0);
+});
+
+test('realtime: two players see each other, chat and movement are relayed', async () => {
+  const a = await newAccount();
+  const b = await newAccount();
+  const port = Number(new URL(base).port);
+
+  const clientA = makeClient(port);
+  const clientB = makeClient(port);
+  await Promise.all([clientA.opened, clientB.opened]);
+
+  clientA.send({ t: 'hello', token: a.token, place: { kind: 'city' } });
+  const readyA = await clientA.waitFor((m) => m.t === 'ready');
+  assert.equal(readyA.instance.kind, 'city');
+
+  clientB.send({ t: 'hello', token: b.token, place: { kind: 'city' } });
+  const readyB = await clientB.waitFor((m) => m.t === 'ready');
+  assert.equal(readyB.instance.id, readyA.instance.id, 'players share one city instance');
+
+  const joinNotice = await clientA.waitFor((m) => m.t === 'join');
+  assert.equal(joinNotice.player.userId, b.user.id);
+  assert.ok(readyB.players.some((player) => player.userId === a.user.id));
+
+  clientA.send({ t: 'pose', x: 12.5, y: 0, z: -4, yaw: 1.2, emote: 'walk', location: 'world' });
+  const snapshot = await clientB.waitFor(
+    (m) => m.t === 'snapshot' && m.players.some((p) => p.userId === a.user.id && p.x === 12.5)
+  );
+  assert.ok(snapshot.players.length >= 2);
+
+  clientA.send({ t: 'chat', scope: 'city', body: 'Hello LoftLife' });
+  const chat = await clientB.waitFor((m) => m.t === 'chat' && m.scope === 'city');
+  assert.equal(chat.body, 'Hello LoftLife');
+  assert.equal(chat.from.userId, a.user.id);
+
+  // Proximity chat is range limited: shout reaches, whisper does not.
+  clientA.send({ t: 'chat', scope: 'local', mode: 'whisper', body: 'psst' });
+  const whisper = await clientB.waitFor(
+    (m) => m.t === 'chat' && m.scope === 'local' && m.mode === 'whisper',
+    600
+  ).catch(() => null);
+  assert.equal(whisper, null, 'a whisper must not reach a distant player');
+
+  const history = await api('GET', `/api/chat/history?scope=city&scopeId=${readyA.instance.id}`, {
+    token: b.token,
+  });
+  assert.ok(history.json.some((message) => message.body === 'Hello LoftLife'));
+
+  clientA.close();
+  clientB.close();
+});
+
+test('realtime: unauthenticated sockets are refused', async () => {
+  const port = Number(new URL(base).port);
+  const client = makeClient(port);
+  await client.opened;
+  client.send({ t: 'hello', token: 'bogus-token', place: { kind: 'city' } });
+  const error = await client.waitFor((m) => m.t === 'error');
+  assert.equal(error.code, 'unauthorized');
+  client.close();
+});
+
+test('realtime: a private world cannot be joined over the socket', async () => {
+  const owner = await newAccount();
+  const guest = await newAccount();
+  const port = Number(new URL(base).port);
+
+  const world = await api('POST', '/api/worlds', {
+    token: owner.token,
+    body: { name: 'Secret Base', access: 'private' },
+  });
+
+  const client = makeClient(port);
+  await client.opened;
+  client.send({ t: 'hello', token: guest.token, place: { kind: 'world', worldId: world.json.id } });
+  const error = await client.waitFor((m) => m.t === 'error');
+  assert.equal(error.code, 'forbidden');
+  client.close();
+});
+
+test('new accounts start furnished and own their starting outfit', async () => {
+  const account = await newAccount();
+  const me = await api('GET', '/api/auth/me', { token: account.token });
+  const { STARTER_SUITE } = await import('../starter.mjs');
+  const { CLOTHING_SHOP, isKnownFurniture } = await import('../economy.mjs');
+
+  assert.equal(me.json.suite.items.length, STARTER_SUITE.items.length);
+  assert.ok(me.json.suite.items.length >= 10, 'starter suite should be furnished');
+  for (const item of STARTER_SUITE.items) {
+    assert.ok(isKnownFurniture(item.catalogId), `${item.catalogId} must be purchasable`);
+  }
+
+  const ownedClothing = me.json.inventory
+    .filter((entry) => entry.kind === 'clothing')
+    .map((entry) => entry.catalogId);
+  const shopClothing = new Set(CLOTHING_SHOP.map((entry) => entry.id));
+  for (const piece of [me.json.profile.avatar.topStyle, me.json.profile.avatar.accessory]) {
+    if (shopClothing.has(piece)) {
+      assert.ok(ownedClothing.includes(piece), `starting outfit piece "${piece}" must be owned`);
+    }
+  }
+
+  // Saving the starting outfit must not be rejected by the wardrobe check.
+  const saveAvatar = await api('PATCH', '/api/profile', {
+    token: account.token,
+    body: { avatar: me.json.profile.avatar },
+  });
+  assert.equal(saveAvatar.status, 200);
+});
+
+test('moderation: first account is admin and can review reports', async () => {
+  // The first account registered in this database is the bootstrap admin.
+  const admin = await newAccount();
+  const reported = await newAccount();
+
+  const report = await api('POST', '/api/reports', {
+    token: reported.token,
+    body: { handle: admin.handle, reason: 'spam', details: 'Test report' },
+  });
+  assert.equal(report.status, 201);
+
+  const denied = await api('GET', '/api/mod/reports', { token: reported.token });
+  assert.equal(denied.status, 403);
+
+  const me = await api('GET', '/api/auth/me', { token: admin.token });
+  if (me.json.user.role === 'admin') {
+    const list = await api('GET', '/api/mod/reports', { token: admin.token });
+    assert.equal(list.status, 200);
+  }
+});
+
+test('realtime: parties invite, accept, chat and leave', async () => {
+  const leader = await newAccount();
+  const guest = await newAccount();
+  const port = Number(new URL(base).port);
+  const clientA = makeClient(port);
+  const clientB = makeClient(port);
+  await Promise.all([clientA.opened, clientB.opened]);
+
+  clientA.send({ t: 'hello', token: leader.token, place: { kind: 'city' } });
+  await clientA.waitFor((m) => m.t === 'ready');
+  clientB.send({ t: 'hello', token: guest.token, place: { kind: 'city' } });
+  await clientB.waitFor((m) => m.t === 'ready');
+
+  clientA.send({ t: 'party', action: 'create' });
+  const created = await clientA.waitFor((m) => m.t === 'party' && m.party);
+  assert.equal(created.party.leaderId, leader.user.id);
+  assert.equal(created.party.members.length, 1);
+
+  clientA.send({ t: 'party', action: 'invite', handle: guest.handle });
+  const invited = await clientB.waitFor(
+    (m) => m.t === 'party' && m.invites.some((invite) => invite.id === created.party.id)
+  );
+  assert.equal(invited.party, null, 'the invitee is not a member yet');
+
+  clientB.send({ t: 'party', action: 'accept' });
+  const joined = await clientB.waitFor((m) => m.t === 'party' && m.party && m.party.members.length === 2);
+  assert.equal(joined.party.leaderId, leader.user.id);
+
+  clientA.send({ t: 'chat', scope: 'party', body: 'Party up' });
+  const partyChat = await clientB.waitFor((m) => m.t === 'chat' && m.scope === 'party');
+  assert.equal(partyChat.body, 'Party up');
+  assert.equal(partyChat.scopeId, created.party.id);
+
+  clientB.send({ t: 'party', action: 'leave' });
+  const left = await clientB.waitFor((m) => m.t === 'party' && m.party === null);
+  assert.equal(left.party, null);
+  const remaining = await clientA.waitFor(
+    (m) => m.t === 'party' && m.party && m.party.members.length === 1
+  );
+  assert.equal(remaining.party.members[0].userId, leader.user.id);
+
+  clientA.close();
+  clientB.close();
+});
+
+test('realtime: voice signalling is relayed to the same instance', async () => {
+  const a = await newAccount();
+  const b = await newAccount();
+  const port = Number(new URL(base).port);
+  const clientA = makeClient(port);
+  const clientB = makeClient(port);
+  await Promise.all([clientA.opened, clientB.opened]);
+
+  clientA.send({ t: 'hello', token: a.token, place: { kind: 'city' } });
+  const readyA = await clientA.waitFor((m) => m.t === 'ready');
+  clientB.send({ t: 'hello', token: b.token, place: { kind: 'city' } });
+  const readyB = await clientB.waitFor((m) => m.t === 'ready');
+
+  clientA.send({
+    t: 'pose',
+    x: 3,
+    y: 0,
+    z: 2,
+    yaw: 0,
+    location: 'world',
+    voice: true,
+    voiceMode: 'shout',
+  });
+  const snapshot = await clientB.waitFor(
+    (m) =>
+      m.t === 'snapshot' &&
+      m.players.some(
+        (player) => player.userId === a.user.id && player.voice === true && player.voiceMode === 'shout'
+      )
+  );
+  assert.ok(snapshot);
+
+  clientA.send({
+    t: 'voice',
+    to: readyB.you.connId,
+    kind: 'offer',
+    data: { type: 'offer', sdp: 'v=0' },
+  });
+  const signal = await clientB.waitFor((m) => m.t === 'voice' && m.kind === 'offer');
+  assert.equal(signal.from.connId, readyA.you.connId);
+  assert.equal(signal.from.userId, a.user.id);
+  assert.equal(signal.data.sdp, 'v=0');
+
+  clientA.close();
+  clientB.close();
+});
+
+test('realtime: boarding a LoftLine bus assigns a server-owned seat', async () => {
+  const rider = await newAccount();
+  const port = Number(new URL(base).port);
+  const client = makeClient(port);
+  await client.opened;
+  client.send({ t: 'hello', token: rider.token, place: { kind: 'city' } });
+  await client.waitFor((m) => m.t === 'ready');
+
+  const routes = await api('GET', '/api/transit');
+  assert.equal(routes.status, 200);
+  assert.equal(routes.json.lines.length, 2);
+  const line = routes.json.lines[0];
+  assert.ok(line.stops.length >= 3, 'the 15th Street line has several stops');
+
+  const stop = line.stops[1];
+  client.send({ t: 'pose', x: stop.x, y: 0, z: stop.z, yaw: 0, location: 'world' });
+  client.send({ t: 'transit', action: 'board', lineId: line.id, stopId: stop.id });
+  const boarded = await client.waitFor((m) => m.t === 'transit' && m.riding);
+  assert.equal(boarded.riding.lineId, line.id);
+  assert.equal(typeof boarded.riding.seat, 'number');
+
+  const moving = await client.waitFor(
+    (m) =>
+      m.t === 'snapshot' &&
+      (m.vehicles ?? []).some(
+        (vehicle) =>
+          vehicle.id === boarded.riding.vehicleId &&
+          vehicle.riders.some((entry) => entry.userId === rider.user.id)
+      )
+  );
+  assert.ok(moving.vehicles.length >= 1);
+
+  // While riding, a client pose is ignored; the bus drives the avatar.
+  client.send({ t: 'pose', x: 480, y: 0, z: 480, yaw: 0, location: 'world' });
+  const stillRiding = await client.waitFor(
+    (m) =>
+      m.t === 'snapshot' &&
+      (m.vehicles ?? []).some((vehicle) => vehicle.id === boarded.riding.vehicleId)
+  );
+  const me = stillRiding.players.find((player) => player.userId === rider.user.id);
+  assert.ok(me, 'rider remains in the instance');
+  assert.equal(me.location, 'transit');
+  assert.ok(Math.abs(me.x) < 480, 'client teleport was rejected while riding');
+
+  client.send({ t: 'transit', action: 'exit' });
+  const exited = await client.waitFor((m) => m.t === 'transit' && m.riding === null && m.exited);
+  assert.equal(typeof exited.exited.x, 'number');
+
+  client.close();
+});

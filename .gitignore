@@ -1,4 +1,7 @@
 node_modules/
+# Local SQLite database and its WAL sidecars (see server/db.mjs)
+data/
+.logs/
 build/
 dist/
 coverage/
