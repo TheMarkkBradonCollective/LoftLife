@@ -85,6 +85,9 @@ export class LoftLifeRealtime {
         if (!canManage) return Response.json({error:'Only the owner or co-owner can change city status',code:'forbidden'},{status:403});
         const status = String(body.status ?? '');
         if (!['live','available','offline'].includes(status)) return Response.json({error:'Invalid city status',code:'invalid_status'},{status:400});
+        if (['build_mode','build_pending','maintenance'].includes(String(world.status)) && status !== 'available') {
+          return Response.json({error:'Finish Build Mode or maintenance before changing this city status',code:'invalid_transition'},{status:409});
+        }
         if (status === 'live' && !active.some(player => player.userId === body.userId)) {
           return Response.json({error:'Enter your city before making it Live',code:'must_be_present'},{status:409});
         }
@@ -299,6 +302,18 @@ export class LoftLifeRealtime {
         error(ws, 'not_found', 'That world no longer exists');
         ws.close(1008, 'world_not_found');
         return;
+      }
+      if (world.status === 'live') {
+        const staffRows = await sql.query(
+          "SELECT user_id FROM ll_world_collaborators WHERE world_id=$1 AND role IN ('co_owner','moderator')",
+          [worldId]
+        ) as Array<{user_id:string}>;
+        const staffIds = new Set([world.owner_id,...staffRows.map(row=>row.user_id)]);
+        const alreadyPresent = this.players(instanceId).some(player=>staffIds.has(player.userId));
+        if (!alreadyPresent) {
+          world.status = 'available';
+          await sql.query("UPDATE ll_worlds SET status='available',published=FALSE,updated_at=$1 WHERE id=$2",[Date.now(),worldId]);
+        }
       }
       const roleRows = world.owner_id === account.id
         ? [{role:'owner'}]
