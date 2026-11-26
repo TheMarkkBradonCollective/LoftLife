@@ -167,8 +167,8 @@ function json(body: unknown, status = 200, headers: Record<string, string> = {})
   });
 }
 
-function fail(message: string, status: number, code: string): Response {
-  return json({ error: message, code }, status);
+function fail(message: string, status: number, code: string, detail?: unknown): Response {
+  return json({ error: message, code, ...(detail === undefined ? {} : { detail }) }, status);
 }
 
 function secretFor(env: CloudflareEnv): string | null {
@@ -461,8 +461,9 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
   const isPublic = path === '/api/shop';
   const auth = isPublic ? null : await currentAccount(request, env);
   if (!isPublic && !auth) return fail('Sign in to continue.', 401, 'unauthorized');
-  const sql = auth?.sql;
+  const sql = auth?.sql ?? await database(env);
   const account = auth?.account;
+  if (!sql) return fail('DATABASE_URL is not configured.',503,'unconfigured');
   if (suiteMatch && request.method === 'GET' && sql && account) {
     const targetRows = await sql.query('SELECT id,handle,display_name FROM ll_accounts WHERE handle=$1 LIMIT 1',[decodeURIComponent(suiteMatch[1]).toLowerCase()]) as Array<{id:string;handle:string;display_name:string}>;
     if (!targetRows[0]) return fail('No player with that handle.',404,'not_found');
