@@ -77,6 +77,24 @@ export class LoftLifeRealtime {
       if ('error' in result) return Response.json({error:result.error,code:result.code},{status:result.status});
       return Response.json(result);
     }
+    if (requestUrl.pathname === '/internal/party/presence' && request.method === 'POST') {
+      const body = await request.json().catch(() => ({})) as { userId?: string; instanceId?: string | null };
+      if (!body.userId) return new Response('userId required',{status:400});
+      const state = await this.partyData();
+      if (body.instanceId) state.userInstances[body.userId] = body.instanceId;
+      else delete state.userInstances[body.userId];
+      await this.ctx.storage.put('party_state',state);
+      return Response.json({ok:true});
+    }
+    if (requestUrl.pathname === '/internal/party/broadcast' && request.method === 'POST') {
+      const body = await request.json().catch(() => ({})) as { notifyUserIds?: string[]; party?: unknown; invites?: unknown[] };
+      const notify = new Set(body.notifyUserIds ?? []);
+      for (const socket of this.ctx.getWebSockets()) {
+        const player = socket.deserializeAttachment() as Player | undefined;
+        if (player?.userId && notify.has(player.userId)) send(socket,{t:'party',party:body.party??null,invites:body.invites??[]});
+      }
+      return Response.json({ok:true});
+    }
     if (requestUrl.pathname === '/internal/presence') {
       const players = this.players('city:main');
       return new Response(JSON.stringify({
@@ -360,8 +378,8 @@ export class LoftLifeRealtime {
     }
     error(ws,'bad_request','Unknown transit action');
   }
-  private async partyData(): Promise<{ parties: Record<string,{id:string;leaderId:string;members:string[];invites:string[];createdAt:number}>; memberParty: Record<string,string> }> {
-    return await this.ctx.storage.get('party_state') ?? { parties: {}, memberParty: {} };
+  private async partyData(): Promise<{ parties: Record<string,{id:string;leaderId:string;members:string[];invites:string[];createdAt:number}>; memberParty: Record<string,string>; userInstances: Record<string,string> }> {
+    return await this.ctx.storage.get('party_state') ?? { parties: {}, memberParty: {}, userInstances: {} };
   }
   private async partyView(party: {id:string;leaderId:string;members:string[];invites:string[];createdAt:number} | null) {
     if (!party) return null;
@@ -432,7 +450,15 @@ export class LoftLifeRealtime {
     const snapshot=await this.partyState(userId);
     for(const id of snapshot.party?.members.map(member=>member.userId)??[])notify.add(id);
     for(const party of snapshot.invites)for(const member of party?.invites??[])notify.add(member.userId);
-    return {...snapshot,notifyUserIds:[...notify]};
+    const notifyUserIds=[...notify];
+    const payload={...snapshot,notifyUserIds};
+    if(this.env.REALTIME){
+      const targets=[...new Set(notifyUserIds.map(id=>state.userInstances[id]).filter((value):value is string=>Boolean(value)))];
+      await Promise.all(targets.map(instanceId=>this.env.REALTIME!.get(this.env.REALTIME!.idFromName(instanceId)).fetch(new Request('https://loftlife-internal/internal/party/broadcast',{
+        method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload),
+      }))));
+    }
+    return payload;
   }
   private async handleParty(ws:HibernatableWebSocket,player:Player,message:Record<string,unknown>) {
     const namespace=this.env.REALTIME;
