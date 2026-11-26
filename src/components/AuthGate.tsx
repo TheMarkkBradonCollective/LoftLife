@@ -54,7 +54,7 @@ export const AuthGate: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
               onClose();
             }}
             aria-label="Keep playing offline"
-            className="absolute top-3 right-3 w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            className="absolute top-3 right-3 w-10 h-10 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
           >
             <X className="w-4 h-4" />
           </button>

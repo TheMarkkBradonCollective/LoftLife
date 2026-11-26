@@ -44,6 +44,9 @@ import { VoiceManager, type VoiceMode, type VoiceStatus } from './net/voice';
 
 export type SessionStatus = 'loading' | 'anonymous' | 'online' | 'offline';
 
+/** Device-to-account persistence state, surfaced in the HUD so saves are never a guess. */
+export type SyncState = 'local' | 'saving' | 'synced' | 'error';
+
 export interface RidingState {
   vehicleId: string;
   lineId: string;
@@ -69,6 +72,9 @@ interface SessionValue {
   authBusy: boolean;
   /** True right after a brand-new account was created, so the local character can be adopted. */
   justRegistered: boolean;
+  /** 'local' while offline, then saving/synced/error for the account mirror. */
+  syncState: SyncState;
+  syncError: string | null;
   connection: ConnectionStatus;
   instance: InstanceInfo | null;
   remotePlayers: RemotePlayer[];
@@ -141,6 +147,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [justRegistered, setJustRegistered] = useState(false);
+  const [syncState, setSyncState] = useState<SyncState>('local');
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const syncSeq = useRef(0);
 
   const [connection, setConnection] = useState<ConnectionStatus>('idle');
   const [instance, setInstance] = useState<InstanceInfo | null>(null);
@@ -181,6 +190,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setWallet(payload.wallet);
     setInventory(payload.inventory);
     setSuite(payload.suite);
+    // Nothing is pending right after a fetch: the account and the screen agree.
+    syncSeq.current += 1;
+    setSyncState('synced');
+    setSyncError(null);
   }, []);
 
   // Restore an existing token on boot.
@@ -210,6 +223,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [loadSession]);
+
+  // Offline play never talks to the account mirror, so the HUD can say so.
+  useEffect(() => {
+    if (status === 'online') return;
+    syncSeq.current += 1;
+    setSyncState('local');
+    setSyncError(null);
+  }, [status]);
 
   // Realtime connection follows the signed-in state.
   useEffect(() => {
@@ -424,6 +445,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setTransitVehicles([]);
     setRiding(null);
     voiceRef.current?.disable();
+    syncSeq.current += 1;
+    setSyncState('local');
+    setSyncError(null);
     // Signing out returns to the on-device character instead of a wall.
     setStatus('offline');
   }, []);
@@ -454,6 +478,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Every write bumps a sequence so a slow response from an older edit cannot
+  // overwrite the status of a newer one.
+  const beginSync = useCallback(() => {
+    syncSeq.current += 1;
+    setSyncState('saving');
+    return syncSeq.current;
+  }, []);
+
+  const finishSync = useCallback((seq: number, error?: unknown) => {
+    if (seq !== syncSeq.current) return;
+    if (error) {
+      setSyncState('error');
+      setSyncError(messageOf(error));
+    } else {
+      setSyncState('synced');
+      setSyncError(null);
+    }
+  }, []);
+
   const scheduleSave = useCallback((key: string, run: () => void) => {
     pendingSaves.current[key] = run;
     if (saveTimers.current[key]) window.clearTimeout(saveTimers.current[key]);
@@ -468,40 +511,59 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const saveRoomState = useCallback(
     (payload: RoomStatePayload) => {
       if (status !== 'online') return;
+      const seq = beginSync();
       scheduleSave('suite', () => {
         api
           .saveSuite(payload)
-          .then((saved) => setSuite((prev) => (prev ? { ...prev, ...saved } : prev)))
-          .catch((error) => setChatError(`Room not saved: ${messageOf(error)}`));
+          .then((saved) => {
+            setSuite((prev) => (prev ? { ...prev, ...saved } : prev));
+            finishSync(seq);
+          })
+          .catch((error) => {
+            setChatError(`Room not saved: ${messageOf(error)}`);
+            finishSync(seq, error);
+          });
       });
     },
-    [status, scheduleSave]
+    [status, scheduleSave, beginSync, finishSync]
   );
 
   const saveWorldState = useCallback(
     (worldId: string, payload: RoomStatePayload) => {
       if (status !== 'online') return;
+      const seq = beginSync();
       scheduleSave(`world:${worldId}`, () => {
         api
           .saveWorldState(worldId, payload)
-          .catch((error) => setChatError(`World not saved: ${messageOf(error)}`));
+          .then(() => finishSync(seq))
+          .catch((error) => {
+            setChatError(`World not saved: ${messageOf(error)}`);
+            finishSync(seq, error);
+          });
       });
     },
-    [status, scheduleSave]
+    [status, scheduleSave, beginSync, finishSync]
   );
 
   const saveAvatar = useCallback(
     (avatar: AvatarConfig) => {
       if (status !== 'online') return;
+      const seq = beginSync();
       if (avatarTimer.current) window.clearTimeout(avatarTimer.current);
       avatarTimer.current = window.setTimeout(() => {
         api
           .updateProfile({ avatar })
-          .then((next) => setProfile(next))
-          .catch((error) => setChatError(`Outfit not saved: ${messageOf(error)}`));
+          .then((next) => {
+            setProfile(next);
+            finishSync(seq);
+          })
+          .catch((error) => {
+            setChatError(`Outfit not saved: ${messageOf(error)}`);
+            finishSync(seq, error);
+          });
       }, 700);
     },
-    [status]
+    [status, beginSync, finishSync]
   );
 
   const sendChat = useCallback((chat: ChatScope) => {
@@ -579,6 +641,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       authError,
       authBusy,
       justRegistered,
+      syncState,
+      syncError,
       connection,
       instance,
       remotePlayers,
@@ -628,6 +692,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       authError,
       authBusy,
       justRegistered,
+      syncState,
+      syncError,
       connection,
       instance,
       remotePlayers,

@@ -1,27 +1,30 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ArrowUp, FastForward, Mic, Sparkles } from 'lucide-react';
 import { touchInput } from '../game/touchInput';
 
 interface TouchControlsProps {
   /** Hidden while a modal is open so taps reach the dialog. */
   active: boolean;
-  /** Drag-look is only meaningful in third-person Play View. */
-  lookEnabled: boolean;
   voiceEnabled: boolean;
   onEmote: () => void;
   onTalkStart: () => void;
   onTalkEnd: () => void;
 }
 
-const STICK_RADIUS = 46;
+const STICK_RADIUS = 48;
+const STICK_SIZE = 136;
 
 /**
- * Mobile controls: a virtual stick, a drag-look pad and contextual buttons.
+ * Mobile controls: a virtual stick plus contextual buttons.
+ *
+ * Camera drag-look is handled by the viewport canvas itself (a drag rotates,
+ * a tap interacts), so there is deliberately no full-screen look pad here:
+ * an overlay would swallow every tap on the right half of the scene.
+ *
  * Everything feeds `touchInput`, which the viewport's render loop already reads.
  */
 export const TouchControls: React.FC<TouchControlsProps> = ({
   active,
-  lookEnabled,
   voiceEnabled,
   onEmote,
   onTalkStart,
@@ -29,10 +32,31 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
 }) => {
   const stickRef = useRef<HTMLDivElement>(null);
   const stickPointer = useRef<number | null>(null);
-  const lookPointer = useRef<number | null>(null);
-  const lookLast = useRef({ x: 0, y: 0 });
   const [knob, setKnob] = useState({ x: 0, y: 0 });
   const [sprint, setSprint] = useState(false);
+
+  // A modal can open mid-drag; the matching pointerup never arrives, so release
+  // everything instead of leaving the character walking on its own.
+  useEffect(() => {
+    if (active) return;
+    stickPointer.current = null;
+    setKnob({ x: 0, y: 0 });
+    setSprint(false);
+    touchInput.moveX = 0;
+    touchInput.moveZ = 0;
+    touchInput.sprint = false;
+    touchInput.jump = false;
+  }, [active]);
+
+  useEffect(
+    () => () => {
+      touchInput.moveX = 0;
+      touchInput.moveZ = 0;
+      touchInput.sprint = false;
+      touchInput.jump = false;
+    },
+    []
+  );
 
   if (!active) return null;
 
@@ -67,36 +91,11 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
 
   return (
     <>
-      {/* Drag-look pad (right half, above the dock) */}
-      {lookEnabled && (
-        <div
-          className="fixed right-0 top-24 bottom-40 w-1/2 z-20 touch-none"
-          onPointerDown={(event) => {
-            lookPointer.current = event.pointerId;
-            lookLast.current = { x: event.clientX, y: event.clientY };
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }}
-          onPointerMove={(event) => {
-            if (lookPointer.current !== event.pointerId) return;
-            const dx = event.clientX - lookLast.current.x;
-            const dy = event.clientY - lookLast.current.y;
-            lookLast.current = { x: event.clientX, y: event.clientY };
-            touchInput.lookDx += dx * 0.005;
-            touchInput.lookDy += dy * 0.004;
-          }}
-          onPointerUp={() => {
-            lookPointer.current = null;
-          }}
-          onPointerCancel={() => {
-            lookPointer.current = null;
-          }}
-        />
-      )}
-
       {/* Virtual stick */}
       <div
         ref={stickRef}
-        className="fixed left-5 bottom-24 z-40 w-[124px] h-[124px] rounded-full border border-[#39ff14]/40 bg-[#0b100d]/70 backdrop-blur-sm touch-none"
+        className="fixed left-5 bottom-24 z-40 rounded-full border border-[#39ff14]/40 bg-[#0b100d]/70 backdrop-blur-sm touch-none select-none"
+        style={{ width: STICK_SIZE, height: STICK_SIZE }}
         onPointerDown={(event) => {
           stickPointer.current = event.pointerId;
           event.currentTarget.setPointerCapture(event.pointerId);
@@ -108,13 +107,16 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         }}
         onPointerUp={releaseStick}
         onPointerCancel={releaseStick}
+        onLostPointerCapture={releaseStick}
         aria-label="Movement stick"
+        role="slider"
+        aria-valuetext="Movement"
       >
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span className="text-[9px] uppercase tracking-widest text-[#39ff14]/45">Move</span>
         </div>
         <div
-          className="absolute left-1/2 top-1/2 w-12 h-12 rounded-full bg-[#39ff14]/85 border border-[#8eff78] pointer-events-none"
+          className="absolute left-1/2 top-1/2 w-14 h-14 rounded-full bg-[#39ff14]/85 border border-[#8eff78] pointer-events-none"
           style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }}
         />
       </div>

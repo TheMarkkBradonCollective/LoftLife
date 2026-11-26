@@ -1,5 +1,5 @@
 import React from 'react';
-import { Footprints, Move, PencilRuler, Smartphone, X } from 'lucide-react';
+import { Eye, Footprints, Move, PencilRuler, Smartphone, X } from 'lucide-react';
 import { sfx } from '../game/audio';
 import type { GameMode } from '../game/types';
 
@@ -84,11 +84,47 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
               onClose();
             }}
             aria-label="Close room settings"
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            className="w-10 h-10 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* One obvious action for the owner; visitors get the reason instead. */}
+        {canEdit ? (
+          <div className="px-5 pt-4">
+            {editing ? (
+              <button
+                type="button"
+                onClick={() => {
+                  sfx.playClick();
+                  onExitEdit();
+                }}
+                className="w-full px-4 py-3 rounded-xl bg-white/10 text-slate-100 text-xs font-bold flex items-center justify-center gap-2 hover:bg-white/20 transition-colors"
+              >
+                <Footprints className="w-4 h-4" />
+                Back to walking
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  sfx.playClick();
+                  onEnterEdit();
+                }}
+                className="w-full px-4 py-3 rounded-xl bg-[#39ff14] text-[#051205] text-xs font-bold flex items-center justify-center gap-2 hover:bg-[#5bff3b] transition-colors neon-btn-glow"
+              >
+                <PencilRuler className="w-4 h-4" />
+                Edit this suite
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="mx-5 mt-4 px-3 py-2.5 rounded-lg border border-white/10 bg-white/5 text-[11px] leading-snug text-slate-400 flex items-center gap-2">
+            <Eye className="w-3.5 h-3.5 text-[#39ff14] shrink-0" />
+            Visiting · only the owner can furnish this suite
+          </div>
+        )}
 
         <div className="px-5 py-4 space-y-4 overflow-y-auto">
           <section className="space-y-2">
@@ -140,40 +176,21 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
                   }
                 />
 
-                {canEdit &&
-                  (editing ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        sfx.playClick();
-                        onExitEdit();
-                      }}
-                      className="px-3.5 py-2 rounded-lg text-xs font-bold bg-white/10 text-slate-100 hover:bg-white/20 flex items-center gap-1.5 whitespace-nowrap shrink-0"
-                    >
-                      <Footprints className="w-3.5 h-3.5" />
-                      Walk
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        sfx.playClick();
-                        onEnterEdit();
-                      }}
-                      className="px-3.5 py-2 rounded-lg text-xs font-bold bg-[#39ff14] text-[#051205] hover:bg-[#5bff3b] neon-btn-glow flex items-center gap-1.5 whitespace-nowrap shrink-0"
-                    >
-                      <PencilRuler className="w-3.5 h-3.5" />
-                      Edit
-                    </button>
-                  ))}
+                <span
+                  className={`text-[11px] font-semibold shrink-0 ${
+                    canEdit ? 'text-[#39ff14]' : 'text-slate-500'
+                  }`}
+                >
+                  {canEdit ? (editing ? 'Editing' : 'Owner') : 'Visiting'}
+                </span>
               </div>
             </div>
           </section>
 
           <p className="text-[11px] leading-relaxed text-slate-400">
             {editing
-              ? 'Drag furniture to move it, R rotates, and the dock below holds the catalog. Choose Walk to stop editing.'
-              : 'Walk the room freely; open Edit here whenever you want to change the furniture or finishes.'}
+              ? 'Drag furniture to move it, R rotates, and the dock below holds the catalog. Choose Back to walking when you are done.'
+              : 'Walk the room freely; tap Edit this suite whenever you want to change the furniture or finishes.'}
           </p>
         </div>
 

@@ -480,6 +480,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     renderer.domElement.style.display = 'block';
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
+    // Without this a phone pan is claimed by the browser (scroll/zoom) and the
+    // drag-look pointer events are cancelled mid-gesture.
+    renderer.domElement.style.touchAction = 'none';
     mount.appendChild(renderer.domElement);
 
     const onContextLost = (e: Event) => {
@@ -705,6 +708,26 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       ensureUnstuck: () => {},
     };
     sceneHandlesRef.current = handles;
+
+    // Development-only probe for the browser smoke tests. Read-only, and gone
+    // from production builds.
+    if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
+      (window as unknown as Record<string, unknown>).__loftlife = {
+        camera: () => camera.position.toArray(),
+        cutaway: () => ({ ...handles.wallCut }),
+        view: () => propsRef.current.viewMode,
+        mode: () => propsRef.current.mode,
+        location: () => propsRef.current.location,
+        avatar: () => ({ x: handles.avatarState.x, z: handles.avatarState.z }),
+        wallItems: () =>
+          propsRef.current.items
+            .filter((item) => item.wall === 'north' || item.wall === 'west')
+            .map((item) => ({
+              wall: item.wall,
+              visible: handles.furnitureMap.get(item.uid)?.visible ?? null,
+            })),
+      };
+    }
 
     controls.addEventListener('start', () => {
       handles.cameraAnim.active = false;
@@ -1433,9 +1456,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           lastLookX = e.clientX;
           lastLookY = e.clientY;
           handles.playCam.lastManualLookTime = performance.now();
-          handles.playCam.yaw -= mx * 0.0042;
+          // A finger needs a little more travel per pixel than a mouse; a
+          // full-width swipe still turns roughly half a circle.
+          const lookScale = propsRef.current.isTouch ? 1.35 : 1;
+          handles.playCam.yaw -= mx * 0.0042 * lookScale;
           handles.playCam.pitch = THREE.MathUtils.clamp(
-            handles.playCam.pitch + my * 0.0036,
+            handles.playCam.pitch + my * 0.0036 * lookScale,
             -0.22,
             1.02
           );
@@ -2232,9 +2258,14 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           const nz = dirZ / len;
           const baseSpeed = currentLoc === 'world' ? 4.4 : 2.85;
           const speed = sprinting ? (currentLoc === 'world' ? 10.5 : 4.4) : baseSpeed;
+          // Analogue stick: a half-deflected stick walks at half speed. Keys
+          // and click-to-walk leave the magnitude at 1.
+          const touchMagnitude = Math.min(1, Math.hypot(touchInput.moveX, touchInput.moveZ));
+          const analog = touchMagnitude > 0 ? touchMagnitude : 1;
+          const step = speed * analog * delta;
 
-          const nextX = av.x + nx * speed * delta;
-          const nextZ = av.z + nz * speed * delta;
+          const nextX = av.x + nx * step;
+          const nextZ = av.z + nz * step;
 
           if (checkWalkableForLoc(nextX, av.z, currentLoc, currentItems)) av.x = nextX;
           if (checkWalkableForLoc(av.x, nextZ, currentLoc, currentItems)) av.z = nextZ;
@@ -2664,12 +2695,15 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           handles.wallCut.north = cutNorth;
           handles.wallCut.west = cutWest;
           handles.roomHandles.setWallCutaway(cutNorth, cutWest);
-          // Wall-mounted decor has to disappear with its wall.
-          for (const item of currentItems) {
-            if (item.wall !== 'north' && item.wall !== 'west') continue;
-            const group = handles.furnitureMap.get(item.uid);
-            if (group) group.visible = item.wall === 'north' ? !cutNorth : !cutWest;
-          }
+        }
+        // Wall-mounted decor follows its wall every frame, so art placed or
+        // recoloured while a wall is hidden cannot pop back into view.
+        for (const item of currentItems) {
+          if (item.wall !== 'north' && item.wall !== 'west') continue;
+          const group = handles.furnitureMap.get(item.uid);
+          if (!group) continue;
+          const wanted = item.wall === 'north' ? !cutNorth : !cutWest;
+          if (group.visible !== wanted) group.visible = wanted;
         }
       }
 
@@ -2807,6 +2841,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     return () => {
       disposed = true;
+      delete (window as unknown as Record<string, unknown>).__loftlife;
       clearDragGhost();
       cancelAnimationFrame(frameId);
       clearTimeout(frameId);
@@ -2839,6 +2874,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       h.wallCut.north = false;
       h.wallCut.west = false;
       h.roomHandles.setWallCutaway(false, false);
+      // The isometric cutaway hides wall decor; restore it for the chase view.
+      for (const item of propsRef.current.items) {
+        if (item.wall !== 'north' && item.wall !== 'west') continue;
+        const group = h.furnitureMap.get(item.uid);
+        if (group) group.visible = true;
+      }
       h.controls.enabled = false;
       h.cameraAnim.active = false;
       h.camera.fov = 52;

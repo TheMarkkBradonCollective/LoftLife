@@ -1,11 +1,14 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   Armchair,
   BedDouble,
   BookOpen,
   Camera,
   ChevronDown,
   ChevronUp,
+  Cloud,
+  CloudOff,
   Coffee,
   Copy,
   DoorOpen,
@@ -15,11 +18,13 @@ import {
   Frame,
   Gamepad2,
   Hand,
+  HardDrive,
   Home,
   ArrowUp,
   LampDesk,
   LampFloor,
   Layers,
+  Loader2,
   LogIn,
   Map as MapIcon,
   MessageCircle,
@@ -27,6 +32,7 @@ import {
   Move,
   Music,
   Paintbrush,
+  PencilRuler,
   RotateCw,
   Settings,
   Sofa,
@@ -54,6 +60,7 @@ import { CityMapModal } from './components/CityMapModal';
 import { ElevatorPanelModal } from './components/ElevatorPanelModal';
 import { HotelDoorTerminalModal } from './components/HotelDoorTerminalModal';
 import { RoomSettingsModal } from './components/RoomSettingsModal';
+import { SyncConflictModal } from './components/SyncConflictModal';
 import type { CameraPresetRequest } from './components/RoomViewport';
 import { SocialHud } from './components/SocialHud';
 import { TouchControls } from './components/TouchControls';
@@ -97,6 +104,10 @@ import type {
 
 const STORAGE_KEY = 'loftlife_room_state_v1';
 const LEGACY_STORAGE_KEY = 'loftline_room_state_v1';
+// Copies kept when a device/account conflict is settled, so the losing side is
+// never destroyed. Local only; never uploaded.
+const ACCOUNT_BACKUP_KEY = 'loftlife_account_suite_backup_v1';
+const DEVICE_BACKUP_KEY = 'loftlife_device_suite_backup_v1';
 
 interface SavedState {
   items: PlacedItem[];
@@ -133,6 +144,81 @@ function loadSavedState(): SavedState {
     avatar: DEFAULT_AVATAR,
     roomName: preset.name,
   };
+}
+
+interface SuiteSnapshot {
+  items: PlacedItem[];
+  surfaces: RoomSurfaceConfig;
+  mood: LightingMood;
+  roomName: string;
+  avatar: AvatarConfig;
+}
+
+const avatarFingerprint = (avatar: AvatarConfig) =>
+  [
+    avatar.name,
+    avatar.skinTone,
+    avatar.hairStyle,
+    avatar.hairColor,
+    avatar.topStyle,
+    avatar.topColor,
+    avatar.bottomColor,
+    avatar.shoeColor,
+    avatar.accessory,
+  ].join(':');
+
+/** Identity of a suite + character, ignoring server/local id churn. */
+function suiteFingerprint(state: SuiteSnapshot): string {
+  const items = state.items
+    .map((item) =>
+      [
+        item.catalogId,
+        item.gx,
+        item.gz,
+        item.rot,
+        item.wall ?? '',
+        item.color,
+        item.active === false ? 'off' : 'on',
+      ].join(':')
+    )
+    .sort()
+    .join('|');
+  return [
+    state.roomName.trim(),
+    state.mood,
+    state.surfaces.floor,
+    state.surfaces.wall,
+    avatarFingerprint(state.avatar),
+    items,
+  ].join('::');
+}
+
+function defaultSnapshot(): SuiteSnapshot {
+  const preset = ROOM_PRESETS[0];
+  return {
+    items: preset.items,
+    surfaces: preset.surfaces,
+    mood: preset.mood,
+    roomName: preset.name,
+    avatar: DEFAULT_AVATAR,
+  };
+}
+
+/** A save that still matches the starting loft is not progress worth a prompt. */
+function hasDeviceProgress(saved: SavedState): boolean {
+  try {
+    return suiteFingerprint(saved) !== suiteFingerprint(defaultSnapshot());
+  } catch {
+    return true;
+  }
+}
+
+function keepBackup(key: string, payload: Record<string, unknown>) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ savedAt: new Date().toISOString(), ...payload }));
+  } catch {
+    // A full quota must not block the choice; the main save still applies.
+  }
 }
 
 function getCategoryIcon(catalogId: string) {
@@ -273,6 +359,16 @@ export default function App() {
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [roomSettingsOpen, setRoomSettingsOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
+  // Signed in, but the device suite and the account suite disagree. Writes to
+  // the account are paused until the player picks one.
+  const [conflict, setConflict] = useState<{ device: SavedState; account: SuiteSnapshot } | null>(
+    null
+  );
+  const [conflictOpen, setConflictOpen] = useState(false);
+  const [syncPaused, setSyncPaused] = useState(false);
+  // Account writes stay blocked until the screen has adopted the account copy,
+  // so a stale device mirror can never be pushed over it on boot.
+  const onlineReadyRef = useRef(false);
   const [cityMapOpen, setCityMapOpen] = useState(false);
   const [cityStreet, setCityStreet] = useState('M St & 15th St');
   const [muted, setMuted] = useState(false);
@@ -318,25 +414,28 @@ export default function App() {
       // Ignore storage quota errors
     }
 
-    if (session.status !== 'online') return;
+    if (session.status !== 'online' || syncPaused || !onlineReadyRef.current) return;
     const state = { name: roomName, items, surfaces, mood };
     if (activeWorld) {
       if (activeWorld.canEdit) session.saveWorldState(activeWorld.id, state);
     } else {
       session.saveRoomState(state);
     }
-  }, [items, surfaces, mood, avatarConfig, roomName, activeWorld, session.status]);
+  }, [items, surfaces, mood, avatarConfig, roomName, activeWorld, session.status, syncPaused]);
 
   // Character appearance is part of the persistent account. Skip the write when
   // the local outfit already matches the account (e.g. just after sign-in).
   useEffect(() => {
-    if (session.status !== 'online' || !session.profile) return;
+    if (session.status !== 'online' || !session.profile || syncPaused || !onlineReadyRef.current)
+      return;
     if (JSON.stringify(session.profile.avatar) === JSON.stringify(avatarConfig)) return;
     session.saveAvatar(avatarConfig);
-  }, [avatarConfig, session.status, session.profile]);
+  }, [avatarConfig, session.status, session.profile, syncPaused]);
 
   // The character lives on this device until the player chooses to go online.
-  // Signing up adopts that local character; signing in keeps the account one.
+  // Signing up adopts that local character. Signing in to an existing account
+  // must never replace device progress silently: a difference opens the sync
+  // dialog and pauses account writes until it is settled.
   const previousStatusRef = useRef(session.status);
   useEffect(() => {
     const previous = previousStatusRef.current;
@@ -351,18 +450,50 @@ export default function App() {
       setMood(saved.mood);
       setRoomName(saved.roomName);
       session.clearJustRegistered();
+      setConflict(null);
+      setConflictOpen(false);
+      setSyncPaused(false);
+      onlineReadyRef.current = true;
       showHint('Offline character brought online');
       return;
     }
 
-    if (session.suite && session.profile) {
-      setItems(session.suite.items);
-      setSurfaces(session.suite.surfaces);
-      setMood(session.suite.mood);
-      setRoomName(session.suite.name);
-      setAvatarConfig(session.profile.avatar);
-      showHint('Signed in · online character loaded');
+    if (!session.suite || !session.profile) {
+      onlineReadyRef.current = true;
+      return;
     }
+    const account: SuiteSnapshot = {
+      items: session.suite.items,
+      surfaces: session.suite.surfaces,
+      mood: session.suite.mood,
+      roomName: session.suite.name,
+      avatar: session.profile.avatar,
+    };
+
+    // Only an explicit sign-in (offline -> online) can collide with progress
+    // made on this device; restoring a token on boot is the account's own copy.
+    if (previous === 'offline') {
+      const device = loadSavedState();
+      if (hasDeviceProgress(device) && suiteFingerprint(device) !== suiteFingerprint(account)) {
+        setConflict({ device, account });
+        setConflictOpen(true);
+        setSyncPaused(true);
+        onlineReadyRef.current = true;
+        showHint('This device has a different suite than your account');
+        return;
+      }
+    }
+
+    setItems(account.items);
+    setSurfaces(account.surfaces);
+    setMood(account.mood);
+    setRoomName(account.roomName);
+    setAvatarConfig(account.avatar);
+    setConflict(null);
+    setConflictOpen(false);
+    setSyncPaused(false);
+    onlineReadyRef.current = true;
+    showHint('Signed in · online character loaded');
   }, [
     session.status,
     session.justRegistered,
@@ -371,6 +502,15 @@ export default function App() {
     session.clearJustRegistered,
     // showHint only touches timer refs, so it is stable enough to leave out here.
   ]);
+
+  // Leaving the account behind also drops any pending choice.
+  useEffect(() => {
+    if (session.status === 'online') return;
+    onlineReadyRef.current = false;
+    setConflict(null);
+    setConflictOpen(false);
+    setSyncPaused(false);
+  }, [session.status]);
 
   // Stream position/emote to the realtime gateway while online.
   useEffect(() => {
@@ -424,6 +564,43 @@ export default function App() {
     if (npcChatTimerRef.current) window.clearTimeout(npcChatTimerRef.current);
     npcChatTimerRef.current = window.setTimeout(() => setNpcChat(null), 5500);
   }, []);
+
+  /** Keep the on-device suite and upload it, after the player confirms. */
+  const keepDeviceSuite = useCallback(() => {
+    if (!conflict) return;
+    // Upload what is on screen now, not the snapshot taken when the dialog
+    // opened: the player may have kept editing while it was dismissed.
+    keepBackup(ACCOUNT_BACKUP_KEY, { suite: conflict.account });
+    setConflict(null);
+    setConflictOpen(false);
+    setSyncPaused(false);
+    session.saveRoomState({ name: roomName, items, surfaces, mood });
+    session.saveAvatar(avatarConfig);
+    showHint('Device suite kept · syncing to your account');
+  }, [conflict, session, showHint, roomName, items, surfaces, mood, avatarConfig]);
+
+  /** Load the account suite, after copying the device one aside. */
+  const useAccountSuite = useCallback(() => {
+    if (!conflict) return;
+    const { device, account } = conflict;
+    keepBackup(DEVICE_BACKUP_KEY, { suite: device });
+    setItems(account.items);
+    setSurfaces(account.surfaces);
+    setMood(account.mood);
+    setRoomName(account.roomName);
+    setAvatarConfig(account.avatar);
+    setConflict(null);
+    setConflictOpen(false);
+    setSyncPaused(false);
+    showHint('Account suite loaded · device copy saved locally');
+  }, [conflict, showHint]);
+
+  const retryOnlineSave = useCallback(() => {
+    if (session.status !== 'online' || syncPaused) return;
+    session.saveRoomState({ name: roomName, items, surfaces, mood });
+    session.saveAvatar(avatarConfig);
+    showHint('Trying to save again…');
+  }, [session, syncPaused, roomName, items, surfaces, mood, avatarConfig, showHint]);
 
   const handleChangeLocation = useCallback(
     (next: WorldLocation) => {
@@ -583,7 +760,8 @@ export default function App() {
   /** Return from a player world to the hotel suite. */
   const handleLeaveWorld = useCallback(() => {
     setActiveWorld(null);
-    const suite = session.suite;
+    // While a conflict is unresolved the device suite is the truth on screen.
+    const suite = conflict ? null : session.suite;
     if (suite) {
       setItems(suite.items);
       setSurfaces(suite.surfaces);
@@ -597,7 +775,7 @@ export default function App() {
     setMovingUid(null);
     session.enterCity();
     showHint('Back in your suite');
-  }, [session, showHint]);
+  }, [session, showHint, conflict]);
 
   const pushHistory = useCallback((prevItems: PlacedItem[]) => {
     setHistory((h) => [...h.slice(-19), prevItems]);
@@ -921,13 +1099,16 @@ export default function App() {
   const hudPanelClass =
     'bg-[#0b100d]/95 text-slate-100 border-[#39ff14]/30 neon-panel-glow';
 
+  const canEditRoom = location === 'room' && (!activeWorld || activeWorld.canEdit);
+
   const anyModalOpen =
     avatarModalOpen ||
     cityMapOpen ||
     doorTerminalOpen ||
     elevatorModalOpen ||
     roomSettingsOpen ||
-    authOpen;
+    authOpen ||
+    conflictOpen;
 
   const locationTitle = activeWorld
     ? `${activeWorld.name}${activeWorld.canEdit ? ' · Building' : ' · Visiting'}`
@@ -1038,26 +1219,36 @@ export default function App() {
       )}
 
       {/* Top-Left Brand & Hotel / City Summary */}
-      <div className="fixed top-4 left-4 z-20 pointer-events-auto">
-        <div className={`px-4 py-2.5 rounded-xl border flex items-center gap-3 ${hudPanelClass}`}>
+      <div className="fixed top-4 left-4 z-20 pointer-events-auto max-w-[calc(100vw-2rem)]">
+        <div
+          className={`px-4 py-2.5 rounded-xl border flex items-center gap-3 min-w-0 ${hudPanelClass}`}
+        >
           <span className="font-display text-base font-bold tracking-tight text-[#39ff14] whitespace-nowrap shrink-0">
             LoftLife
           </span>
           <span className="text-xs text-[#39ff14]/45" aria-hidden="true">
             |
           </span>
-          <div className="flex items-center gap-2 text-xs text-slate-200 whitespace-nowrap">
-            <span className="font-medium text-white">{locationTitle}</span>
-            <span className="text-[#39ff14]/60" aria-hidden="true">
+          <div className="flex items-center gap-2 text-xs text-slate-200 min-w-0 whitespace-nowrap">
+            <span className="font-medium text-white truncate max-w-[42vw] sm:max-w-none">
+              {locationTitle}
+            </span>
+            <span className="hidden lg:inline text-[#39ff14]/60" aria-hidden="true">
               ·
             </span>
-            <span className="font-mono-tabular text-slate-300">{locationSub}</span>
+            <span className="hidden lg:inline font-mono-tabular text-slate-300 truncate">
+              {locationSub}
+            </span>
           </div>
         </div>
       </div>
 
       {/* Top-Right Compact Mode & Utility Bar */}
-      <div className="fixed top-4 right-4 z-20 max-w-[calc(100vw-1.5rem)] sm:max-w-[calc(100vw-27rem)] flex flex-wrap items-center justify-end gap-2 pointer-events-auto">
+      <div
+        className={`fixed top-[4.5rem] sm:top-4 right-3 sm:right-4 z-20 max-w-[calc(100vw-1.5rem)] sm:max-w-[calc(100vw-27rem)] flex flex-wrap items-center justify-end gap-2 pointer-events-auto ${
+          touchDevice ? '[&_button]:min-h-10 [&_button]:min-w-10' : ''
+        }`}
+      >
         {/* Offline is the default; this is the door to the shared world. */}
         {session.status !== 'online' && (
           <button
@@ -1071,6 +1262,53 @@ export default function App() {
             <LogIn className="w-3.5 h-3.5" />
             Play online
           </button>
+        )}
+
+        {/* Persistence status: local-only, uploading, synced, or waiting on a choice. */}
+        {conflict ? (
+          <button
+            type="button"
+            onClick={() => setConflictOpen(true)}
+            title="Your device suite differs from your account"
+            className="px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-amber-400/15 text-amber-300 border-amber-400/45 hover:bg-amber-400/25"
+          >
+            <AlertTriangle className="w-3.5 h-3.5" />
+            Sync paused
+          </button>
+        ) : session.status !== 'online' ? (
+          <span
+            title="Character and suite are saved in this browser"
+            className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 ${hudPanelClass}`}
+          >
+            <HardDrive className="w-3.5 h-3.5 text-[#39ff14]" />
+            Local
+          </span>
+        ) : session.syncState === 'error' ? (
+          <button
+            type="button"
+            onClick={retryOnlineSave}
+            title={session.syncError ?? 'Saving to your account failed'}
+            className="px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-red-500/15 text-red-200 border-red-500/40 hover:bg-red-500/25"
+          >
+            <CloudOff className="w-3.5 h-3.5" />
+            Not saved
+          </button>
+        ) : (
+          <span
+            title="Character and suite are saved to your account"
+            className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 ${hudPanelClass}`}
+          >
+            {session.syncState === 'saving' ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-[#39ff14]" />
+            ) : (
+              <Cloud className="w-3.5 h-3.5 text-[#39ff14]" />
+            )}
+            {session.syncState === 'saving'
+              ? 'Saving…'
+              : session.syncState === 'synced'
+              ? 'Synced'
+              : 'Connected'}
+          </span>
         )}
 
         {/* Leave a player-created world and restore the hotel suite */}
@@ -1197,6 +1435,23 @@ export default function App() {
           ))}
         </div>
 
+        {/* Owners get one tap into furnishing; visitors never see this. */}
+        {canEditRoom && mode === 'walk' && (
+          <button
+            type="button"
+            onClick={() => {
+              sfx.playClick();
+              handleModeSwitch('edit');
+            }}
+            aria-label="Edit suite"
+            title="Edit this suite's furniture and finishes"
+            className="px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-[#39ff14] text-[#051205] border-[#39ff14] hover:bg-[#5bff3b] neon-btn-glow"
+          >
+            <PencilRuler className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Edit suite</span>
+          </button>
+        )}
+
         {/* Camera & Avatar & Sound */}
         <div className={`p-1 rounded-xl border flex items-center gap-1 ${hudPanelClass}`}>
           <button
@@ -1243,13 +1498,15 @@ export default function App() {
             ) : (
               <MicOff className="w-3.5 h-3.5" />
             )}
-            {session.voiceStatus === 'requesting'
-              ? 'Mic…'
-              : session.voiceStatus === 'ready'
-              ? session.voicePushToTalk
-                ? 'Talking'
-                : 'Voice'
-              : 'Voice'}
+            <span className="hidden sm:inline">
+              {session.voiceStatus === 'requesting'
+                ? 'Mic…'
+                : session.voiceStatus === 'ready'
+                ? session.voicePushToTalk
+                  ? 'Talking'
+                  : 'Voice'
+                : 'Voice'}
+            </span>
           </button>
 
           <button
@@ -1265,7 +1522,7 @@ export default function App() {
             }`}
           >
             <User className="w-3.5 h-3.5" />
-            Avatar
+            <span className="hidden sm:inline">Avatar</span>
           </button>
 
           <button
@@ -1302,7 +1559,7 @@ export default function App() {
 
       {/* Transient Walk / Action Hint Banner */}
       {walkHint && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+        <div className="fixed top-[11.75rem] sm:top-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none max-w-[92vw]">
           <div className={`px-3.5 py-1.5 rounded-lg border text-xs font-medium text-[#d8ffd0] ${hudPanelClass}`}>
             {walkHint}
           </div>
@@ -1311,7 +1568,7 @@ export default function App() {
 
       {/* Proximity Action Prompt (Isometric Walk & Play View) */}
       {proximityPrompt && !anyModalOpen && (
-        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+        <div className="fixed bottom-52 sm:bottom-28 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
           <div className="px-4 py-2 rounded-xl bg-[#39ff14] text-[#051205] font-bold text-xs border border-[#8eff78] neon-btn-glow">
             {proximityPrompt}
           </div>
@@ -1320,7 +1577,7 @@ export default function App() {
 
       {/* NPC Dialogue Toast */}
       {npcChat && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 w-[min(460px,90vw)] pointer-events-auto">
+        <div className="fixed bottom-52 sm:bottom-24 left-1/2 -translate-x-1/2 z-30 w-[min(460px,90vw)] pointer-events-auto">
           <div className={`px-4 py-3 rounded-xl border flex items-start justify-between gap-3 ${hudPanelClass}`}>
             <div className="flex items-start gap-2.5">
               <MessageCircle className="w-4 h-4 mt-0.5 text-[#39ff14] shrink-0" />
@@ -1919,7 +2176,6 @@ export default function App() {
       {/* Mobile virtual stick, drag-look and contextual buttons */}
       <TouchControls
         active={touchDevice && !anyModalOpen && session.status !== 'loading'}
-        lookEnabled={viewMode === 'play'}
         voiceEnabled={session.voiceStatus === 'ready'}
         onEmote={() => triggerEmote(activeEmote === 'dance' ? 'wave' : 'dance')}
         onTalkStart={() => session.setPushToTalk(true)}
@@ -1928,6 +2184,28 @@ export default function App() {
 
       {/* Community: chat, presence, friends, shop and worlds */}
       <SocialHud onEnterWorld={handleEnterWorld} />
+
+      {/* Device vs account suite: nothing moves until the player chooses */}
+      {conflict && (
+        <SyncConflictModal
+          open={conflictOpen}
+          device={{
+            roomName: conflict.device.roomName,
+            itemCount: conflict.device.items.length,
+            avatarName: conflict.device.avatar.name,
+            moodLabel: conflict.device.mood,
+          }}
+          account={{
+            roomName: conflict.account.roomName,
+            itemCount: conflict.account.items.length,
+            avatarName: conflict.account.avatar.name,
+            moodLabel: conflict.account.mood,
+          }}
+          onKeepDevice={keepDeviceSuite}
+          onUseAccount={useAccountSuite}
+          onDecideLater={() => setConflictOpen(false)}
+        />
+      )}
 
       {/* Sign in / create the account that turns the local character online */}
       {authOpen && <AuthGate onClose={() => setAuthOpen(false)} />}
@@ -1938,7 +2216,7 @@ export default function App() {
         roomName={roomName}
         itemCount={items.length}
         mode={mode}
-        canEdit={location === 'room' && (!activeWorld || activeWorld.canEdit)}
+        canEdit={canEditRoom}
         touchDevice={touchDevice}
         isPortrait={isPortrait}
         onEnterEdit={() => {
