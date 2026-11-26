@@ -387,7 +387,7 @@ export class LoftLifeRealtime {
     }));
   }
     private async partyData(): Promise<{ parties: Record<string,{id:string;leaderId:string;members:string[];invites:string[];createdAt:number}>; memberParty: Record<string,string>; userInstances: Record<string,string> }> {
-    return await this.ctx.storage.get('party_state') ?? { parties: {}, memberParty: {}, userInstances: {} };
+    return (await this.ctx.storage.get<{ parties: Record<string,{id:string;leaderId:string;members:string[];invites:string[];createdAt:number}>; memberParty: Record<string,string>; userInstances: Record<string,string> }>('party_state')) ?? { parties: {}, memberParty: {}, userInstances: {} };
   }
   private async partyView(party: {id:string;leaderId:string;members:string[];invites:string[];createdAt:number} | null) {
     if (!party) return null;
