@@ -523,7 +523,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       client.close();
       realtimeRef.current = null;
     };
-  }, [status, guestToken, realtimeActive]); (also consumed by a future
+  }, [status, guestToken, realtimeActive]);
+
+  // Transit routes are public, server-owned data (also consumed by a future
   // Unity client), so they are fetched once on boot.
   useEffect(() => {
     api
