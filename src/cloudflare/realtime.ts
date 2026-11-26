@@ -524,7 +524,7 @@ export class LoftLifeRealtime {
       return;
     }
     const world = player.instanceId.startsWith('world:');
-    let dbScope = world ? 'world' : 'city';
+    let dbScope = scope === 'local' ? 'local' : world ? 'world' : 'city';
     let scopeId = world ? player.instanceId.slice(6) : 'main';
     let recipients: string[] = [];
     let to: {userId:string;handle:string}|undefined;
