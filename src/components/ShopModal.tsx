@@ -10,14 +10,17 @@ const currencyLabel = (currency: 'yuanzi' | 'tongbao') => (currency === 'yuanzi'
 interface ShopModalProps {
   open: boolean;
   onClose: () => void;
+  initialTab?: 'furniture' | 'clothing';
+  readOnly?: boolean;
 }
 
 /** Buy furniture and wardrobe pieces with the server-owned price list. */
-export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose }) => {
+export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab = 'furniture', readOnly = false }) => {
   const { wallet, inventory, buy, status } = useSession();
   const [furniture, setFurniture] = useState<ShopEntry[]>([]);
   const [clothing, setClothing] = useState<ShopEntry[]>([]);
-  const [tab, setTab] = useState<'furniture' | 'clothing'>('furniture');
+  const [tab, setTab] = useState<'furniture' | 'clothing'>(initialTab);
+  useEffect(() => { if (open) setTab(initialTab); }, [open, initialTab]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -51,6 +54,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose }) => {
   const items = tab === 'furniture' ? furniture : clothing;
 
   const purchase = async (item: ShopEntry) => {
+    if (readOnly) return;
     if (status !== 'online') {
       setError('Sign in to buy items.');
       return;
@@ -155,12 +159,12 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose }) => {
                 </div>
                 <button
                   type="button"
-                  disabled={busyId === item.id || clothingOwned || !affordable}
+                  disabled={readOnly || busyId === item.id || clothingOwned || !affordable}
                   onClick={() => purchase(item)}
                   className="mt-auto px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 bg-[#39ff14] text-[#051205] hover:bg-[#5bff3b] disabled:opacity-40"
                 >
                   {busyId === item.id && <Loader2 className="w-3 h-3 animate-spin" />}
-                  {clothingOwned ? 'Owned' : affordable ? 'Buy' : 'Not enough'}
+                  {readOnly ? 'Sign in to purchase' : clothingOwned ? 'Owned' : affordable ? 'Buy' : 'Not enough'}
                 </button>
               </div>
             );

@@ -482,6 +482,10 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     metroLineZ,
     loftCenter,
     loftDoorPos,
+    airportCenter,
+    airportArrivalPos,
+    airportDeparturePos,
+    airportShopPos,
   } = CITY_LAYOUT;
 
   // 0. Atmospheric Sky Dome
@@ -715,6 +719,11 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
         6,
         true
       );
+      continue;
+    }
+
+    if (blk.kind === 'loft_hotel' || blk.kind === 'airport') {
+      pushSlantedPrism(sidewalkAcc, blk.uMin + 0.4, blk.uMax - 0.4, blk.zMin + 0.4, blk.zMax - 0.4, 0.14, 0.17, 6, 6, true);
       continue;
     }
 
@@ -1560,6 +1569,48 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
   djDeckGroup.add(speakerGlow);
   worldGroup.add(djDeckGroup);
   obstacles.push({ type: 'box', x: djX, z: djZ - 0.2, hw: 0.8, hd: 0.4 });
+
+
+  // 10a. Walk-up airport terminal at the edge of TheCity.
+  const airportGroup = new THREE.Group();
+  airportGroup.position.set(airportCenter.x, 0.15, airportCenter.z);
+  const airportWallMat = new THREE.MeshStandardMaterial({ color: 0xdce5e8, roughness: 0.72 });
+  const airportGlassMat = new THREE.MeshPhysicalMaterial({ color: 0x9ac9d8, roughness: 0.12, metalness: 0.08, transparent: true, opacity: 0.72 });
+  const airportRoofMat = new THREE.MeshStandardMaterial({ color: 0x28343b, roughness: 0.45, metalness: 0.25 });
+  const terminalBody = new THREE.Mesh(new THREE.BoxGeometry(14, 4.2, 7), airportWallMat);
+  terminalBody.position.set(0, 2.1, -1.0); terminalBody.castShadow = true; terminalBody.receiveShadow = true; airportGroup.add(terminalBody);
+  const terminalRoof = new THREE.Mesh(new THREE.BoxGeometry(14.6, 0.35, 7.6), airportRoofMat);
+  terminalRoof.position.set(0, 4.3, -1.0); airportGroup.add(terminalRoof);
+  const terminalGlass = new THREE.Mesh(new THREE.BoxGeometry(10.8, 2.1, 0.08), airportGlassMat);
+  terminalGlass.position.set(0, 2.15, 2.54); airportGroup.add(terminalGlass);
+  const signCanvas = document.createElement('canvas'); signCanvas.width = 640; signCanvas.height = 128;
+  const signCtx = signCanvas.getContext('2d')!; signCtx.fillStyle = '#17232a'; signCtx.fillRect(0,0,640,128);
+  signCtx.fillStyle = '#f4fbff'; signCtx.font = 'bold 54px sans-serif'; signCtx.textAlign = 'center'; signCtx.fillText('THECITY AIRPORT',320,82);
+  const airportSign = new THREE.Mesh(new THREE.PlaneGeometry(8.2,1.65),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(signCanvas)}));
+  airportSign.position.set(0,3.35,2.61); airportGroup.add(airportSign);
+  const terminalLights = new THREE.Mesh(new THREE.BoxGeometry(11.2,0.08,0.12),new THREE.MeshStandardMaterial({color:0x39ff14,emissive:0x39ff14,emissiveIntensity:0.6}));
+  terminalLights.position.set(0,4.02,2.68); airportGroup.add(terminalLights);
+  const planeMat = new THREE.MeshStandardMaterial({color:0xf4f5f2,roughness:0.38,metalness:0.12});
+  const planeBody = new THREE.Mesh(new THREE.CylinderGeometry(0.48,0.58,8.2,12),planeMat);
+  planeBody.rotation.x = Math.PI/2; planeBody.position.set(9.2,1.0,-1.5); airportGroup.add(planeBody);
+  const planeWing = new THREE.Mesh(new THREE.BoxGeometry(5.8,0.16,1.05),planeMat);
+  planeWing.position.set(9.2,1.0,-1.2); airportGroup.add(planeWing);
+  const makeAirportKiosk = (x: number, label: string, color: number) => {
+    const kiosk = new THREE.Group(); kiosk.position.set(x,0,4.7);
+    const base = new THREE.Mesh(new THREE.BoxGeometry(2.2,1.2,0.9),airportRoofMat); base.position.y=0.6; kiosk.add(base);
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(2.25,0.12,0.95),new THREE.MeshStandardMaterial({color:0xe8edf0,roughness:0.35})); counter.position.y=1.23; kiosk.add(counter);
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(2.1,0.5,0.08),new THREE.MeshStandardMaterial({color,emissive:color,emissiveIntensity:0.16})); panel.position.set(0,1.75,0.48); kiosk.add(panel);
+    const canvas = document.createElement('canvas'); canvas.width=320; canvas.height=80;
+    const ctx=canvas.getContext('2d')!; ctx.fillStyle='#10191f'; ctx.fillRect(0,0,320,80); ctx.fillStyle='#fff'; ctx.font='bold 30px sans-serif'; ctx.textAlign='center'; ctx.fillText(label,160,52);
+    const labelMesh=new THREE.Mesh(new THREE.PlaneGeometry(2,0.5),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(canvas)})); labelMesh.position.set(0,1.75,0.53); kiosk.add(labelMesh);
+    airportGroup.add(kiosk);
+  };
+  makeAirportKiosk(-4.4,'CLOTHING',0x39ff14);
+  makeAirportKiosk(4.4,'DEPARTURES',0x55aaff);
+  worldGroup.add(airportGroup);
+  obstacles.push({type:'box',x:airportCenter.x,z:airportCenter.z-1.0,hw:7.15,hd:3.65});
+  obstacles.push({type:'box',x:airportShopPos.x,z:airportShopPos.z-1.7,hw:1.2,hd:0.48});
+  obstacles.push({type:'box',x:airportDeparturePos.x,z:airportDeparturePos.z-1.7,hw:1.2,hd:0.48});
 
   // 11. Animated City Visitors / NPCs
   const npcSpecs: {

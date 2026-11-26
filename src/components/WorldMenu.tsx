@@ -197,7 +197,7 @@ const CityMiniMap: React.FC<{
       ctx.fillStyle = '#090e0b';
       ctx.fillRect(0, 0, w, h);
       for (const block of blocks) {
-        ctx.fillStyle = block.kind === 'loft_plaza' ? '#39ff14' : block.kind === 'park' ? '#1d4d28' : '#1a231e';
+        ctx.fillStyle = block.kind === 'loft_plaza' ? '#39ff14' : block.kind === 'loft_hotel' ? '#9a784b' : block.kind === 'airport' ? '#477b99' : block.kind === 'park' ? '#1d4d28' : '#1a231e';
         ctx.beginPath();
         ctx.moveTo(toX(block.uMin), toY(block.zMin));
         ctx.lineTo(toX(block.uMax), toY(block.zMin));
@@ -233,7 +233,9 @@ const CityMiniMap: React.FC<{
       ctx.stroke();
       ctx.fillStyle = '#d9ffd0';
       ctx.font = 'bold 9px sans-serif';
-      ctx.fillText('HOTEL', toX(12) + 6, toY(loftCenter.z));
+      ctx.fillText('HOTEL', toX(worldToU(CITY_LAYOUT.loftDoorPos.x, CITY_LAYOUT.loftDoorPos.z)) + 6, toY(CITY_LAYOUT.loftDoorPos.z));
+      ctx.fillStyle = '#8fd4ff';
+      ctx.fillText('AIRPORT', toX(worldToU(CITY_LAYOUT.airportCenter.x, CITY_LAYOUT.airportCenter.z)) + 6, toY(CITY_LAYOUT.airportCenter.z));
       frame = requestAnimationFrame(draw);
     };
     frame = requestAnimationFrame(draw);

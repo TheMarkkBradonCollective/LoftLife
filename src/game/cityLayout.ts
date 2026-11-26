@@ -9,7 +9,7 @@ export interface CityBlock {
   uMax: number;
   zMin: number;
   zMax: number;
-  kind: 'loft_plaza' | 'park' | 'building';
+  kind: 'loft_plaza' | 'loft_hotel' | 'airport' | 'park' | 'building';
   height: number;
   /** Secondary upper setback height (0 if single volume) */
   setbackHeight: number;
@@ -51,6 +51,11 @@ export interface CityLayout {
   metroLineZ: number; // Elevated metro viaduct Z coordinate (16th St corridor)
   loftCenter: { x: number; z: number };
   loftDoorPos: { x: number; z: number };
+  hotelCenter: { x: number; z: number };
+  airportCenter: { x: number; z: number };
+  airportArrivalPos: { x: number; z: number };
+  airportDeparturePos: { x: number; z: number };
+  airportShopPos: { x: number; z: number };
   bounds: { zMin: number; zMax: number; uMin: number; uMax: number };
 }
 
@@ -130,6 +135,10 @@ export function buildCityLayout(): CityLayout {
       // Central LoftLife Grand Hotel & Plaza between M St (12)->N St (13) and 15th St (14)->16th St (15)
       if (col === 12 && row === 14) {
         kind = 'loft_plaza';
+      } else if (col === 23 && row === 27) {
+        kind = 'loft_hotel';
+      } else if (col === 24 && row === 28) {
+        kind = 'airport';
       } else if (
         (col === 11 && row === 14) ||
         (col === 6 && row === 8) ||
@@ -187,9 +196,20 @@ export function buildCityLayout(): CityLayout {
   const loftCenterX = plazaMidU + CITY_SLOPE * plazaMidZ;
   const loftCenterZ = plazaMidZ;
 
-  // LoftLife Grand Hotel stands on north side of the Plaza block facing south toward fountain
-  const loftDoorZ = plazaBlock.zMin + 6.4;
-  const loftDoorX = plazaMidU + CITY_SLOPE * loftDoorZ;
+  // Relocate the Grand Hotel to the edge of TheCity beside the airport.
+  const hotelBlock = blocks.find((b) => b.kind === 'loft_hotel')!;
+  const hotelMidU = (hotelBlock.uMin + hotelBlock.uMax) / 2;
+  const hotelMidZ = (hotelBlock.zMin + hotelBlock.zMax) / 2;
+  const hotelCenterX = hotelMidU + CITY_SLOPE * hotelMidZ;
+  const loftDoorZ = hotelBlock.zMin + 6.4;
+  const loftDoorX = hotelMidU + CITY_SLOPE * loftDoorZ;
+  const airportBlock = blocks.find((b) => b.kind === 'airport')!;
+  const airportMidU = (airportBlock.uMin + airportBlock.uMax) / 2;
+  const airportMidZ = (airportBlock.zMin + airportBlock.zMax) / 2;
+  const airportCenterX = airportMidU + CITY_SLOPE * airportMidZ;
+  const airportArrivalPos = { x: airportCenterX, z: airportMidZ + 7.2 };
+  const airportDeparturePos = { x: airportCenterX + 4.4, z: airportMidZ + 6.5 };
+  const airportShopPos = { x: airportCenterX - 4.4, z: airportMidZ + 6.5 };
 
   // Major intersections get working Traffic Lights
   const signalIntersections: TrafficSignalIntersection[] = [];
@@ -252,6 +272,11 @@ export function buildCityLayout(): CityLayout {
     metroLineZ: zLines[15], // Elevated Metro Viaduct runs along 16th St (just south of Hotel Plaza!)
     loftCenter: { x: loftCenterX, z: loftCenterZ },
     loftDoorPos: { x: loftDoorX, z: loftDoorZ },
+    hotelCenter: { x: hotelCenterX, z: hotelMidZ },
+    airportCenter: { x: airportCenterX, z: airportMidZ },
+    airportArrivalPos,
+    airportDeparturePos,
+    airportShopPos,
     bounds: {
       uMin: uLines[0] - 8.0,
       uMax: uLines[uLines.length - 1] + 8.0,

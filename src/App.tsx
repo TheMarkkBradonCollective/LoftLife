@@ -58,6 +58,8 @@ import { AvatarModal } from './components/AvatarModal';
 import { CityMapModal } from './components/CityMapModal';
 import { ElevatorPanelModal } from './components/ElevatorPanelModal';
 import { HotelDoorTerminalModal } from './components/HotelDoorTerminalModal';
+import { AirportTravelModal } from './components/AirportTravelModal';
+import { ShopModal } from './components/ShopModal';
 import { RoomSettingsModal } from './components/RoomSettingsModal';
 import { SyncConflictModal } from './components/SyncConflictModal';
 import { SocialHud } from './components/SocialHud';
@@ -346,6 +348,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [targetVisitResident, setTargetVisitResident] = useState<ActiveResident | null>(null);
   const [doorTerminalOpen, setDoorTerminalOpen] = useState(false);
   const [elevatorModalOpen, setElevatorModalOpen] = useState(false);
+  const [airportDepartureOpen, setAirportDepartureOpen] = useState(false);
+  const [airportShopOpen, setAirportShopOpen] = useState(false);
 
   // Runtime environment decides controls and gameplay access. Width is never
   // used: a narrow desktop window stays a desktop, and a mobile PWA is still a
@@ -580,7 +584,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
 
   // Stream position/emote to the realtime gateway while online.
   useEffect(() => {
-    if (session.status !== 'online') return;
+    if (session.status !== 'online' && session.status !== 'guest') return;
     const timer = window.setInterval(() => {
       const pose = playerPoseRef.current;
       session.setPose({
@@ -1235,6 +1239,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     cityMapOpen ||
     doorTerminalOpen ||
     elevatorModalOpen ||
+    airportDepartureOpen ||
+    airportShopOpen ||
     roomSettingsOpen ||
     authOpen ||
     menuOpen ||
@@ -1488,6 +1494,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onProximityPrompt={setProximityPrompt}
         onCityStreetChange={setCityStreet}
         onOpenDoorTerminal={() => setDoorTerminalOpen(true)}
+        onOpenAirportDeparture={() => setAirportDepartureOpen(true)}
+        onOpenAirportShop={() => setAirportShopOpen(true)}
         onOpenElevator={() => setElevatorModalOpen(true)}
         onUnlockRoomDoor={handleUnlockRoomDoor}
         onUnlockHallwayDoor={handleUnlockHallwayDoor}
@@ -2573,6 +2581,14 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onUnlockFromResident={handleUnlockMainFromResident}
         onClose={() => setDoorTerminalOpen(false)}
       />
+
+      <AirportTravelModal open={airportDepartureOpen} guest={session.status === 'guest'} onClose={() => setAirportDepartureOpen(false)} onTakeFlight={() => {
+        setAirportDepartureOpen(false);
+        if (onExitPlatform) onExitPlatform();
+        else if (session.status === 'guest') void session.endGuest();
+        else if (session.status === 'online') session.exitCity();
+      }} />
+      <ShopModal open={airportShopOpen} onClose={() => setAirportShopOpen(false)} initialTab="clothing" readOnly={session.status === 'guest'} />
 
       {/* Hotel Brass Elevator Floor Selector */}
       <ElevatorPanelModal

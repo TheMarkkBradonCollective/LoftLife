@@ -164,6 +164,8 @@ interface RoomViewportProps {
   onProximityPrompt?: (label: string | null) => void;
   onCityStreetChange?: (label: string) => void;
   onOpenDoorTerminal: () => void;
+  onOpenAirportDeparture: () => void;
+  onOpenAirportShop: () => void;
   onOpenElevator: () => void;
   onUnlockRoomDoor: () => void;
   onUnlockHallwayDoor: (roomNumber: string) => void;
@@ -659,7 +661,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     // 5. Player Avatar
     const avatarRig = createAvatarRig(propsRef.current.avatarConfig);
-    avatarRig.root.position.set(0.5, 0, 1.8);
+    const initialCitySpawn = propsRef.current.location === 'world' ? CITY_LAYOUT.airportArrivalPos : { x: 0.5, z: 1.8 };
+    avatarRig.root.position.set(initialCitySpawn.x, 0, initialCitySpawn.z);
     scene.add(avatarRig.root);
 
     const rippleMesh = new THREE.Mesh(
@@ -720,8 +723,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         lastManualLookTime: 0,
       },
       avatarState: {
-        x: 0.5,
-        z: 1.8,
+        x: initialCitySpawn.x,
+        z: initialCitySpawn.z,
         y: 0,
         yaw: 0,
         path: [] as { x: number; z: number }[],
@@ -1166,6 +1169,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       }
 
       // 4. Outdoor Main City ('world')
+      if (Math.hypot(av.x - CITY_LAYOUT.airportShopPos.x, av.z - CITY_LAYOUT.airportShopPos.z) < 2.25) {
+        return { label: actionLabel('Browse Airport Clothing Shop'), execute: () => { releaseCursorForModal(); propsRef.current.onOpenAirportShop(); } };
+      }
+      if (Math.hypot(av.x - CITY_LAYOUT.airportDeparturePos.x, av.z - CITY_LAYOUT.airportDeparturePos.z) < 2.25) {
+        return { label: actionLabel('Take a flight'), execute: () => { releaseCursorForModal(); propsRef.current.onOpenAirportDeparture(); } };
+      }
       if (
         Math.hypot(av.x - mainWorld.loftDoorEntryPos.x, av.z - mainWorld.loftDoorEntryPos.z) <
         2.5
