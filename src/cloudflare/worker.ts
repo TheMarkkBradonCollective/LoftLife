@@ -1,4 +1,5 @@
 import { neon } from '@neondatabase/serverless';
+import { handleWorldRoute } from './worlds';
 export { LoftLifeRealtime } from './realtime';
 import {
   hashPassword,
