@@ -315,6 +315,8 @@ interface AppProps {
 
 export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const session = useSession();
+  const playerSuiteNumber = session.suite?.number ?? PLAYER_SUITE_NUMBER;
+  const playerSuiteFloor = session.suite?.floor ?? PLAYER_SUITE_FLOOR;
   const { settings } = useSettings();
 
   // Server-owned state wins when signed in; localStorage stays the offline path.
@@ -340,7 +342,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [location, setLocation] = useState<WorldLocation>(
     entry?.kind === 'city' ? 'world' : 'room'
   );
-  const [hallwayFloor, setHallwayFloor] = useState<number>(PLAYER_SUITE_FLOOR);
+  const [hallwayFloor, setHallwayFloor] = useState<number>(playerSuiteFloor);
   const [unlockedRooms, setUnlockedRooms] = useState<string[]>([]);
   const [mainDoorUnlocked, setMainDoorUnlocked] = useState<boolean>(false);
   const [roomDoorUnlocked, setRoomDoorUnlocked] = useState<boolean>(false);
@@ -682,30 +684,30 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         showHint(`Floor ${hallwayFloor} Hallway · Find a numbered suite door or ride the elevator`);
       } else if (next === 'room') {
         setActiveResident(null);
-        setHallwayFloor(PLAYER_SUITE_FLOOR);
+        setHallwayFloor(playerSuiteFloor);
         showHint(
           touchDevice
-            ? `${roomName} (Suite ${PLAYER_SUITE_NUMBER}) · Tap the West door for your Keycard`
-            : `${roomName} (Suite ${PLAYER_SUITE_NUMBER}) · Walk to West door & press E for Keycard`
+            ? `${roomName} (Suite ${playerSuiteNumber}) · Tap the West door for your Keycard`
+            : `${roomName} (Suite ${playerSuiteNumber}) · Walk to West door & press E for Keycard`
         );
       }
     },
-    [gameplayAllowed, hallwayFloor, roomName, showHint, touchDevice]
+    [gameplayAllowed, hallwayFloor, playerSuiteFloor, playerSuiteNumber, roomName, showHint, touchDevice]
   );
 
   const handleUnlockRoomDoor = useCallback(() => {
     setRoomDoorUnlocked(true);
     setUnlockedRooms((prev) =>
-      prev.includes(PLAYER_SUITE_NUMBER) ? prev : [...prev, PLAYER_SUITE_NUMBER]
+      prev.includes(playerSuiteNumber) ? prev : [...prev, playerSuiteNumber]
     );
-  }, []);
+  }, [playerSuiteNumber]);
 
   const handleUnlockHallwayDoor = useCallback((roomNumber: string) => {
     setUnlockedRooms((prev) => (prev.includes(roomNumber) ? prev : [...prev, roomNumber]));
-    if (roomNumber === PLAYER_SUITE_NUMBER) {
+    if (roomNumber === playerSuiteNumber) {
       setRoomDoorUnlocked(true);
     }
-  }, []);
+  }, [playerSuiteNumber]);
 
   const handleEnterSuiteFromHallway = useCallback(
     (roomNumber: string) => {
@@ -713,7 +715,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         showHint(MOBILE_GAMEPLAY_MESSAGE);
         return;
       }
-      if (roomNumber === PLAYER_SUITE_NUMBER) {
+      if (roomNumber === playerSuiteNumber) {
         setActiveResident(null);
         handleChangeLocation('room');
         return;
@@ -732,18 +734,18 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         showNpcChat(res.name, res.greeting);
       }
     },
-    [gameplayAllowed, handleChangeLocation, showHint, showNpcChat, touchDevice]
+    [gameplayAllowed, handleChangeLocation, playerSuiteNumber, showHint, showNpcChat, touchDevice]
   );
 
   const handleUnlockMainWithKeycard = useCallback(() => {
     setMainDoorUnlocked(true);
     setRoomDoorUnlocked(true);
     setUnlockedRooms((prev) =>
-      prev.includes(PLAYER_SUITE_NUMBER) ? prev : [...prev, PLAYER_SUITE_NUMBER]
+      prev.includes(playerSuiteNumber) ? prev : [...prev, playerSuiteNumber]
     );
     setDoorTerminalOpen(false);
-    showHint(`Keycard accepted! Walk into Main Lobby & ride elevator to Floor ${PLAYER_SUITE_FLOOR}`);
-  }, [showHint]);
+    showHint(`Keycard accepted! Walk into Main Lobby & ride elevator to Floor ${playerSuiteFloor}`);
+  }, [playerSuiteFloor, playerSuiteNumber, showHint]);
 
   const handleUnlockMainFromResident = useCallback(
     (resident: ActiveResident) => {
@@ -767,7 +769,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   );
 
   const handleArriveFloor = useCallback(
-    (floor: 'L' | 2 | 3 | 4) => {
+    (floor: 'L' | number) => {
       if (!gameplayAllowed) {
         setElevatorModalOpen(false);
         showHint(MOBILE_GAMEPLAY_MESSAGE);
@@ -781,7 +783,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         setLocation('hallway');
         setActiveResident(null);
         setMode('walk');
-        showHint(`Arrived on Floor ${floor} · Walk down the hallway to Suites ${floor}01–${floor}04`);
+        showHint(`Arrived on Floor ${floor} · Walk down the hallway to Suites ${floor}01–${floor}10`);
       }
     },
     [gameplayAllowed, handleChangeLocation, showHint]
@@ -1408,7 +1410,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     ? `Floor ${hallwayFloor} Hallway`
     : location === 'resident_room' && activeResident
     ? `${activeResident.name}'s Suite ${activeResident.roomNumber}`
-    : `Suite ${PLAYER_SUITE_NUMBER} · ${roomName}`;
+    : `Suite ${playerSuiteNumber} · ${roomName}`;
 
   const locationSub = activeWorld
     ? `Player world · ${items.length} items · ${session.presenceOnline} online`
@@ -1420,7 +1422,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     ? `Suites ${hallwayFloor}01–${hallwayFloor}04`
     : location === 'resident_room' && activeResident
     ? `Floor ${activeResident.floor} · Guest Visit`
-    : `Floor ${PLAYER_SUITE_FLOOR} · ${items.length} items`;
+    : `Floor ${playerSuiteFloor} · ${items.length} items`;
 
   // Only show players who are actually in this scene (and, for player worlds,
   // in the same world instance).
@@ -1452,6 +1454,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       <RoomViewport
         location={location}
         hallwayFloor={hallwayFloor}
+        playerSuiteNumber={playerSuiteNumber}
+        playerSuiteFloor={playerSuiteFloor}
         unlockedRooms={unlockedRooms}
         mainDoorUnlocked={mainDoorUnlocked}
         roomDoorUnlocked={roomDoorUnlocked}
@@ -2576,6 +2580,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       <HotelDoorTerminalModal
         open={doorTerminalOpen}
         playerName={avatarConfig.name}
+        playerSuiteNumber={playerSuiteNumber}
+        playerSuiteFloor={playerSuiteFloor}
         mainDoorUnlocked={mainDoorUnlocked}
         onUnlockWithKeycard={handleUnlockMainWithKeycard}
         onUnlockFromResident={handleUnlockMainFromResident}
@@ -2595,6 +2601,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         open={elevatorModalOpen}
         currentLocation={location}
         currentFloor={hallwayFloor}
+        playerSuiteFloor={playerSuiteFloor}
         playerName={avatarConfig.name}
         targetVisitResident={targetVisitResident}
         onArriveFloor={handleArriveFloor}
