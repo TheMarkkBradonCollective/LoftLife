@@ -17,15 +17,13 @@ import {
 } from '../../shared/auth-core.mjs';
 
 /**
- * Cloudflare Worker: static assets, identity, and a proxy to the game server.
+ * Cloudflare Worker: static assets, Neon-backed game APIs and Durable Object realtime.
  *
- *   browser ──► Worker ──► Neon Postgres   (accounts, password hashes, sessions)
- *                  └────► GAME_ORIGIN      (/api/* and /ws: rooms, economy, realtime)
+ *   browser ──► Worker ──► Neon Postgres (identity and persistent game state)
+ *                  └────► Durable Objects (city/world sockets, parties and transit)
  *
- * Passwords are PBKDF2-SHA256 via Web Crypto, session tokens are HMAC-signed
- * with LOFTLIFE_SESSION_SECRET. The Node game server verifies the same token
- * with the same secret (server/edge-auth.mjs), so one sign-in works across both
- * runtimes without a database lookup on every request.
+ * Passwords are PBKDF2-SHA256 via Web Crypto. Session tokens are HMAC-signed
+ * with LOFTLIFE_SESSION_SECRET and verified against Neon sessions on API and socket joins.
  */
 
 interface WorkerFetcher {
@@ -607,7 +605,7 @@ async function handleHealth(env: CloudflareEnv): Promise<Response> {
     storageEngine,
     edgeAuth: Boolean(secretFor(env)),
     realtime: Boolean(env.REALTIME),
-    gameApi: env.GAME_ORIGIN ? 'legacy-proxy' : 'not-yet-migrated',
+    gameApi: env.GAME_ORIGIN ? 'legacy-fallback-configured' : 'edge-routes',
   });
 }
 
