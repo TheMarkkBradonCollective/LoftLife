@@ -48,6 +48,7 @@ interface AccountRow {
   role: string;
   created_at: number;
   display_name: string;
+  suspended_until?: number;
 }
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
@@ -143,6 +144,7 @@ const SCHEMA_STATEMENTS = [
      display_name TEXT NOT NULL DEFAULT ''
    )`,
   `ALTER TABLE ll_accounts ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE ll_accounts ADD COLUMN IF NOT EXISTS suspended_until BIGINT NOT NULL DEFAULT 0`,
   `CREATE TABLE IF NOT EXISTS ll_sessions (
      jti_hash TEXT PRIMARY KEY,
      account_id TEXT NOT NULL REFERENCES ll_accounts(id) ON DELETE CASCADE,
@@ -308,12 +310,13 @@ async function handleRegister(request: Request, env: CloudflareEnv): Promise<Res
     return fail('That handle or email is already registered.', 409, 'conflict');
   }
 
+  const accountCount = await sql.query('SELECT COUNT(*) AS total FROM ll_accounts') as Array<{total:string|number}>;
   const account: AccountRow = {
     id: `usr_${crypto.randomUUID()}`,
     handle,
     email,
     password_hash: await hashPassword(password),
-    role: 'player',
+    role: Number(accountCount[0]?.total ?? 0) === 0 ? 'admin' : 'player',
     created_at: Date.now(),
     display_name: displayName,
   };
@@ -355,13 +358,14 @@ async function handleLogin(request: Request, env: CloudflareEnv): Promise<Respon
   if (!identifier || !password) return fail('Handle/email and password are required.', 400, 'invalid_input');
 
   const rows = (await sql.query(
-    'SELECT id, handle, email, password_hash, role, created_at, display_name FROM ll_accounts WHERE handle = $1 OR email = $1 LIMIT 1',
+    'SELECT id, handle, email, password_hash, role, created_at, display_name, suspended_until FROM ll_accounts WHERE handle = $1 OR email = $1 LIMIT 1',
     [identifier]
   )) as AccountRow[];
   const account = rows[0];
   if (!account || !(await verifyPassword(password, account.password_hash))) {
     return fail('Incorrect handle/email or password.', 401, 'invalid_credentials');
   }
+  if (Number(account.suspended_until ?? 0) > Date.now()) return fail('This account is temporarily suspended.',403,'account_suspended',{suspendedUntil:Number(account.suspended_until)});
 
   await provisionGameAccount(sql, account);
   const session = await issueSession(sql, account, secret);
@@ -399,8 +403,8 @@ async function currentAccount(request: Request, env: CloudflareEnv) {
   const sql = await database(env);
   if (!sql) return null;
   const rows = await sql.query(
-    'SELECT a.id,a.handle,a.email,a.password_hash,a.role,a.created_at,a.display_name FROM ll_sessions s JOIN ll_accounts a ON a.id=s.account_id WHERE s.jti_hash=$1 AND s.account_id=$2 AND s.expires_at>$3 LIMIT 1',
-    [await sha256Hex(payload.sid), payload.sub, Date.now()]
+    'SELECT a.id,a.handle,a.email,a.password_hash,a.role,a.created_at,a.display_name FROM ll_sessions s JOIN ll_accounts a ON a.id=s.account_id WHERE s.jti_hash=$1 AND s.account_id=$2 AND s.expires_at>$3 AND COALESCE(a.suspended_until,0)<=$4 LIMIT 1',
+    [await sha256Hex(payload.sid), payload.sub, Date.now(), Date.now()]
   ) as AccountRow[];
   return rows[0] ? { sql, account: rows[0] } : null;
 }
@@ -450,6 +454,7 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
   const handled = new Set([
     '/api/shop','/api/auth/me','/api/profile','/api/inventory',
     '/api/economy/wallet','/api/economy/history','/api/suite','/api/suite/visibility',
+    '/api/mod/reports','/api/mod/suspend',
   ]);
   const suiteMatch = path.match(/^\/api\/suites\/([^/]+)$/);
   if (!handled.has(path) && !suiteMatch) return null;
@@ -475,6 +480,25 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
     }
     if (!allowed) return fail('This suite is private.',403,'forbidden');
     return json({...suiteView(suite),ownerId:target.id,ownerHandle:target.handle,ownerName:target.display_name,isOwner:target.id===account.id});
+  }
+  if (path === '/api/mod/reports' || path === '/api/mod/suspend') {
+    if (!account || account.role !== 'admin') return fail('Administrator access required.',403,'forbidden');
+    if (path === '/api/mod/reports' && request.method === 'GET') {
+      const reports = await sql.query(
+        "SELECT r.id,r.reason,r.details,r.created_at,reporter.handle AS reporter,target.handle AS target FROM ll_reports r JOIN ll_accounts reporter ON reporter.id=r.reporter_id JOIN ll_accounts target ON target.id=r.target_user_id WHERE r.status='open' ORDER BY r.created_at DESC LIMIT 100"
+      ) as Array<Record<string,unknown>>;
+      return json(reports);
+    }
+    if (path === '/api/mod/suspend' && request.method === 'POST') {
+      const body = await readJson(request);
+      const target = await sql.query('SELECT id FROM ll_accounts WHERE handle=$1 LIMIT 1',[String(body.handle??'').toLowerCase()]) as Array<{id:string}>;
+      if (!target[0]) return fail('No player with that handle.',404,'not_found');
+      const hours = Math.max(0,Math.min(720,Number(body.hours)||0));
+      const suspendedUntil = hours>0 ? Date.now()+hours*60*60*1000 : 0;
+      await sql.query('UPDATE ll_accounts SET suspended_until=$1 WHERE id=$2',[suspendedUntil,target[0].id]);
+      await sql.query('DELETE FROM ll_sessions WHERE account_id=$1',[target[0].id]);
+      return json({userId:target[0].id,suspendedUntil});
+    }
   }
   if (path === '/api/shop' && request.method === 'GET') {
     return json({
