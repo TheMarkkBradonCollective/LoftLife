@@ -41,6 +41,7 @@ interface AccountRow {
   password_hash: string;
   role: string;
   created_at: number;
+  display_name: string;
 }
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
@@ -55,8 +56,10 @@ const SCHEMA_STATEMENTS = [
      email TEXT NOT NULL UNIQUE,
      password_hash TEXT NOT NULL,
      role TEXT NOT NULL DEFAULT 'player',
-     created_at BIGINT NOT NULL
+     created_at BIGINT NOT NULL,
+     display_name TEXT NOT NULL DEFAULT ''
    )`,
+  `ALTER TABLE ll_accounts ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT ''`,
   `CREATE TABLE IF NOT EXISTS ll_sessions (
      jti_hash TEXT PRIMARY KEY,
      account_id TEXT NOT NULL REFERENCES ll_accounts(id) ON DELETE CASCADE,
@@ -154,6 +157,7 @@ function publicAccount(row: AccountRow) {
     id: row.id,
     handle: row.handle,
     role: row.role === 'admin' ? 'admin' : 'player',
+    displayName: row.display_name || row.handle,
     createdAt: Number(row.created_at),
   };
 }
@@ -176,7 +180,7 @@ async function issueSession(sql: Sql, account: AccountRow, secret: string): Prom
       sub: account.id,
       handle: account.handle,
       role: account.role === 'admin' ? 'admin' : 'player',
-      name: account.handle,
+      name: account.display_name || account.handle,
       sid: jti,
       iat: issuedAt,
       exp: expiresAtSeconds,
@@ -228,11 +232,12 @@ async function handleRegister(request: Request, env: CloudflareEnv): Promise<Res
     password_hash: await hashPassword(password),
     role: 'player',
     created_at: Date.now(),
+    display_name: displayName,
   };
 
   await sql.query(
-    'INSERT INTO ll_accounts (id, handle, email, password_hash, role, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
-    [account.id, account.handle, account.email, account.password_hash, account.role, account.created_at]
+    'INSERT INTO ll_accounts (id, handle, email, password_hash, role, created_at, display_name) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+    [account.id, account.handle, account.email, account.password_hash, account.role, account.created_at, account.display_name]
   );
 
   const session = await issueSession(sql, account, secret);
@@ -266,7 +271,7 @@ async function handleLogin(request: Request, env: CloudflareEnv): Promise<Respon
   if (!identifier || !password) return fail('Handle/email and password are required.', 400, 'invalid_input');
 
   const rows = (await sql.query(
-    'SELECT id, handle, email, password_hash, role, created_at FROM ll_accounts WHERE handle = $1 OR email = $1 LIMIT 1',
+    'SELECT id, handle, email, password_hash, role, created_at, display_name FROM ll_accounts WHERE handle = $1 OR email = $1 LIMIT 1',
     [identifier]
   )) as AccountRow[];
   const account = rows[0];
