@@ -345,7 +345,7 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
                         <button type="button" onClick={() => setStatus(world, 'available')} disabled={busyId === world.id}
                           className="px-2 py-1 rounded-lg border border-white/12 text-[11px] text-slate-200 disabled:opacity-50">Set Available</button>
                       )}
-                      {world.status !== 'offline' && world.status !== 'build_mode' && (
+                      {!['offline','build_mode','build_pending','maintenance'].includes(world.status) && (
                         <button type="button" onClick={() => setStatus(world, 'offline')} disabled={busyId === world.id}
                           className="px-2 py-1 rounded-lg border border-white/12 text-[11px] text-slate-200 disabled:opacity-50">Set Offline</button>
                       )}
