@@ -13,6 +13,7 @@ import {
 import { api, ApiError, type FriendEntry } from '../net/api';
 import { useSession } from '../session';
 import { ShopModal } from '../components/ShopModal';
+import { hudChatScopesFor } from '../../shared/hud-presentation.mjs';
 import { WorldsModal } from '../components/WorldsModal';
 import { HudBadge, HudButton, HudIconButton, cx } from './primitives';
 
@@ -65,11 +66,19 @@ export const SocialPanel: React.FC<SocialPanelProps> = ({
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const online = session.status === 'online';
+  const isGuest = session.status === 'guest';
+  // Guests can chat in the city and nearby, but have no account features.
+  const online = session.status === 'online' || isGuest;
 
   // Apply the requested entry point each time the sheet opens.
   useEffect(() => {
     if (!open) return;
+    if (isGuest) {
+      setPanelTab('chat');
+      setChatTab('city');
+      setFriends([]);
+      return;
+    }
     if (intent === 'people') {
       setPanelTab('people');
     } else {
@@ -77,7 +86,7 @@ export const SocialPanel: React.FC<SocialPanelProps> = ({
       setChatTab(intent === 'messages' ? 'dm' : 'local');
       if (intent === 'chat') window.setTimeout(() => inputRef.current?.focus(), 120);
     }
-  }, [open, intent]);
+  }, [open, intent, isGuest]);
 
   useEffect(() => {
     if (!open) return;
@@ -103,13 +112,13 @@ export const SocialPanel: React.FC<SocialPanelProps> = ({
   }, [visible.length, open, chatTab]);
 
   const loadFriends = useCallback(async () => {
-    if (!online) return;
+    if (session.status !== 'online') return;
     try {
       setFriends(await api.friends());
     } catch {
       // Offline or signed out: the list simply stays empty.
     }
-  }, [online]);
+  }, [session.status]);
 
   useEffect(() => {
     if (open && panelTab === 'people') void loadFriends();
@@ -197,7 +206,9 @@ export const SocialPanel: React.FC<SocialPanelProps> = ({
           <header className="flex items-center gap-2 border-b border-white/10 px-3.5 py-3">
             <span className="ll-brand-dot" aria-hidden="true" />
             <div className="min-w-0">
-              <h2 className="text-[14px] font-semibold leading-tight text-white">Social</h2>
+              <h2 className="text-[14px] font-semibold leading-tight text-white">
+                {isGuest ? `Guest Visit · ${session.guestName ?? 'Guest'}` : 'Social'}
+              </h2>
               <p className="text-[10px] text-white/45">
                 {online ? `${session.presenceOnline} online` : 'Sign in to chat online'}
                 {session.instance ? ` · ${session.instance.count} here` : ''}
@@ -220,7 +231,9 @@ export const SocialPanel: React.FC<SocialPanelProps> = ({
             {(
               [
                 { id: 'chat' as PanelTab, label: 'Chat', icon: <MessageCircle className="w-3.5 h-3.5" /> },
-                { id: 'people' as PanelTab, label: 'People', icon: <Users className="w-3.5 h-3.5" /> },
+                ...(!isGuest
+                  ? [{ id: 'people' as PanelTab, label: 'People', icon: <Users className="w-3.5 h-3.5" /> }]
+                  : []),
               ] as const
             ).map((tab) => (
               <button
@@ -239,41 +252,43 @@ export const SocialPanel: React.FC<SocialPanelProps> = ({
                 {tab.label}
               </button>
             ))}
-            <div className="ml-auto flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setShopOpen(true)}
-                aria-label="Open shop"
-                className="ll-focus inline-flex h-9 w-9 items-center justify-center rounded-lg text-white/65 hover:bg-white/10 hover:text-white"
-              >
-                <Store className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setWorldsOpen(true)}
-                aria-label="Browse worlds"
-                className="ll-focus inline-flex h-9 w-9 items-center justify-center rounded-lg text-white/65 hover:bg-white/10 hover:text-white"
-              >
-                <Globe2 className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  const result = await session.claimDaily();
-                  if (result) setNotice('Daily reward claimed');
-                }}
-                aria-label="Claim daily reward"
-                className="ll-focus inline-flex h-9 w-9 items-center justify-center rounded-lg text-white/65 hover:bg-white/10 hover:text-white"
-              >
-                <Sparkles className="w-4 h-4" />
-              </button>
-            </div>
+            {!isGuest && (
+              <div className="ml-auto flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setShopOpen(true)}
+                  aria-label="Open shop"
+                  className="ll-focus inline-flex h-9 w-9 items-center justify-center rounded-lg text-white/65 hover:bg-white/10 hover:text-white"
+                >
+                  <Store className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWorldsOpen(true)}
+                  aria-label="Browse worlds"
+                  className="ll-focus inline-flex h-9 w-9 items-center justify-center rounded-lg text-white/65 hover:bg-white/10 hover:text-white"
+                >
+                  <Globe2 className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const result = await session.claimDaily();
+                    if (result) setNotice('Daily reward claimed');
+                  }}
+                  aria-label="Claim daily reward"
+                  className="ll-focus inline-flex h-9 w-9 items-center justify-center rounded-lg text-white/65 hover:bg-white/10 hover:text-white"
+                >
+                  <Sparkles className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
 
           {panelTab === 'chat' ? (
             <>
               <div className="flex items-center gap-1 px-3 py-2 overflow-x-auto no-scrollbar">
-                {CHAT_TABS.map((tab) => (
+                {CHAT_TABS.filter((tab) => hudChatScopesFor({ guest: isGuest }).includes(tab.id)).map((tab) => (
                   <button
                     key={tab.id}
                     type="button"
@@ -347,7 +362,7 @@ export const SocialPanel: React.FC<SocialPanelProps> = ({
                   ref={inputRef}
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
-                  placeholder={online ? 'Say something…' : 'Sign in to chat'}
+                  placeholder={online ? (isGuest ? 'Chat as Guest…' : 'Say something…') : 'Sign in to chat'}
                   maxLength={240}
                   className="min-w-0 flex-1 rounded-lg border border-white/12 bg-black/30 px-2.5 py-2 text-[12px] text-white placeholder:text-white/35 focus:border-white/40 focus:outline-none"
                 />
@@ -539,9 +554,9 @@ export const SocialPanel: React.FC<SocialPanelProps> = ({
         </aside>
       </div>
 
-      <ShopModal open={shopOpen} onClose={() => setShopOpen(false)} />
+      <ShopModal open={shopOpen} onClose={() => setShopOpen(false)} readOnly={isGuest} />
       <WorldsModal
-        open={worldsOpen}
+        open={worldsOpen && !isGuest}
         onClose={() => setWorldsOpen(false)}
         onEnter={(worldId) => {
           if (!gameplayAllowed) return;

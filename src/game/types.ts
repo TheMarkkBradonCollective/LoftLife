@@ -72,8 +72,11 @@ export type HairStyleId = 'bob' | 'afro' | 'ponytail' | 'sidepart' | 'buns' | 's
 export type TopStyleId = 'hoodie' | 'blazer' | 'tee' | 'turtleneck';
 export type AccessoryId = 'none' | 'glasses' | 'headphones' | 'beanie';
 
+export type MakeupStyleId = 'natural' | 'soft' | 'bold';
+
 export interface AvatarConfig {
   name: string;
+  makeupStyle?: MakeupStyleId;
   skinTone: string;
   hairStyle: HairStyleId;
   hairColor: string;

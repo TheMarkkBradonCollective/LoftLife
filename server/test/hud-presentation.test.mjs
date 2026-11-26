@@ -102,3 +102,22 @@ test('action verbs stay short enough for a circular button label', () => {
   assert.equal(contextActionVerb('toggle'), 'Use');
   assert.equal(contextActionVerb('anything-else'), 'Interact');
 });
+
+test('the new HUD honours guest restrictions without hiding city chat', async () => {
+  const {
+    ACCOUNT_CHAT_SCOPES,
+    GUEST_CHAT_SCOPES,
+    hudChatScopesFor,
+    hudSectionAvailable,
+  } = await import('../../shared/hud-presentation.mjs');
+
+  assert.equal(hudSectionAvailable('map', {guest: true}), true);
+  assert.equal(hudSectionAvailable('settings', {guest: true}), true);
+  assert.equal(hudSectionAvailable('friends', {guest: true}), false);
+  assert.equal(hudSectionAvailable('messages', {guest: true}), false);
+  assert.equal(hudSectionAvailable('friends'), true);
+
+  assert.deepEqual([...hudChatScopesFor({guest: true})], [...GUEST_CHAT_SCOPES]);
+  assert.deepEqual([...hudChatScopesFor({})], [...ACCOUNT_CHAT_SCOPES]);
+  assert.deepEqual([...GUEST_CHAT_SCOPES], ['local', 'city']);
+});

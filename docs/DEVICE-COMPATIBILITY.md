@@ -128,12 +128,14 @@ All browser runs used the dev server and Chromium with CDP device emulation
 (viewport, mobile flag, touch points and user agent) in this workspace.
 
 - **Typecheck / build / unit tests:** `npx tsc --noEmit` passes, `npm test`
-  passes 108/108 (including 7 new HUD presentation tests), `npm run build`
+  passes 109/109 (including 8 HUD presentation tests), `npm run build`
   succeeds with only the pre-existing chunk-size warning, and
   `npx wrangler deploy --dry-run` bundles the Worker and assets.
 - **Desktop Chrome (1440×900):** `desktop-web`, keyboard/mouse HUD, no
   joystick mounted, menu and social sheet open and close with the HUD hidden
-  while open.
+  while open. Re-checked after merging the guest-city, airport and hotel
+  rollout with a registered account: suite HUD, all ten menu sections, editing
+  and the contextual hotel `Unlock` action render.
 - **Desktop app (Windows bridge marker, 1440×900):** `windows-exe`,
   `installed: true`, full-width app bar, fullscreen control, keyboard/mouse HUD.
 - **iOS mobile portrait (390×844):** `ios-web`, `mobile`, gameplay allowed,

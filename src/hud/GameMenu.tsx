@@ -7,7 +7,6 @@ import {
   Eye,
   Gamepad2,
   Globe2,
-  Home,
   KeyRound,
   Layers,
   LogIn,
@@ -41,7 +40,6 @@ import {
   Shield,
   SlidersHorizontal,
   Accessibility,
-  Compass,
   Radio,
 } from 'lucide-react';
 import { api, ApiError, type FriendEntry, type SuiteState, type TouchLayoutPreferences, type WorldSummary } from '../net/api';
@@ -63,6 +61,7 @@ import {
   cx,
 } from './primitives';
 import { VOICE_RANGES, VOICE_RANGE_INFO } from '../../shared/voice-controls.mjs';
+import { hudSectionAvailable } from '../../shared/hud-presentation.mjs';
 import type { EmoteType, GameMode, LightingMood, PlacedItem, ViewMode } from '../game/types';
 import type { SocialIntent } from './types';
 
@@ -103,6 +102,8 @@ export interface GameMenuProps {
   deviceLabel: string;
   installed: boolean;
   online: boolean;
+  /** Guest visits keep the city and local room but no account features. */
+  guest?: boolean;
   activeEmote: EmoteType;
   fullscreen: boolean;
   debug: { presentation: string; platform: string; input: string } | null;
@@ -112,8 +113,6 @@ export interface GameMenuProps {
   onSetView: (mode: ViewMode) => void;
   onToggleZoom: () => void;
   onToggleFollow: () => void;
-  onTravelCity: () => void;
-  onTravelSuite: () => void;
   onLeaveWorld: () => Promise<void>;
   onEditRoom: () => void;
   onOpenCityMap: () => void;
@@ -191,6 +190,7 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
     deviceLabel,
     installed,
     online,
+    guest = false,
     activeEmote,
     fullscreen,
     debug,
@@ -290,11 +290,13 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
 
   const socialChat = (intent: SocialIntent) => closeThen(() => props.onOpenSocial(intent));
 
+  // Guests have no account, friends list or direct messages to manage.
+  const sections = SECTIONS.filter((entry) => hudSectionAvailable(entry.id, { guest }));
   const groups: { id: string; label: string; entries: typeof SECTIONS }[] = [
-    { id: 'Explore', label: 'Explore', entries: SECTIONS.filter((entry) => entry.group === 'Explore') },
-    { id: 'Social', label: 'Social', entries: SECTIONS.filter((entry) => entry.group === 'Social') },
-    { id: 'You', label: 'You', entries: SECTIONS.filter((entry) => entry.group === 'You') },
-    { id: 'System', label: 'System', entries: SECTIONS.filter((entry) => entry.group === 'System') },
+    { id: 'Explore', label: 'Explore', entries: sections.filter((entry) => entry.group === 'Explore') },
+    { id: 'Social', label: 'Social', entries: sections.filter((entry) => entry.group === 'Social') },
+    { id: 'You', label: 'You', entries: sections.filter((entry) => entry.group === 'You') },
+    { id: 'System', label: 'System', entries: sections.filter((entry) => entry.group === 'System') },
   ];
 
   return (
@@ -324,7 +326,11 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
           </div>
           <div className="ml-auto flex items-center gap-1.5">
             <HudBadge tone={online ? 'live' : 'neutral'}>
-              {online ? `${session.presenceOnline} online` : 'Local play'}
+              {guest
+                ? `Guest visit · ${session.presenceOnline} online`
+                : online
+                ? `${session.presenceOnline} online`
+                : 'Local play'}
             </HudBadge>
             <HudIconButton
               label="Close game menu"
@@ -380,7 +386,7 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
 
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="flex flex-wrap gap-1.5 border-b border-black/8 px-3 py-2 sm:hidden">
-              {SECTIONS.map((entry) => (
+              {sections.map((entry) => (
                 <button
                   key={entry.id}
                   type="button"
@@ -435,7 +441,7 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                     </p>
 
                     <div className="flex flex-wrap gap-2">
-                      {location === 'world' ? (
+                      {location === 'world' && (
                         <HudButton
                           theme="light"
                           variant="primary"
@@ -444,32 +450,16 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                         >
                           Open city map
                         </HudButton>
-                      ) : (
+                      )}
+                      {!guest && (
                         <HudButton
                           theme="light"
-                          variant="primary"
-                          icon={<Compass className="w-4 h-4" />}
-                          onClick={() => closeThen(props.onTravelCity)}
+                          icon={<Globe2 className="w-4 h-4" />}
+                          onClick={() => closeThen(props.onOpenWorlds)}
                         >
-                          Travel to TheCity
+                          Browse worlds
                         </HudButton>
                       )}
-                      {location !== 'room' && (
-                        <HudButton
-                          theme="light"
-                          icon={<Home className="w-4 h-4" />}
-                          onClick={() => closeThen(props.onTravelSuite)}
-                        >
-                          Return to suite
-                        </HudButton>
-                      )}
-                      <HudButton
-                        theme="light"
-                        icon={<Globe2 className="w-4 h-4" />}
-                        onClick={() => closeThen(props.onOpenWorlds)}
-                      >
-                        Browse worlds
-                      </HudButton>
                     </div>
                   </MenuCard>
                 </>
@@ -549,13 +539,15 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                         Manage world
                       </HudButton>
                     )}
-                    <HudButton
-                      theme="light"
-                      icon={<Globe2 className="w-4 h-4" />}
-                      onClick={() => closeThen(props.onOpenWorlds)}
-                    >
-                      Browse &amp; travel
-                    </HudButton>
+                    {!guest && (
+                      <HudButton
+                        theme="light"
+                        icon={<Globe2 className="w-4 h-4" />}
+                        onClick={() => closeThen(props.onOpenWorlds)}
+                      >
+                        Browse &amp; travel
+                      </HudButton>
+                    )}
                     {world && (
                       <HudButton
                         theme="light"
@@ -573,39 +565,48 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
               {section === 'inventory' && (
                 <>
                   <MenuCard className="space-y-3">
-                    <SectionHeading hint={online ? 'Saved to your account' : 'Local play'}>
+                    <SectionHeading hint={guest ? 'Guest visit' : online ? 'Saved to your account' : 'Local play'}>
                       Wallet
                     </SectionHeading>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <HudBadge tone="dark">元 {session.wallet.yuanzi}</HudBadge>
-                      <HudBadge>宝 {session.wallet.tongbao}</HudBadge>
-                      <HudButton
-                        theme="light"
-                        variant="quiet"
-                        icon={<Sparkles className="w-4 h-4" />}
-                        onClick={async () => {
-                          const result = await session.claimDaily();
-                          if (result) {
-                            // The wallet badge above updates from session state.
-                          }
-                        }}
-                        disabled={!online}
-                      >
-                        Daily reward
-                      </HudButton>
-                      <HudButton
-                        theme="light"
-                        icon={<Store className="w-4 h-4" />}
-                        onClick={() => closeThen(props.onOpenShop)}
-                        className="ml-auto"
-                      >
-                        Shop
-                      </HudButton>
-                    </div>
-                    {!online && (
-                      <p className="text-[11px] text-black/45">
-                        Sign in to buy furniture, claim rewards and sync your inventory.
+                    {guest ? (
+                      <p className="text-[11px] leading-relaxed text-black/45">
+                        Guest visits cannot buy items or claim rewards. Your guest room, outfits and
+                        progress stay saved on this device until you sign in.
                       </p>
+                    ) : (
+                      <>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <HudBadge tone="dark">元 {session.wallet.yuanzi}</HudBadge>
+                          <HudBadge>宝 {session.wallet.tongbao}</HudBadge>
+                          <HudButton
+                            theme="light"
+                            variant="quiet"
+                            icon={<Sparkles className="w-4 h-4" />}
+                            onClick={async () => {
+                              const result = await session.claimDaily();
+                              if (result) {
+                                // The wallet badge above updates from session state.
+                              }
+                            }}
+                            disabled={!online}
+                          >
+                            Daily reward
+                          </HudButton>
+                          <HudButton
+                            theme="light"
+                            icon={<Store className="w-4 h-4" />}
+                            onClick={() => closeThen(props.onOpenShop)}
+                            className="ml-auto"
+                          >
+                            Shop
+                          </HudButton>
+                        </div>
+                        {!online && (
+                          <p className="text-[11px] text-black/45">
+                            Sign in to buy furniture, claim rewards and sync your inventory.
+                          </p>
+                        )}
+                      </>
                     )}
                   </MenuCard>
 
@@ -712,20 +713,23 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                               </span>
                               <span className="block text-[10px] text-black/40">@{player.handle}</span>
                             </span>
-                            <button
-                              type="button"
-                              onClick={() => closeThen(() => props.onOpenSocial('people'))}
-                              className="ll-focus inline-flex min-h-[34px] items-center gap-1 rounded-lg bg-black/[0.05] px-2 text-[11px] font-semibold text-black/70 hover:bg-black/[0.08]"
-                            >
-                              <UserPlus className="w-3.5 h-3.5" aria-hidden="true" />
-                              Add
-                            </button>
+                            {!guest && (
+                              <button
+                                type="button"
+                                onClick={() => closeThen(() => props.onOpenSocial('people'))}
+                                className="ll-focus inline-flex min-h-[34px] items-center gap-1 rounded-lg bg-black/[0.05] px-2 text-[11px] font-semibold text-black/70 hover:bg-black/[0.08]"
+                              >
+                                <UserPlus className="w-3.5 h-3.5" aria-hidden="true" />
+                                Add
+                              </button>
+                            )}
                           </li>
                         ))}
                       </ul>
                     )}
                   </MenuCard>
 
+                  {!guest && (
                   <MenuCard className="space-y-2">
                     <SectionHeading hint={session.party ? `${session.party.members.length}/${session.party.maxMembers}` : 'None'}>
                       Party
@@ -792,18 +796,29 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                       </>
                     )}
                   </MenuCard>
+                  )}
 
                   <div className="flex flex-wrap gap-2">
                     <HudButton theme="light" variant="primary" icon={<MessageCircle className="w-4 h-4" />} onClick={() => socialChat('chat')}>
                       Chat
                     </HudButton>
-                    <HudButton theme="light" icon={<UserPlus className="w-4 h-4" />} onClick={() => socialChat('people')}>
-                      Friends &amp; party
-                    </HudButton>
-                    <HudButton theme="light" icon={<Users className="w-4 h-4" />} onClick={() => socialChat('messages')}>
-                      Direct messages
-                    </HudButton>
+                    {!guest && (
+                      <>
+                        <HudButton theme="light" icon={<UserPlus className="w-4 h-4" />} onClick={() => socialChat('people')}>
+                          Friends &amp; party
+                        </HudButton>
+                        <HudButton theme="light" icon={<Users className="w-4 h-4" />} onClick={() => socialChat('messages')}>
+                          Direct messages
+                        </HudButton>
+                      </>
+                    )}
                   </div>
+                  {guest && (
+                    <p className="text-[11px] leading-relaxed text-black/45">
+                      Guest visits include city and nearby chat. Direct messages, parties and friend
+                      requests need a LoftLife account.
+                    </p>
+                  )}
                 </>
               )}
 
@@ -968,13 +983,15 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                   <MenuCard className="space-y-2">
                     <SectionHeading>Account</SectionHeading>
                     <MenuRow
-                      title={online ? `@${session.profile?.handle ?? 'player'}` : 'Playing locally'}
+                      title={guest ? `Guest · ${session.guestName ?? 'visitor'}` : online ? `@${session.profile?.handle ?? 'player'}` : 'Playing locally'}
                       detail={
-                        online
+                        guest
+                          ? 'Guest visit: city and nearby chat only. Your room and character are saved on this device.'
+                          : online
                           ? 'Character, suite and preferences sync to your account.'
                           : 'Saved on this device. Sign in to play online and keep progress everywhere.'
                       }
-                      icon={online ? <BadgeCheck className="w-4 h-4" /> : <HardDrive className="w-4 h-4" />}
+                      icon={guest || !online ? <HardDrive className="w-4 h-4" /> : <BadgeCheck className="w-4 h-4" />}
                     >
                       {online ? (
                         <HudBadge tone={syncError ? 'warn' : 'live'}>
@@ -1282,9 +1299,11 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                   <MenuCard className="space-y-3">
                     <SectionHeading>Leave this session</SectionHeading>
                     <p className="text-[12px] leading-relaxed text-black/55">
-                      {world
+                      {guest
+                        ? 'Guest visits leave TheCity at the airport departure desk. Your guest room and character stay saved on this device.'
+                        : world
                         ? `Leaving ${world.name} saves your build (when you can edit) and returns you to your suite.`
-                        : 'Return to your suite or travel to TheCity. Your position and camera state are restored when you come back.'}
+                        : 'Travel is physical: suite and hallway doors lead through the hotel, and leaving TheCity happens at the airport departure desk. Your position and camera state are restored when you come back.'}
                     </p>
                     {leaveError && (
                       <p className="flex items-start gap-1.5 rounded-lg bg-red-50 px-2.5 py-2 text-[11px] text-red-700">
@@ -1292,21 +1311,6 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                       </p>
                     )}
                     <div className="flex flex-wrap gap-2">
-                      <HudButton
-                        theme="light"
-                        variant="primary"
-                        icon={<Home className="w-4 h-4" />}
-                        onClick={() => closeThen(props.onTravelSuite)}
-                      >
-                        Return to suite
-                      </HudButton>
-                      <HudButton
-                        theme="light"
-                        icon={<Compass className="w-4 h-4" />}
-                        onClick={() => closeThen(props.onTravelCity)}
-                      >
-                        Travel to TheCity
-                      </HudButton>
                       {world && (
                         <HudButton
                           theme="light"
@@ -1318,7 +1322,7 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                           {confirmLeave ? 'Confirm leave world' : 'Leave world'}
                         </HudButton>
                       )}
-                      {!online && (
+                      {!online && !guest && (
                         <HudButton
                           theme="light"
                           icon={<LogIn className="w-4 h-4" />}
@@ -1341,7 +1345,11 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                       <li>Account and character, including offline progress.</li>
                       <li>Camera mode, 360° orbit angle and zoom distance.</li>
                       <li>Furniture, finishes and world permissions.</li>
-                      <li>Chat, parties, friends and social settings.</li>
+                      <li>
+                        {guest
+                          ? 'Guest room, outfits and settings saved on this device.'
+                          : 'Chat, parties, friends and social settings.'}
+                      </li>
                     </ul>
                   </MenuCard>
                 </>

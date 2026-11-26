@@ -4,6 +4,7 @@ import { AvatarModal } from './components/AvatarModal';
 import { CityMapModal } from './components/CityMapModal';
 import { ElevatorPanelModal } from './components/ElevatorPanelModal';
 import { HotelDoorTerminalModal } from './components/HotelDoorTerminalModal';
+import { AirportTravelModal } from './components/AirportTravelModal';
 import { RoomSettingsModal } from './components/RoomSettingsModal';
 import { SyncConflictModal } from './components/SyncConflictModal';
 import { ShopModal } from './components/ShopModal';
@@ -58,6 +59,7 @@ import type {
 } from './game/types';
 
 const STORAGE_KEY = 'loftlife_room_state_v1';
+const GUEST_STORAGE_KEY = 'loftlife_guest_room_state_v1';
 const LEGACY_STORAGE_KEY = 'loftline_room_state_v1';
 // Copies kept when a device/account conflict is settled, so the losing side is
 // never destroyed. Local only; never uploaded.
@@ -75,10 +77,10 @@ interface SavedState {
   roomName: string;
 }
 
-function loadSavedState(): SavedState {
+function loadSavedState(storageKey = STORAGE_KEY): SavedState {
   try {
     const raw =
-      localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
+      localStorage.getItem(storageKey) ?? (storageKey === STORAGE_KEY ? localStorage.getItem(LEGACY_STORAGE_KEY) : null);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<SavedState>;
       if (Array.isArray(parsed.items) && parsed.surfaces && parsed.avatar) {
@@ -201,6 +203,8 @@ interface AppProps {
 
 export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const session = useSession();
+  const playerSuiteNumber = session.suite?.number ?? PLAYER_SUITE_NUMBER;
+  const playerSuiteFloor = session.suite?.floor ?? PLAYER_SUITE_FLOOR;
   const { settings } = useSettings();
 
   // Server-owned state wins when signed in; localStorage stays the offline path.
@@ -215,14 +219,19 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         roomName: session.suite.name,
       };
     }
-    return loadSavedState();
+    const saved = session.status === 'guest' ? loadSavedState(GUEST_STORAGE_KEY) : loadSavedState();
+    if (session.status === 'guest' && session.guestName) {
+      return { ...saved, avatar: { ...saved.avatar, name: `Guest · ${session.guestName}` } };
+    }
+    return saved;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [location, setLocation] = useState<WorldLocation>(
     entry?.kind === 'city' ? 'world' : 'room'
   );
-  const [hallwayFloor, setHallwayFloor] = useState<number>(PLAYER_SUITE_FLOOR);
+  const [hallwayFloor, setHallwayFloor] = useState<number>(playerSuiteFloor);
+  useEffect(() => { if (session.suite) setHallwayFloor(session.suite.floor); }, [session.suite?.floor]);
   const [unlockedRooms, setUnlockedRooms] = useState<string[]>([]);
   const [mainDoorUnlocked, setMainDoorUnlocked] = useState<boolean>(false);
   const [roomDoorUnlocked, setRoomDoorUnlocked] = useState<boolean>(false);
@@ -230,6 +239,9 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [targetVisitResident, setTargetVisitResident] = useState<ActiveResident | null>(null);
   const [doorTerminalOpen, setDoorTerminalOpen] = useState(false);
   const [elevatorModalOpen, setElevatorModalOpen] = useState(false);
+  const [airportDepartureOpen, setAirportDepartureOpen] = useState(false);
+  const [airportShopOpen, setAirportShopOpen] = useState(false);
+  const [avatarStudioMode, setAvatarStudioMode] = useState<'hair' | 'closet'>('hair');
 
   // Runtime environment decides controls and gameplay access. Width is never
   // used: a narrow desktop window stays a desktop, and a mobile PWA is still a
@@ -367,7 +379,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
           avatar: avatarConfig,
           roomName,
         };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        localStorage.setItem(session.status === 'guest' ? GUEST_STORAGE_KEY : STORAGE_KEY, JSON.stringify(payload));
       }
     } catch {
       // Ignore storage quota errors
@@ -473,7 +485,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
 
   // Stream position/emote to the realtime gateway while online.
   useEffect(() => {
-    if (session.status !== 'online') return;
+    if (session.status !== 'online' && session.status !== 'guest') return;
     const timer = window.setInterval(() => {
       const pose = playerPoseRef.current;
       session.setPose({
@@ -565,44 +577,53 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
             : 'Main City · Walk to Hotel Main Entrance & press E for Keycard / Guest Intercom'
         );
       } else if (next === 'lobby') {
-        showHint('Main Lobby · Walk into the North brass elevator to ride to Floors 2–4');
+        showHint('Main Lobby · Walk into the North brass elevator to ride to your residential floor');
       } else if (next === 'hallway') {
         setActiveResident(null);
         showHint(`Floor ${hallwayFloor} Hallway · Find a numbered suite door or ride the elevator`);
       } else if (next === 'room') {
         setActiveResident(null);
-        setHallwayFloor(PLAYER_SUITE_FLOOR);
+        setHallwayFloor(playerSuiteFloor);
         showHint(
           touchDevice
-            ? `${roomName} (Suite ${PLAYER_SUITE_NUMBER}) · Tap the West door for your Keycard`
-            : `${roomName} (Suite ${PLAYER_SUITE_NUMBER}) · Walk to West door & press E for Keycard`
+            ? `${roomName} (Suite ${playerSuiteNumber}) · Tap the West door for your Keycard`
+            : `${roomName} (Suite ${playerSuiteNumber}) · Walk to West door & press E for Keycard`
         );
       }
     },
-    [gameplayAllowed, hallwayFloor, roomName, showHint, touchDevice]
+    [gameplayAllowed, hallwayFloor, playerSuiteFloor, playerSuiteNumber, roomName, showHint, touchDevice]
   );
 
+  const handleEnterGuestRoom = useCallback(() => {
+    if (session.status !== 'guest') return;
+    setRoomName('Guest Room'); setRoomDoorUnlocked(true); setActiveResident(null); setMode('walk'); setLocation('room');
+    showHint('Your Guest Room is private and saved only on this device.');
+  }, [session.status, showHint]);
+
   const handleUnlockRoomDoor = useCallback(() => {
+    if (session.status === 'guest') { showHint('Guest visits cannot enter shared resident suites.'); return; }
     setRoomDoorUnlocked(true);
     setUnlockedRooms((prev) =>
-      prev.includes(PLAYER_SUITE_NUMBER) ? prev : [...prev, PLAYER_SUITE_NUMBER]
+      prev.includes(playerSuiteNumber) ? prev : [...prev, playerSuiteNumber]
     );
-  }, []);
+  }, [playerSuiteNumber]);
 
   const handleUnlockHallwayDoor = useCallback((roomNumber: string) => {
+    if (session.status === 'guest') { showHint('Guest visits cannot enter shared resident suites.'); return; }
     setUnlockedRooms((prev) => (prev.includes(roomNumber) ? prev : [...prev, roomNumber]));
-    if (roomNumber === PLAYER_SUITE_NUMBER) {
+    if (roomNumber === playerSuiteNumber) {
       setRoomDoorUnlocked(true);
     }
-  }, []);
+  }, [playerSuiteNumber]);
 
   const handleEnterSuiteFromHallway = useCallback(
     (roomNumber: string) => {
+      if (session.status === 'guest') { showHint('Guest visits do not include shared hotel rooms.'); return; }
       if (!gameplayAllowed) {
         showHint(MOBILE_GAMEPLAY_MESSAGE);
         return;
       }
-      if (roomNumber === PLAYER_SUITE_NUMBER) {
+      if (roomNumber === playerSuiteNumber) {
         setActiveResident(null);
         handleChangeLocation('room');
         return;
@@ -621,21 +642,23 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         showNpcChat(res.name, res.greeting);
       }
     },
-    [gameplayAllowed, handleChangeLocation, showHint, showNpcChat, touchDevice]
+    [gameplayAllowed, handleChangeLocation, playerSuiteNumber, showHint, showNpcChat, touchDevice]
   );
 
   const handleUnlockMainWithKeycard = useCallback(() => {
+    if (session.status === 'guest') { showHint('Guest visits do not include shared hotel rooms.'); return; }
     setMainDoorUnlocked(true);
     setRoomDoorUnlocked(true);
     setUnlockedRooms((prev) =>
-      prev.includes(PLAYER_SUITE_NUMBER) ? prev : [...prev, PLAYER_SUITE_NUMBER]
+      prev.includes(playerSuiteNumber) ? prev : [...prev, playerSuiteNumber]
     );
     setDoorTerminalOpen(false);
-    showHint(`Keycard accepted! Walk into Main Lobby & ride elevator to Floor ${PLAYER_SUITE_FLOOR}`);
-  }, [showHint]);
+    showHint(`Keycard accepted! Walk into Main Lobby & ride elevator to Floor ${playerSuiteFloor}`);
+  }, [playerSuiteFloor, playerSuiteNumber, showHint]);
 
   const handleUnlockMainFromResident = useCallback(
     (resident: ActiveResident) => {
+      if (session.status === 'guest') { showHint('Guest visits do not include shared hotel rooms.'); return; }
       setMainDoorUnlocked(true);
       setTargetVisitResident(resident);
       setUnlockedRooms((prev) =>
@@ -656,7 +679,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   );
 
   const handleArriveFloor = useCallback(
-    (floor: 'L' | 2 | 3 | 4) => {
+    (floor: 'L' | number) => {
       if (!gameplayAllowed) {
         setElevatorModalOpen(false);
         showHint(MOBILE_GAMEPLAY_MESSAGE);
@@ -670,7 +693,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         setLocation('hallway');
         setActiveResident(null);
         setMode('walk');
-        showHint(`Arrived on Floor ${floor} · Walk down the hallway to Suites ${floor}01–${floor}04`);
+        showHint(`Arrived on Floor ${floor} · Walk down the hallway to Suites ${floor}01–${floor}10`);
       }
     },
     [gameplayAllowed, handleChangeLocation, showHint]
@@ -770,23 +793,6 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     }
     handleLeaveWorld();
   }, [activeWorld, session.status, items, surfaces, mood, showHint, handleLeaveWorld]);
-
-  /** M-menu travel: player worlds leave first, then Main City. */
-  const handleTravelCity = useCallback(() => {
-    if (activeWorld) {
-      handleLeaveWorld();
-      setLocation('world');
-      session.enterCity();
-      showHint('Main City · press M for the map and world menu');
-      return;
-    }
-    handleChangeLocation('world');
-  }, [activeWorld, handleLeaveWorld, session, handleChangeLocation, showHint]);
-
-  const handleTravelSuite = useCallback(() => {
-    if (activeWorld) handleLeaveWorld();
-    handleChangeLocation('room');
-  }, [activeWorld, handleLeaveWorld, handleChangeLocation]);
 
   const pushHistory = useCallback((prevItems: PlacedItem[]) => {
     setHistory((h) => [...h.slice(-19), prevItems]);
@@ -1336,6 +1342,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     cityMapOpen ||
     doorTerminalOpen ||
     elevatorModalOpen ||
+    airportDepartureOpen ||
+    airportShopOpen ||
     roomSettingsOpen ||
     authOpen ||
     menuOpen ||
@@ -1509,7 +1517,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     ? `Floor ${hallwayFloor} Hallway`
     : location === 'resident_room' && activeResident
     ? `${activeResident.name}'s Suite ${activeResident.roomNumber}`
-    : roomName;
+    : `Suite ${playerSuiteNumber} · ${roomName}`;
 
   const locationSub = activeWorld
     ? `Player world · ${items.length} items · ${session.presenceOnline} online`
@@ -1521,7 +1529,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     ? `Suites ${hallwayFloor}01–${hallwayFloor}04`
     : location === 'resident_room' && activeResident
     ? `Floor ${activeResident.floor} · Guest Visit`
-    : `Floor ${PLAYER_SUITE_FLOOR} · ${items.length} items`;
+    : `Floor ${playerSuiteFloor} · ${items.length} items`;
 
   // Only show players who are actually in this scene (and, for player worlds,
   // in the same world instance).
@@ -1552,7 +1560,10 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       >
       <RoomViewport
         location={location}
+        guestMode={session.status === 'guest'}
         hallwayFloor={hallwayFloor}
+        playerSuiteNumber={playerSuiteNumber}
+        playerSuiteFloor={playerSuiteFloor}
         unlockedRooms={unlockedRooms}
         mainDoorUnlocked={mainDoorUnlocked}
         roomDoorUnlocked={roomDoorUnlocked}
@@ -1595,6 +1606,12 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onProximityPrompt={setProximityPrompt}
         onCityStreetChange={setCityStreet}
         onOpenDoorTerminal={() => setDoorTerminalOpen(true)}
+        onOpenAirportDeparture={() => setAirportDepartureOpen(true)}
+        onOpenAirportShop={() => setAirportShopOpen(true)}
+        onEnterGuestRoom={handleEnterGuestRoom}
+        onOpenCloset={() => { setAvatarStudioMode('closet'); setAvatarModalOpen(true); }}
+        onOpenBathroomMirror={() => { setAvatarStudioMode('hair'); setAvatarModalOpen(true); }}
+        onOpenSalon={() => { setAvatarStudioMode('hair'); setAvatarModalOpen(true); }}
         onOpenElevator={() => setElevatorModalOpen(true)}
         onUnlockRoomDoor={handleUnlockRoomDoor}
         onUnlockHallwayDoor={handleUnlockHallwayDoor}
@@ -1709,6 +1726,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         deviceLabel={device.label}
         installed={device.installed}
         online={session.status === 'online'}
+        guest={session.status === 'guest'}
         activeEmote={activeEmote}
         fullscreen={fullscreen}
         debug={hudDebug}
@@ -1718,8 +1736,6 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onSetView={handleSetView}
         onToggleZoom={toggleCloseZoom}
         onToggleFollow={toggleFollowCharacter}
-        onTravelCity={handleTravelCity}
-        onTravelSuite={handleTravelSuite}
         onLeaveWorld={handleLeaveWorldConfirmed}
         onEditRoom={() => handleModeSwitch('edit')}
         onOpenCityMap={() => setCityMapOpen(true)}
@@ -1756,9 +1772,13 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         intent={socialIntent}
       />
 
-      <ShopModal open={shopOpen} onClose={() => setShopOpen(false)} />
+      <ShopModal
+        open={shopOpen}
+        onClose={() => setShopOpen(false)}
+        readOnly={session.status === 'guest'}
+      />
       <WorldsModal
-        open={worldsOpen}
+        open={worldsOpen && session.status !== 'guest'}
         onClose={() => setWorldsOpen(false)}
         onEnter={(worldId) => {
           setWorldsOpen(false);
@@ -1829,6 +1849,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       {/* Avatar Character Studio Modal */}
       <AvatarModal
         open={avatarModalOpen}
+        mode={avatarStudioMode}
+        outfitStorageKey={session.status === 'online' ? (session.user?.id ?? 'account') : `guest_${session.guestName ?? 'visitor'}`}
         config={avatarConfig}
         ownedClothing={session.inventory
           .filter((entry) => entry.kind === 'clothing')
@@ -1851,6 +1873,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onClose={() => setWorldMenuOpen(false)}
         initialTab={worldMenuTab}
         location={location}
+        guestMode={session.status === 'guest'}
         world={activeWorld}
         suite={session.suite}
         roomName={roomName}
@@ -1886,8 +1909,6 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onSetTouch={controls.setTouch}
         onResetTouch={controls.resetTouch}
         onWorldUpdated={handleWorldUpdated}
-        onTravelCity={handleTravelCity}
-        onTravelSuite={handleTravelSuite}
         onLeaveWorld={handleLeaveWorldConfirmed}
         onOpenCityMap={() => setCityMapOpen(true)}
         onEditRoom={() => handleModeSwitch('edit')}
@@ -1897,17 +1918,29 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       <HotelDoorTerminalModal
         open={doorTerminalOpen}
         playerName={avatarConfig.name}
+        playerSuiteNumber={playerSuiteNumber}
+        playerSuiteFloor={playerSuiteFloor}
         mainDoorUnlocked={mainDoorUnlocked}
         onUnlockWithKeycard={handleUnlockMainWithKeycard}
         onUnlockFromResident={handleUnlockMainFromResident}
         onClose={() => setDoorTerminalOpen(false)}
       />
 
+      <AirportTravelModal open={airportDepartureOpen} guest={session.status === 'guest'} onClose={() => setAirportDepartureOpen(false)} onTakeFlight={() => {
+        setAirportDepartureOpen(false);
+        if (onExitPlatform) onExitPlatform();
+        else if (session.status === 'guest') void session.endGuest();
+        else if (session.status === 'online') session.exitCity();
+      }} />
+      <ShopModal open={airportShopOpen} onClose={() => setAirportShopOpen(false)} initialTab="clothing" readOnly={session.status === 'guest'} />
+
       {/* Hotel Brass Elevator Floor Selector */}
       <ElevatorPanelModal
         open={elevatorModalOpen}
         currentLocation={location}
         currentFloor={hallwayFloor}
+        playerSuiteFloor={playerSuiteFloor}
+        playerSuiteNumber={playerSuiteNumber}
         playerName={avatarConfig.name}
         targetVisitResident={targetVisitResident}
         onArriveFloor={handleArriveFloor}

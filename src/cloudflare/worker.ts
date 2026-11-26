@@ -54,7 +54,7 @@ interface AccountRow {
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
 const STARTER_SUITE = {
-  name: 'Grand Suite 402',
+  name: 'Grand Hotel Suite',
   surfaces: { floor: 'oak_parquet', wall: 'warm_chalk' },
   mood: 'morning',
   items: [
@@ -94,6 +94,7 @@ function safeAvatar(input: unknown, name: string) {
     skinTone: hex(raw.skinTone, DEFAULT_AVATAR.skinTone),
     hairStyle: pick('hairStyle', DEFAULT_AVATAR.hairStyle),
     hairColor: hex(raw.hairColor, DEFAULT_AVATAR.hairColor),
+    makeupStyle: ['natural','soft','bold'].includes(String(raw.makeupStyle)) ? raw.makeupStyle as 'natural'|'soft'|'bold' : 'natural',
     topStyle: pick('topStyle', DEFAULT_AVATAR.topStyle),
     topColor: hex(raw.topColor, DEFAULT_AVATAR.topColor),
     bottomColor: hex(raw.bottomColor, DEFAULT_AVATAR.bottomColor),
@@ -119,8 +120,20 @@ async function provisionGameAccount(sql: Sql, account: AccountRow, avatarInput?:
     );
   }
   await sql.query(
+    'INSERT INTO ll_hotel_room_allocations (owner_id, created_at) VALUES ($1,$2) ON CONFLICT (owner_id) DO NOTHING',
+    [account.id, at]
+  );
+  const allocationRows = await sql.query(
+    'SELECT room_index FROM ll_hotel_room_allocations WHERE owner_id=$1 LIMIT 1',
+    [account.id]
+  ) as Array<{ room_index: number | string }>;
+  const roomIndex = Math.max(1, Number(allocationRows[0]?.room_index) || 1);
+  const suiteFloor = 5 + Math.floor((roomIndex - 1) / 10);
+  const suiteDoor = ((roomIndex - 1) % 10) + 1;
+  const suiteNumber = `${suiteFloor}${String(suiteDoor).padStart(2, '0')}`;
+  await sql.query(
     'INSERT INTO ll_suites (id,owner_id,number,floor,name,items_json,surfaces_json,mood,is_public,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9) ON CONFLICT (owner_id) DO NOTHING',
-    [crypto.randomUUID(), account.id, '402', 4, STARTER_SUITE.name, JSON.stringify(STARTER_SUITE.items), JSON.stringify(STARTER_SUITE.surfaces), STARTER_SUITE.mood, at]
+    [crypto.randomUUID(), account.id, suiteNumber, suiteFloor, STARTER_SUITE.name, JSON.stringify(STARTER_SUITE.items), JSON.stringify(STARTER_SUITE.surfaces), STARTER_SUITE.mood, at]
   );
   for (const item of DEFAULT_CLOTHING) {
     await sql.query(
@@ -153,6 +166,11 @@ const SCHEMA_STATEMENTS = [
      expires_at BIGINT NOT NULL
    )`,
   `CREATE INDEX IF NOT EXISTS ll_sessions_account ON ll_sessions(account_id)`,
+  `CREATE TABLE IF NOT EXISTS ll_guest_sessions (jti_hash TEXT PRIMARY KEY, guest_id TEXT NOT NULL, display_name TEXT NOT NULL, created_at BIGINT NOT NULL, expires_at BIGINT NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS ll_guest_sessions_expiry ON ll_guest_sessions(expires_at)`,
+  `CREATE TABLE IF NOT EXISTS ll_hotel_room_allocations (room_index BIGSERIAL PRIMARY KEY, owner_id TEXT NOT NULL UNIQUE REFERENCES ll_accounts(id) ON DELETE CASCADE, created_at BIGINT NOT NULL)`,
+  `INSERT INTO ll_hotel_room_allocations (owner_id, created_at) SELECT owner_id, updated_at FROM ll_suites ORDER BY owner_id ON CONFLICT (owner_id) DO NOTHING`,
+  `UPDATE ll_suites s SET floor=5+((a.room_index-1)/10)::INTEGER, number=(5+((a.room_index-1)/10))::TEXT || lpad((((a.room_index-1)%10)+1)::TEXT,2,'0') FROM ll_hotel_room_allocations a WHERE a.owner_id=s.owner_id`,
   `CREATE TABLE IF NOT EXISTS ll_account_settings (
      user_id TEXT PRIMARY KEY REFERENCES ll_accounts(id) ON DELETE CASCADE,
      data_json TEXT NOT NULL,
@@ -405,6 +423,52 @@ async function handleLogout(request: Request, env: CloudflareEnv): Promise<Respo
 }
 
 
+const GUEST_SESSION_TTL_SECONDS = 60 * 60 * 12;
+
+async function handleGuestSession(request: Request, env: CloudflareEnv): Promise<Response> {
+  const secret = secretFor(env);
+  if (!secret) return fail('Guest sessions are not configured.', 503, 'unconfigured');
+  const sql = await database(env);
+  if (!sql) return fail('DATABASE_URL is not configured.', 503, 'unconfigured');
+  const header = request.headers.get('authorization') ?? '';
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+
+  if (request.method === 'POST') {
+    const body = await readJson(request);
+    const rawName = typeof body.displayName === 'string'
+      ? body.displayName.replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim()
+      : '';
+    if (rawName.length < 2 || rawName.length > 32) {
+      return fail('Choose a display name between 2 and 32 characters.', 400, 'invalid_input');
+    }
+    const displayName = validateDisplayName(rawName, '');
+    const guestId = `gst_${crypto.randomUUID()}`;
+    const jti = crypto.randomUUID();
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const expiresAt = issuedAt + GUEST_SESSION_TTL_SECONDS;
+    await sql.query(
+      'INSERT INTO ll_guest_sessions (jti_hash, guest_id, display_name, created_at, expires_at) VALUES ($1,$2,$3,$4,$5)',
+      [await sha256Hex(jti), guestId, displayName, Date.now(), expiresAt * 1000]
+    );
+    const guestToken = await signAuthToken(
+      { sub: guestId, kind: 'guest', name: displayName, sid: jti, iat: issuedAt, exp: expiresAt },
+      secret
+    );
+    return json({ guest: { id: guestId, displayName }, token: guestToken, expiresAt: expiresAt * 1000 }, 201);
+  }
+
+  if (request.method === 'DELETE') {
+    const payload = token ? await verifyAuthToken(token, secret) : null;
+    if (!payload || payload.kind !== 'guest' || typeof payload.sid !== 'string') {
+      return fail('Guest session is invalid or expired.', 401, 'unauthorized');
+    }
+    await sql.query('DELETE FROM ll_guest_sessions WHERE jti_hash=$1', [await sha256Hex(payload.sid)]);
+    return json({ ok: true });
+  }
+
+  return fail('Method not allowed.', 405, 'method_not_allowed');
+}
+
 async function currentAccount(request: Request, env: CloudflareEnv) {
   const header = request.headers.get('authorization') ?? '';
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
@@ -541,7 +605,7 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
   if (path === '/api/profile' && request.method === 'PATCH' && sql && account) {
     const body = await readJson(request);
     const displayName = validateDisplayName(body.displayName ?? account.display_name, account.handle);
-    const bio = typeof body.bio === 'string' ? body.bio.replace(/[\\u0000-\\u001f\\u007f]/g,'').trim().slice(0,160) : undefined;
+    const bio = typeof body.bio === 'string' ? body.bio.replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,160) : undefined;
     const rows = await sql.query('SELECT avatar_json,bio,voice_json FROM ll_profiles WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
     const avatar = body.avatar === undefined ? parseJsonField(rows[0]?.avatar_json,safeAvatar(undefined,displayName)) : safeAvatar(body.avatar,displayName);
     // Voice preferences are only written when the client sends them, so an
@@ -665,6 +729,12 @@ export default {
     try {
       if (url.pathname === '/api/health') return await handleHealth(env);
 
+      if (url.pathname === '/api/guest/session') {
+        if (!isSameOrigin(request)) return fail('Cross-origin request rejected.', 403, 'forbidden');
+        if (request.method === 'POST' && rateLimited(request)) return fail('Too many attempts. Try again shortly.', 429, 'rate_limited');
+        return await handleGuestSession(request, env);
+      }
+
       const isAuthRoute = ['/api/auth/register', '/api/auth/login', '/api/auth/logout'].includes(
         url.pathname
       );
@@ -722,7 +792,7 @@ export default {
         const auth = await currentAccount(request, env);
         const sql = auth?.sql ?? await database(env);
         if (!sql) return fail('DATABASE_URL is not configured.', 503, 'unconfigured');
-        const worldResponse = await handleWorldRoute(request, sql, auth?.account ?? null);
+        const worldResponse = await handleWorldRoute(request, sql, auth?.account ?? null, env.REALTIME);
         if (worldResponse) return worldResponse;
       }
 

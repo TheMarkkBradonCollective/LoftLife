@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createAvatarRig, type AvatarRig } from './avatar';
-import { PLAYER_SUITE_FLOOR, PLAYER_SUITE_NUMBER } from './catalog';
+
 import type { ActiveResident, EmoteType } from './types';
 
 export interface HotelSeat {
@@ -45,6 +45,7 @@ export interface HallwayDoorSlot {
   x: number;
   z: number;
   roomNumber: string;
+  side: 'north' | 'south';
   resident: ActiveResident | null;
   isPlayerSuite: boolean;
   unlocked: boolean;
@@ -68,6 +69,8 @@ export interface HotelHallwayHandles {
     unlockedRooms: Set<string>,
     residents: ActiveResident[],
     playerName: string,
+    playerSuiteNumber: string,
+    playerSuiteFloor: number,
     maxAnisotropy: number
   ) => void;
   updateHallway: (elapsed: number, delta: number, px: number, pz: number) => void;
@@ -372,7 +375,7 @@ export function buildHotelLobby(maxAnisotropy: number): HotelLobbyHandles {
 
   const elevSignTex = createSignCanvasTexture(
     'ELEVATOR',
-    'FLOORS 2 · 3 · 4',
+    'RESIDENTIAL FLOORS 2+',
     '#0b100e',
     '#39ff14',
     maxAnisotropy
@@ -603,16 +606,16 @@ export function buildHotelLobby(maxAnisotropy: number): HotelLobbyHandles {
 export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
   const hallwayGroup = new THREE.Group();
 
-  // Floor & Slab (24m x 6.4m: x -12..12, z -3.2..3.2)
+  // Floor & Slab (24m x 8.4m: x -12..12, z -4.2..4.2)
   const slab = new THREE.Mesh(
-    new THREE.BoxGeometry(24.6, 0.4, 7.0),
+    new THREE.BoxGeometry(24.6, 0.4, 9.0),
     new THREE.MeshStandardMaterial({ color: 0x20232b, roughness: 0.7 })
   );
   slab.position.set(0, -0.21, 0);
   hallwayGroup.add(slab);
 
   const floorMesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(24, 6.4),
+    new THREE.PlaneGeometry(24, 8.4),
     new THREE.MeshStandardMaterial({
       map: createHallCarpetTexture(maxAnisotropy),
       roughness: 0.88,
@@ -623,7 +626,7 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
   hallwayGroup.add(floorMesh);
 
   const groundRaycastPlane = new THREE.Mesh(
-    new THREE.PlaneGeometry(24, 6.4),
+    new THREE.PlaneGeometry(24, 8.4),
     new THREE.MeshBasicMaterial({ visible: false })
   );
   groundRaycastPlane.rotation.x = -Math.PI / 2;
@@ -638,47 +641,41 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
     metalness: 0.86,
   });
 
-  // North Corridor Wall (z = -3.32) broken into pier segments around 4 Suite Doorways (x = -7, -2, +3, +8)
-  const doorXs = [-7.0, -2.0, 3.0, 8.0];
-  const wallRuns: [number, number][] = [
-    [-12.0, -7.55],
-    [-6.45, -2.55],
-    [-1.45, 2.45],
-    [3.55, 7.45],
-    [8.55, 12.0],
+  // Five suite doors on each side of the corridor (ten total per floor).
+  const doorXs = [-9.2, -4.6, 0, 4.6, 9.2];
+  const doorSlots = [
+    ...doorXs.map((x) => ({ x, side: 'north' as const })),
+    ...doorXs.map((x) => ({ x, side: 'south' as const })),
   ];
-  for (const [x0, x1] of wallRuns) {
-    const w = x1 - x0;
-    const cx = (x0 + x1) / 2;
-    const seg = new THREE.Mesh(new THREE.BoxGeometry(w, 3.4, 0.24), wallMat);
-    seg.position.set(cx, 1.7, -3.32);
-    seg.castShadow = true;
-    seg.receiveShadow = true;
-    hallwayGroup.add(seg);
-
-    const trim = new THREE.Mesh(new THREE.BoxGeometry(w, 0.95, 0.04), walnutMat);
-    trim.position.set(cx, 0.475, -3.19);
-    hallwayGroup.add(trim);
-  }
-  // Headers over each doorway
-  for (const dx of doorXs) {
-    const hdr = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.05, 0.24), wallMat);
-    hdr.position.set(dx, 2.875, -3.32);
-    hallwayGroup.add(hdr);
+  for (const side of ['north', 'south'] as const) {
+    const wallZ = side === 'north' ? -4.32 : 4.32;
+    const trimZ = side === 'north' ? -4.18 : 4.18;
+    const wallRuns: [number, number][] = [];
+    let cursor = -12.0;
+    for (const dx of doorXs) { wallRuns.push([cursor, dx - 0.72]); cursor = dx + 0.72; }
+    wallRuns.push([cursor, 12.0]);
+    for (const [x0, x1] of wallRuns) {
+      const w = x1 - x0; const cx = (x0 + x1) / 2;
+      const seg = new THREE.Mesh(new THREE.BoxGeometry(w, 3.4, 0.24), wallMat);
+      seg.position.set(cx, 1.7, wallZ); seg.castShadow = true; seg.receiveShadow = true; hallwayGroup.add(seg);
+      const trim = new THREE.Mesh(new THREE.BoxGeometry(w, 0.95, 0.04), walnutMat);
+      trim.position.set(cx, 0.475, trimZ); hallwayGroup.add(trim);
+    }
+    for (const dx of doorXs) {
+      const hdr = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.05, 0.24), wallMat);
+      hdr.position.set(dx, 2.875, wallZ); hallwayGroup.add(hdr);
+    }
   }
 
   // East End Wall (x = +12.12)
-  const eastWall = new THREE.Mesh(new THREE.BoxGeometry(0.24, 3.4, 6.64), wallMat);
+  const eastWall = new THREE.Mesh(new THREE.BoxGeometry(0.24, 3.4, 8.84), wallMat);
   eastWall.position.set(12.12, 1.7, 0);
   hallwayGroup.add(eastWall);
 
-  // South Low Cutaway Rail (z = +3.32) so isometric camera sees clearly down the hallway
-  const southCurb = new THREE.Mesh(new THREE.BoxGeometry(24.4, 0.34, 0.24), walnutMat);
-  southCurb.position.set(0, 0.17, 3.32);
-  hallwayGroup.add(southCurb);
+  // The south corridor wall mirrors the north wall with five resident doors.
 
   // West End Wall (x = -12.12) with Brass Elevator Bay at z = 0
-  for (const wz of [-2.15, 2.15]) {
+  for (const wz of [-3.15, 3.15]) {
     const wSeg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 3.4, 2.1), wallMat);
     wSeg.position.set(-12.12, 1.7, wz);
     hallwayGroup.add(wSeg);
@@ -720,7 +717,7 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
 
   let floorSignTex = createSignCanvasTexture(
     'FLOOR 4',
-    'SUITES 401 – 404',
+    'SUITES 401 – 410',
     '#181b24',
     '#d4af5a',
     maxAnisotropy
@@ -743,10 +740,11 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
     hallwayGroup.add(sconce);
   }
 
-  // Build 4 Numbered Suite Doors along North Wall
-  const doors: HallwayDoorSlot[] = doorXs.map((dx, idx) => {
+  // Build 10 numbered suite doors, five on each corridor side.
+  const doors: HallwayDoorSlot[] = doorSlots.map(({ x: dx, side }, idx) => {
     const doorGroup = new THREE.Group();
-    doorGroup.position.set(dx, 0, -3.2);
+    doorGroup.position.set(dx, 0, side === 'north' ? -4.2 : 4.2);
+    doorGroup.rotation.y = side === 'north' ? 0 : Math.PI;
     doorGroup.userData.hallDoorIndex = idx;
 
     // Door Jambs
@@ -788,7 +786,7 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
 
     // Plaque above door
     const plaqueTex = createSignCanvasTexture(
-      `SUITE 40${idx + 1}`,
+      `SUITE 4${String(idx + 1).padStart(2, '0')}`,
       'VACANT',
       '#1e222b',
       '#d4af5a',
@@ -821,8 +819,9 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
     return {
       index: idx,
       x: dx,
-      z: -3.2,
-      roomNumber: `40${idx + 1}`,
+      z: side === 'north' ? -4.2 : 4.2,
+      side,
+      roomNumber: `4${String(idx + 1).padStart(2, '0')}`,
       resident: null,
       isPlayerSuite: false,
       unlocked: false,
@@ -839,11 +838,13 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
     unlockedRooms: Set<string>,
     residents: ActiveResident[],
     playerName: string,
+    playerSuiteNumber: string,
+    playerSuiteFloor: number,
     anisotropy: number
   ) {
     const nextFloorTex = createSignCanvasTexture(
       `FLOOR ${floor}`,
-      `SUITES ${floor}01 – ${floor}04`,
+      `SUITES ${floor}01 – ${floor}10`,
       '#181b24',
       '#d4af5a',
       anisotropy
@@ -854,8 +855,8 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
     floorSignTex = nextFloorTex;
 
     doors.forEach((d, idx) => {
-      const roomNum = `${floor}0${idx + 1}`;
-      const isPlayer = floor === PLAYER_SUITE_FLOOR && roomNum === PLAYER_SUITE_NUMBER;
+      const roomNum = `${floor}${String(idx + 1).padStart(2, '0')}`;
+      const isPlayer = floor === playerSuiteFloor && roomNum === playerSuiteNumber;
       const resident = residents.find((r) => r.roomNumber === roomNum) ?? null;
       const unlocked = unlockedRooms.has(roomNum);
 
@@ -909,7 +910,8 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
     const inElev = Math.abs(z) < 0.72 && x >= -12.35 && x <= -11.4;
     let inUnlockedDoor = false;
     for (const d of doors) {
-      if (d.unlocked && Math.abs(x - d.x) < 0.46 && z >= -3.55 && z <= -2.65) {
+      const inThreshold = d.side === 'north' ? z <= -3.55 && z >= -4.8 : z >= 3.55 && z <= 4.8;
+      if (d.unlocked && Math.abs(x - d.x) < 0.55 && inThreshold) {
         inUnlockedDoor = true;
         break;
       }
@@ -917,7 +919,7 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
     if (
       !inElev &&
       !inUnlockedDoor &&
-      (x < -11.7 + radius || x > 11.7 - radius || z < -2.95 + radius || z > 2.95 - radius)
+      (x < -11.7 + radius || x > 11.7 - radius || z < -3.9 + radius || z > 3.9 - radius)
     ) {
       return false;
     }

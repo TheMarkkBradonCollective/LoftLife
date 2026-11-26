@@ -1,41 +1,33 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowUpDown, Building2, Home, X } from 'lucide-react';
 import { sfx } from '../game/audio';
-import { HOTEL_RESIDENTS, PLAYER_SUITE_FLOOR, PLAYER_SUITE_NUMBER } from '../game/catalog';
+import { HOTEL_RESIDENTS } from '../game/catalog';
 import type { ActiveResident, WorldLocation } from '../game/types';
 
 interface ElevatorPanelModalProps {
   open: boolean;
   currentLocation: WorldLocation;
   currentFloor: number;
+  playerSuiteFloor: number;
+  playerSuiteNumber: string;
   playerName: string;
   targetVisitResident: ActiveResident | null;
-  onArriveFloor: (floor: 'L' | 2 | 3 | 4) => void;
+  onArriveFloor: (floor: 'L' | number) => void;
   onClose: () => void;
 }
-
-const ELEVATOR_STOPS: {
-  id: 'L' | 2 | 3 | 4;
-  label: string;
-  floorNum: number;
-  description: string;
-}[] = [
-  { id: 4, label: 'Floor 4', floorNum: 4, description: 'Penthouse Suites 401 – 404' },
-  { id: 3, label: 'Floor 3', floorNum: 3, description: 'Skyline Suites 301 – 304' },
-  { id: 2, label: 'Floor 2', floorNum: 2, description: 'Garden Suites 201 – 204' },
-  { id: 'L', label: 'Lobby (L)', floorNum: 1, description: 'Concierge & Main Street Exit' },
-];
 
 export const ElevatorPanelModal: React.FC<ElevatorPanelModalProps> = ({
   open,
   currentLocation,
   currentFloor,
+  playerSuiteFloor,
+  playerSuiteNumber,
   playerName,
   targetVisitResident,
   onArriveFloor,
   onClose,
 }) => {
-  const [travelingTo, setTravelingTo] = useState<'L' | 2 | 3 | 4 | null>(null);
+  const [travelingTo, setTravelingTo] = useState<'L' | number | null>(null);
   const [displayFloor, setDisplayFloor] = useState<string>('L');
   const timerRef = useRef<number | null>(null);
 
@@ -62,10 +54,17 @@ export const ElevatorPanelModal: React.FC<ElevatorPanelModalProps> = ({
 
   if (!open) return null;
 
-  const activeStopId: 'L' | 2 | 3 | 4 =
-    currentLocation === 'lobby' ? 'L' : (Math.max(2, Math.min(4, currentFloor)) as 2 | 3 | 4);
+  const maxFloor = Math.max(4, playerSuiteFloor);
+  const elevatorStops: { id: 'L' | number; label: string; floorNum: number; description: string }[] = [
+    ...Array.from({ length: maxFloor - 1 }, (_, index) => {
+      const floor = maxFloor - index;
+      return { id: floor, label: `Floor ${floor}`, floorNum: floor, description: `Residential Suites ${floor}01 – ${floor}10` };
+    }),
+    { id: 'L', label: 'Lobby (L)', floorNum: 1, description: 'Concierge & Main Street Exit' },
+  ];
+  const activeStopId: 'L' | number = currentLocation === 'lobby' ? 'L' : currentFloor;
 
-  const handleSelectFloor = (stopId: 'L' | 2 | 3 | 4) => {
+  const handleSelectFloor = (stopId: 'L' | number) => {
     if (travelingTo) return;
     if (stopId === activeStopId) {
       onClose();
@@ -121,7 +120,7 @@ export const ElevatorPanelModal: React.FC<ElevatorPanelModalProps> = ({
 
         {/* Floor Buttons */}
         <div className="p-4 space-y-2">
-          {ELEVATOR_STOPS.map((stop) => {
+          {elevatorStops.map((stop) => {
             const isHere = activeStopId === stop.id && !travelingTo;
             const isTargetVisit = targetVisitResident?.floor === stop.id;
             const floorResidents = HOTEL_RESIDENTS.filter((r) => r.floor === stop.id);
@@ -157,13 +156,13 @@ export const ElevatorPanelModal: React.FC<ElevatorPanelModalProps> = ({
                   <div className="min-w-0">
                     <div className="text-sm font-semibold flex items-center gap-2">
                       <span>{stop.label}</span>
-                      {stop.id === PLAYER_SUITE_FLOOR && (
+                      {stop.id === playerSuiteFloor && (
                         <span
                           className={`text-[11px] font-medium inline-flex items-center gap-1 ${
                             travelingTo === stop.id ? 'text-[#051205]' : 'text-[#39ff14]'
                           }`}
                         >
-                          · <Home className="w-3 h-3" /> {playerName} ({PLAYER_SUITE_NUMBER})
+                          · <Home className="w-3 h-3" /> {playerName} ({playerSuiteNumber})
                         </span>
                       )}
                     </div>

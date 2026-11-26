@@ -13,6 +13,8 @@ export interface RemotePlayer {
   userId: string;
   handle: string;
   name: string;
+  displayName?: string;
+  isGuest?: boolean;
   avatar: AvatarConfig | null;
   x: number;
   y: number;
@@ -85,7 +87,7 @@ export interface ChatEvent {
   scope: 'local' | 'city' | 'world' | 'dm' | 'party';
   mode?: string;
   body: string;
-  from: { userId: string; handle: string; displayName: string };
+  from: { userId: string; handle: string; displayName: string; isGuest?: boolean };
   at: number;
   id?: string;
   scopeId?: string;

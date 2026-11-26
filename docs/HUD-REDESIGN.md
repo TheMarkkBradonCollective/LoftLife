@@ -117,7 +117,36 @@ Escape/✕ restores exactly the previous state. Developer diagnostics are no
 longer in the player HUD; with `?hudDebug` the presentation and state are
 exposed for inspection.
 
-## 7. Accessibility
+## 7. Guests, hotel and airport
+
+The HUD merged with the guest-city, airport and hotel rollout on `main`. It
+reads the same session state as the rest of the game instead of keeping a
+parallel copy:
+
+- `session.status === 'guest'` marks a guest visit. `hudSectionAvailable()` and
+  `hudChatScopesFor()` in `shared/hud-presentation.mjs` decide which menu
+  sections and chat tabs exist, so guests keep Map, World, Social, Inventory,
+  Character, Emotes, Settings and Leave, plus nearby and city chat, while
+  Friends, direct messages and party chat stay account-only.
+- The social sheet shows `Guest Visit · <name>`, hides the wallet, shop, worlds
+  and daily-reward controls, and cannot open the worlds browser. The shop is
+  read-only for guests at the airport clothing counter.
+- A guest's home is the device-local guest room, not a resident suite. The
+  elevator, keycard and intercom panels receive the server-allocated suite
+  number and floor for registered players.
+- Travel stays physical, matching `main`: suite and hallway doors lead through
+  the hotel, and TheCity is left at the airport departure desk. The game menu
+  deliberately offers no city/suite teleport and no separate leave-city button.
+- Menu → World → Furnish still opens the build panel; opening the menu, chat or
+  the social sheet still unmounts movement and action controls.
+
+Verified locally with a registered account on the SQLite API: dashboard entry,
+suite HUD, all menu sections, editing, and the contextual hotel `Unlock`
+action. The local Node API does not implement `/api/guest/session` (only the
+Cloudflare Worker does), so the live guest path could not be run in this
+workspace; guest gating is covered by unit tests and the build/Worker checks.
+
+## 8. Accessibility
 
 - Every icon control has an `aria-label`; selected/toggled controls use
   `aria-pressed`/`aria-current`.
@@ -129,18 +158,18 @@ exposed for inspection.
 - Gameplay input is suppressed while the menu, social sheet or a text field is
   active; movement keys ignore inputs.
 
-## 8. Verification
+## 9. Verification
 
 Run in this workspace against the redesigned UI:
 
 | Check | Result |
 | --- | --- |
 | `npx tsc --noEmit` | pass |
-| `npm test` (server/shared) | 108/108 pass, including 7 new HUD presentation tests |
+| `npm test` (server/shared) | 109/109 pass, including 8 HUD presentation tests |
 | `npm run build` | pass (Vite; pre-existing chunk-size warning only) |
 | `npx wrangler deploy --dry-run` | pass — Worker + 17 static assets bundle, Durable Object and ASSETS bindings intact |
-| Dev server + desktop browser (1440×900) | game enters, HUD dock/actions render, no console errors beyond a favicon 404 and WebGL perf warnings |
-| Contextual action | walked into the studio stool radius: primary `Sit on Studio Stool`, `S`/`E` hint, key path fires the same interaction |
+| Dev server + desktop browser (1440×900) | account dashboard → suite enters, top HUD and action cluster render, no console errors beyond a favicon 404 and WebGL perf warnings |
+| Contextual action | walked into the studio stool radius: primary `Sit on Studio Stool`, `S`/`E` hint, key path fires the same interaction; in TheCity the hotel door reports `Unlock` |
 | Game menu | all 10 sections reachable; Settings toggles camera, touch size, handedness, audio, graphics |
 | Social sheet | opens from chat; joystick/actions absent from DOM while open |
 | Editing | menu → World → Furnish this suite mounts the build panel and unmounts walking controls |
@@ -158,7 +187,7 @@ is implemented with `env(safe-area-inset-*)` but emulation reports zero insets.
 The dev preview has no backend, so world travel/permissions and voice were not
 re-exercised.
 
-## 9. Screenshots
+## 10. Screenshots
 
 | | |
 | --- | --- |

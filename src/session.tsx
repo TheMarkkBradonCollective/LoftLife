@@ -53,7 +53,7 @@ import {
 } from '../shared/voice-controls.mjs';
 import { resolveDeviceEnvironment } from './game/platform';
 
-export type SessionStatus = 'loading' | 'anonymous' | 'online' | 'offline';
+export type SessionStatus = 'loading' | 'anonymous' | 'online' | 'offline' | 'guest';
 
 /** Device-to-account persistence state, surfaced in the HUD so saves are never a guess. */
 export type SyncState = 'local' | 'saving' | 'synced' | 'error';
@@ -97,6 +97,9 @@ export interface RoomStatePayload {
 
 interface SessionValue {
   status: SessionStatus;
+  guestName: string | null;
+  startGuest: (displayName: string) => Promise<void>;
+  endGuest: () => Promise<void>;
   user: SessionUser | null;
   profile: Profile | null;
   wallet: Wallet;
@@ -150,6 +153,7 @@ interface SessionValue {
     emote: string;
   }) => void;
   enterCity: () => void;
+  exitCity: () => void;
   enterWorld: (worldId: string) => Promise<void>;
   clearChatError: () => void;
   partyAction: (
@@ -176,6 +180,16 @@ interface SessionValue {
 const EMPTY_WALLET: Wallet = { yuanzi: 0, tongbao: 0 };
 // Voice preferences live on the device offline and mirror to the account online.
 const VOICE_PREFS_KEY = 'loftlife_voice_prefs_v1';
+const GUEST_TOKEN_KEY = 'loftlife_guest_session_v1';
+const GUEST_NAME_KEY = 'loftlife_guest_name_v1';
+function readGuestToken() { try { return localStorage.getItem(GUEST_TOKEN_KEY); } catch { return null; } }
+function writeGuestSession(token: string | null, name: string | null) {
+  try {
+    if (token && name) { localStorage.setItem(GUEST_TOKEN_KEY, token); localStorage.setItem(GUEST_NAME_KEY, name); }
+    else { localStorage.removeItem(GUEST_TOKEN_KEY); localStorage.removeItem(GUEST_NAME_KEY); }
+  } catch { /* Guest session remains active for this tab if storage is unavailable. */ }
+}
+function readGuestName() { try { return localStorage.getItem(GUEST_NAME_KEY); } catch { return null; } }
 
 function loadDeviceVoicePreferences(): VoicePreferences {
   // Only the Android APK defaults to open mic; desktop touchscreens use PTT.
@@ -197,6 +211,10 @@ const messageOf = (error: unknown): string =>
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<SessionStatus>('loading');
+  const [guestToken, setGuestToken] = useState<string | null>(() => readGuestToken());
+  const [guestName, setGuestName] = useState<string | null>(() => readGuestName());
+  const [realtimeActive, setRealtimeActive] = useState(false);
+  const pendingWorldRef = useRef<string | null>(null);
   const [user, setUser] = useState<SessionUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [wallet, setWallet] = useState<Wallet>(EMPTY_WALLET);
@@ -383,8 +401,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       if (!getToken()) {
-        // No account needed to play: the local character is the default.
-        if (!cancelled) setStatus('offline');
+        if (!cancelled) setStatus(guestToken ? 'guest' : 'offline');
         return;
       }
       try {
@@ -404,7 +421,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [loadSession]);
+  }, [loadSession, guestToken]);
 
   // Offline play never talks to the account mirror, so the HUD can say so.
   useEffect(() => {
@@ -416,7 +433,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   // Realtime connection follows the signed-in state.
   useEffect(() => {
-    if (status !== 'online') {
+    if ((status !== 'online' && status !== 'guest') || (status === 'online' && !realtimeActive)) {
       realtimeRef.current?.close();
       realtimeRef.current = null;
       setRemotePlayers([]);
@@ -428,7 +445,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       applyVoiceRef.current();
       return;
     }
-    const token = getToken();
+    const token = status === 'guest' ? guestToken : getToken();
     if (!token) return;
 
     const client = new RealtimeClient({
@@ -438,10 +455,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       onReady: ({ instance: info, you, players }) => {
         selfConnRef.current = you.connId;
         setInstance(info);
+        if (pendingWorldRef.current) {
+          const worldId = pendingWorldRef.current;
+          pendingWorldRef.current = null;
+          realtimeRef.current?.switchPlace({ kind: 'world', worldId });
+        }
         setRemotePlayers(players.filter((player) => player.connId !== you.connId));
         setTransitVehicles([]);
         setRiding(null);
-        api
+        if (status === 'online') api
           .party()
           .then((state) => {
             setParty(state.party);
@@ -487,8 +509,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (exited) setChatError(`You stepped off at ${exited.label ?? 'the stop'}`);
       },
       onError: (code, message) => {
-        if (code === 'rate_limited' || code === 'empty_message') setChatError(message);
-        else setChatError(message);
+        if (status === 'guest' && (code === 'unauthorized' || code === 'guest_expired')) {
+          writeGuestSession(null, null);
+          setGuestToken(null); setGuestName(null); setStatus('offline');
+        }
+        setChatError(message);
       },
     });
     realtimeRef.current = client;
@@ -498,7 +523,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       client.close();
       realtimeRef.current = null;
     };
-  }, [status]);
+  }, [status, guestToken, realtimeActive]);
 
   // Transit routes are public, server-owned data (also consumed by a future
   // Unity client), so they are fetched once on boot.
@@ -621,11 +646,41 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const startGuest = useCallback(async (displayName: string) => {
+    setAuthBusy(true); setAuthError(null);
+    try {
+      const result = await api.createGuestSession(displayName);
+      setToken(null);
+      writeGuestSession(result.token, result.guest.displayName);
+      setGuestToken(result.token); setGuestName(result.guest.displayName);
+      setUser(null); setProfile(null); setWallet(EMPTY_WALLET); setInventory([]); setSuite(null);
+      setParty(null); setPartyInvites([]); setMessages([]);
+      pendingWorldRef.current = null; setRealtimeActive(true);
+      setStatus('guest');
+    } catch (error) {
+      setAuthError(messageOf(error));
+      throw error;
+    } finally { setAuthBusy(false); }
+  }, []);
+
+  const endGuest = useCallback(async () => {
+    const token = guestToken;
+    setRealtimeActive(false); pendingWorldRef.current = null;
+    realtimeRef.current?.close(); realtimeRef.current = null;
+    if (token) { try { await api.revokeGuestSession(token); } catch { /* Expiry still bounds the token. */ } }
+    writeGuestSession(null, null);
+    setGuestToken(null); setGuestName(null);
+    setRemotePlayers([]); setMessages([]); setInstance(null); setConnection('idle');
+    setParty(null); setPartyInvites([]); setChatOpenState(false);
+    setStatus('offline');
+  }, [guestToken]);
+
   const login = useCallback(async (identifier: string, password: string) => {
     setAuthBusy(true);
     setAuthError(null);
     try {
       const result = await api.login({ identifier, password });
+      writeGuestSession(null, null); setGuestToken(null); setGuestName(null);
       setToken(result.token);
       await loadSession();
       setStatus('online');
@@ -642,6 +697,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setAuthError(null);
       try {
         const result = await api.register({ ...payload, avatar: payload.avatar ?? DEFAULT_AVATAR });
+        writeGuestSession(null, null); setGuestToken(null); setGuestName(null);
         setToken(result.token);
         await loadSession();
         setJustRegistered(true);
@@ -669,6 +725,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // Signing out locally is what matters.
     }
     setToken(null);
+    setRealtimeActive(false); pendingWorldRef.current = null;
     realtimeRef.current?.close();
     realtimeRef.current = null;
     setUser(null);
@@ -809,8 +866,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const sendChat = useCallback((chat: ChatScope) => {
     setChatError(null);
+    if (status === 'guest' && !['city', 'local'].includes(chat.scope)) {
+      setChatError('Guest visitors can only use public city and nearby chat.');
+      return false;
+    }
     return realtimeRef.current?.sendChat(chat) ?? false;
-  }, []);
+  }, [status]);
 
   const setPose = useCallback<SessionValue['setPose']>((pose) => {
     const audible = rangeToAudibleMode(voiceControlsRef.current?.range ?? 'off');
@@ -823,20 +884,32 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const enterCity = useCallback(() => {
+    pendingWorldRef.current = null; setRealtimeActive(true);
     realtimeRef.current?.switchPlace({ kind: 'city' });
   }, []);
 
+  const exitCity = useCallback(() => {
+    setRealtimeActive(false); pendingWorldRef.current = null;
+    realtimeRef.current?.close(); realtimeRef.current = null;
+    setRemotePlayers([]); setMessages([]); setInstance(null); setConnection('idle');
+    setParty(null); setPartyInvites([]); setTransitVehicles([]); setRiding(null);
+    voiceRef.current?.disable(); applyVoice();
+  }, [applyVoice]);
+
   const enterWorld = useCallback(async (worldId: string) => {
+    if (status === 'guest') { setChatError('Guest visitors can only explore TheCity.'); return; }
     await api.worldEntry(worldId);
-    realtimeRef.current?.switchPlace({ kind: 'world', worldId });
-  }, []);
+    if (realtimeRef.current) realtimeRef.current.switchPlace({ kind: 'world', worldId });
+    else { pendingWorldRef.current = worldId; setRealtimeActive(true); }
+  }, [status]);
 
   const clearChatError = useCallback(() => setChatError(null), []);
 
   const partyAction = useCallback<SessionValue['partyAction']>((action, data) => {
     setChatError(null);
+    if (status === 'guest') { setChatError('Guest visitors cannot use parties.'); return false; }
     return realtimeRef.current?.partyAction(action, data) ?? false;
-  }, []);
+  }, [status]);
 
   const boardTransit = useCallback((lineId: string, stopId: string) => {
     return realtimeRef.current?.boardTransit(lineId, stopId) ?? false;
@@ -852,13 +925,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const enableVoice = useCallback<SessionValue['enableVoice']>(async () => {
+    if (status === 'guest') return 'off';
     // Turning the microphone on is an explicit action, so it also clears a
     // post-reconnect pause. Voice Range Off still blocks transmission.
     voiceControlsRef.current!.suspended = false;
     await voiceRef.current?.enable();
     applyVoice();
     return voiceRef.current?.status ?? 'off';
-  }, [applyVoice]);
+  }, [applyVoice, status]);
 
   const disableVoice = useCallback(() => {
     voiceRef.current?.disable();
@@ -904,6 +978,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
    * player action), then applies the selected mode's semantics.
    */
   const pressMicrophone = useCallback<SessionValue['pressMicrophone']>(async () => {
+    if (status === 'guest') return;
     const controls = voiceControlsRef.current!;
     // Range Off blocks voice in every mode, so do not even ask for the mic.
     if (controls.range === 'off') {
@@ -916,7 +991,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       await voiceRef.current?.enable();
       applyVoice();
     }
-  }, [applyVoice, publishVoice]);
+  }, [applyVoice, publishVoice, status]);
 
   const releaseMicrophone = useCallback(() => {
     voiceControlsRef.current?.releaseMicrophone();
@@ -940,6 +1015,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const value = useMemo<SessionValue>(
     () => ({
       status,
+      guestName,
+      startGuest,
+      endGuest,
+      exitCity,
       user,
       profile,
       wallet,
@@ -998,6 +1077,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }),
     [
       status,
+      guestName,
+      startGuest,
+      endGuest,
+      exitCity,
       user,
       profile,
       wallet,

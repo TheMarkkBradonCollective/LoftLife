@@ -10,7 +10,7 @@ interface Env {
 }
 type Sql = { query(query: string, params?: unknown[]): Promise<unknown[]> };
 type Player = {
-  connId: string; userId: string; handle: string; name: string; avatar: unknown;
+  connId: string; userId: string; handle: string; name: string; avatar: unknown; isGuest?: boolean;
   instanceId: string; x: number; y: number; z: number; yaw: number;
   emote: string; location: string; lastSeen: number; lastChatAt: number; lastPoseAt?: number;
   riding?: string | null; transitLineId?: string | null; transitSeat?: number | null;
@@ -30,7 +30,8 @@ function send(ws: WebSocket, value: unknown) {
 }
 function publicPlayer(p: Player) {
   return {
-    connId: p.connId, userId: p.userId, handle: p.handle, name: p.name,
+    connId: p.connId, userId: p.userId, handle: p.handle,
+    name: p.isGuest ? `Guest · ${p.name}` : p.name, displayName: p.name, isGuest: Boolean(p.isGuest),
     avatar: p.avatar, x: p.x, y: p.y, z: p.z, yaw: p.yaw,
     emote: p.emote, location: p.location, riding: p.riding ?? null,
   };
@@ -66,6 +67,45 @@ export class LoftLifeRealtime {
 
   async fetch(request: Request): Promise<Response> {
     const requestUrl = new URL(request.url);
+    if (requestUrl.pathname === '/internal/world/action' && request.method === 'POST') {
+      const body = await request.json().catch(() => ({})) as { worldId?: string; userId?: string; action?: string; status?: string };
+      if (!body.worldId || !body.userId) return Response.json({error:'worldId and userId are required',code:'bad_request'},{status:400});
+      const worldId = String(body.worldId);
+      const rows = await this.database().query('SELECT owner_id,status FROM ll_worlds WHERE id=$1 LIMIT 1',[worldId]) as Array<{owner_id:string;status:string}>;
+      const world = rows[0];
+      if (!world) return Response.json({error:'World not found',code:'not_found'},{status:404});
+      const roleRows = world.owner_id === body.userId
+        ? [{role:'owner'}]
+        : await this.database().query('SELECT role FROM ll_world_collaborators WHERE world_id=$1 AND user_id=$2 LIMIT 1',[worldId,body.userId]) as Array<{role:string}>;
+      const role = roleRows[0]?.role ?? null;
+      const canManage = role === 'owner' || role === 'co_owner';
+      const canBuild = canManage || role === 'builder';
+      const instanceId = `world:${worldId}`;
+      const active = this.players(instanceId);
+      if (body.action === 'set_status') {
+        if (!canManage) return Response.json({error:'Only the owner or co-owner can change city status',code:'forbidden'},{status:403});
+        const status = String(body.status ?? '');
+        if (!['live','available','offline'].includes(status)) return Response.json({error:'Invalid city status',code:'invalid_status'},{status:400});
+        if (['build_mode','build_pending','maintenance'].includes(String(world.status)) && status !== 'available') {
+          return Response.json({error:'Finish Build Mode or maintenance before changing this city status',code:'invalid_transition'},{status:409});
+        }
+        if (status === 'live' && !active.some(player => player.userId === body.userId)) {
+          return Response.json({error:'Enter your city before making it Live',code:'must_be_present'},{status:409});
+        }
+        await this.database().query('UPDATE ll_worlds SET status=$1,published=$2,updated_at=$3 WHERE id=$4',[status,status==='live',Date.now(),worldId]);
+        this.broadcast(instanceId,{t:'world_status',status});
+        return Response.json({status,activeCount:active.length});
+      }
+      if (body.action === 'request_build') {
+        if (!canBuild) return Response.json({error:'Only the owner, co-owner, or builder can enter Build Mode',code:'forbidden'},{status:403});
+        if (String(world.status) !== 'offline') return Response.json({error:'The owner or co-owner must first set the city to Offline',code:'city_must_be_offline'},{status:409});
+        const nextStatus = active.length === 0 ? 'build_mode' : 'build_pending';
+        await this.database().query('UPDATE ll_worlds SET status=$1,published=FALSE,updated_at=$2 WHERE id=$3',[nextStatus,Date.now(),worldId]);
+        this.broadcast(instanceId,{t:'world_status',status:nextStatus,activeCount:active.length});
+        return Response.json({status:nextStatus,activeCount:active.length,pending:active.length>0});
+      }
+      return Response.json({error:'Unknown world action',code:'unsupported_action'},{status:400});
+    }
     if (requestUrl.pathname === '/internal/chat/broadcast' && request.method === 'POST') {
       const body = await request.json().catch(() => ({})) as { userIds?: string[]; message?: unknown };
       const recipients = new Set(body.userIds ?? []);
@@ -216,6 +256,7 @@ export class LoftLifeRealtime {
         ws.close(1000, 'left');
         return;
       case 'voice': {
+        if (player.isGuest) { error(ws, 'forbidden', 'Guest visitors cannot use private voice signalling'); return; }
         const target = String(message.to ?? '');
         const peer = this.ctx.getWebSockets().find((candidate) => {
           const state = candidate.deserializeAttachment() as Player | undefined;
@@ -243,6 +284,40 @@ export class LoftLifeRealtime {
       return;
     }
     const sql = this.database();
+    if (payload.kind === 'guest') {
+      if (instanceId !== 'city:main' || (place && typeof place === 'object' && (place as {kind?:string}).kind === 'world')) {
+        error(ws, 'forbidden', 'Guest sessions can only enter TheCity');
+        ws.close(1008, 'guest_city_only');
+        return;
+      }
+      const guestRows = await sql.query(
+        'SELECT guest_id, display_name FROM ll_guest_sessions WHERE jti_hash=$1 AND guest_id=$2 AND expires_at>$3 LIMIT 1',
+        [await sha256Hex(payload.sid), payload.sub, Date.now()]
+      ) as Array<{guest_id:string;display_name:string}>;
+      const guest = guestRows[0];
+      if (!guest) {
+        error(ws, 'unauthorized', 'Guest session expired or revoked');
+        ws.close(1008, 'guest_expired');
+        return;
+      }
+      const player: Player = {
+        connId: crypto.randomUUID(), userId: guest.guest_id, handle: 'guest',
+        name: guest.display_name, avatar: null, isGuest: true, instanceId,
+        x: 0, y: 0, z: 0, yaw: 0, emote: 'idle', location: 'world',
+        lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
+      };
+      const active = this.players(instanceId);
+      if (active.length >= MAX_PLAYERS) {
+        error(ws, 'instance_full', 'TheCity is full');
+        ws.close(1013, 'instance_full');
+        return;
+      }
+      ws.serializeAttachment(player);
+      send(ws, { t: 'ready', instance: { id: instanceId, kind: 'city', worldId: null, capacity: MAX_PLAYERS, count: active.length + 1 }, you: publicPlayer(player), players: active.map(publicPlayer) });
+      this.broadcast(instanceId, { t: 'join', player: publicPlayer(player) }, ws);
+      this.broadcastSnapshot(instanceId, true);
+      return;
+    }
     const sessionRows = await sql.query(
       'SELECT a.id, a.handle, a.display_name, a.role FROM ll_sessions s JOIN ll_accounts a ON a.id=s.account_id WHERE s.jti_hash=$1 AND s.account_id=$2 AND s.expires_at>$3 AND COALESCE(a.suspended_until,0)<=$4 LIMIT 1',
       [await sha256Hex(payload.sid), payload.sub, Date.now(), Date.now()]
@@ -257,25 +332,55 @@ export class LoftLifeRealtime {
     let capacity = MAX_PLAYERS;
     if (instanceId.startsWith('world:')) {
       const worldId = instanceId.slice(6);
-      const worlds = await sql.query('SELECT id, owner_id, access, published, max_visitors FROM ll_worlds WHERE id=$1 LIMIT 1', [worldId]) as Array<{ id: string; owner_id: string; access: string; published: boolean; max_visitors: number }>;
+      const worlds = await sql.query('SELECT id, owner_id, access, status, max_visitors FROM ll_worlds WHERE id=$1 LIMIT 1', [worldId]) as Array<{ id: string; owner_id: string; access: string; status: string; max_visitors: number }>;
       const world = worlds[0];
       if (!world) {
         error(ws, 'not_found', 'That world no longer exists');
         ws.close(1008, 'world_not_found');
         return;
       }
-      capacity = Math.max(1, Math.min(MAX_PLAYERS, Number(world.max_visitors) || MAX_PLAYERS));
-      let allowed = world.owner_id === account.id || (world.published && world.access === 'public');
-      if (!allowed && ['invite', 'friends', 'collab'].includes(world.access)) {
-        const [invite, collaborator, friendship] = await Promise.all([
-          sql.query('SELECT 1 FROM ll_world_invites WHERE world_id=$1 AND user_id=$2 LIMIT 1', [worldId, account.id]),
-          sql.query('SELECT 1 FROM ll_world_collaborators WHERE world_id=$1 AND user_id=$2 LIMIT 1', [worldId, account.id]),
-          sql.query("SELECT 1 FROM ll_friendships WHERE status='accepted' AND ((a=$1 AND b=$2) OR (a=$2 AND b=$1)) LIMIT 1", [account.id, world.owner_id]),
-        ]);
-        allowed = invite.length > 0 || collaborator.length > 0 || (world.access === 'friends' && friendship.length > 0);
+      if (world.status === 'live') {
+        const staffRows = await sql.query(
+          "SELECT user_id FROM ll_world_collaborators WHERE world_id=$1 AND role IN ('co_owner','moderator')",
+          [worldId]
+        ) as Array<{user_id:string}>;
+        const staffIds = new Set([world.owner_id,...staffRows.map(row=>row.user_id)]);
+        const alreadyPresent = this.players(instanceId).some(player=>staffIds.has(player.userId));
+        if (!alreadyPresent) {
+          world.status = 'available';
+          await sql.query("UPDATE ll_worlds SET status='available',published=FALSE,updated_at=$1 WHERE id=$2",[Date.now(),worldId]);
+        }
+      }
+      const roleRows = world.owner_id === account.id
+        ? [{role:'owner'}]
+        : await sql.query('SELECT role FROM ll_world_collaborators WHERE world_id=$1 AND user_id=$2 LIMIT 1',[worldId,account.id]) as Array<{role:string}>;
+      const role = roleRows[0]?.role ?? null;
+      const canManage = role === 'owner' || role === 'co_owner';
+      const canBuild = canManage || role === 'builder';
+      const blocked = world.owner_id !== account.id
+        ? await sql.query('SELECT 1 FROM ll_blocks WHERE user_id=$1 AND blocked_id=$2 LIMIT 1',[world.owner_id,account.id])
+        : [];
+      let allowed = false;
+      if (!blocked.length) {
+        if (world.status === 'live') allowed = true;
+        else if (world.status === 'build_mode') allowed = canBuild;
+        else if (world.status === 'offline') allowed = canManage;
+        else if (world.status === 'available') {
+          allowed = Boolean(role) || world.access === 'public';
+          if (!allowed && world.access === 'friends') {
+            const friendship = await sql.query("SELECT 1 FROM ll_friendships WHERE status='accepted' AND ((a=$1 AND b=$2) OR (a=$2 AND b=$1)) LIMIT 1",[account.id,world.owner_id]);
+            allowed = friendship.length > 0;
+          } else if (!allowed && world.access === 'invite') {
+            const invite = await sql.query('SELECT 1 FROM ll_world_invites WHERE world_id=$1 AND user_id=$2 LIMIT 1',[worldId,account.id]);
+            allowed = invite.length > 0;
+          } else if (!allowed && world.access === 'collab') {
+            const invite = await sql.query('SELECT 1 FROM ll_world_invites WHERE world_id=$1 AND user_id=$2 LIMIT 1',[worldId,account.id]);
+            allowed = invite.length > 0;
+          }
+        }
       }
       if (!allowed) {
-        error(ws, 'forbidden', 'You do not have access to this world');
+        error(ws, 'forbidden', 'This city is not currently available to your account');
         ws.close(1008, 'forbidden');
         return;
       }
@@ -304,11 +409,34 @@ export class LoftLifeRealtime {
     send(ws, { t: 'ready', instance: { id: instanceId, kind: instanceId.startsWith('world:') ? 'world' : 'city', worldId: instanceId.startsWith('world:') ? instanceId.slice(6) : null, capacity, count: existingPlayers.length + 1 }, you: publicPlayer(player), players: existingPlayers });
     this.broadcast(instanceId, { t: 'join', player: publicPlayer(player) }, ws);
     this.broadcastSnapshot(instanceId, true);
+    if (instanceId.startsWith('world:')) await this.syncWorldStatus(instanceId.slice(6));
   }
 
   private players(instanceId: string): Player[] {
     return this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment() as Player | undefined)
       .filter((p): p is Player => Boolean(p && p.instanceId === instanceId && p.userId));
+  }
+  private async syncWorldStatus(worldId: string, leavingConnId?: string) {
+    const instanceId = `world:${worldId}`;
+    const active = this.players(instanceId).filter(player => player.connId !== leavingConnId);
+    const rows = await this.database().query('SELECT owner_id,status FROM ll_worlds WHERE id=$1 LIMIT 1',[worldId]) as Array<{owner_id:string;status:string}>;
+    const world = rows[0];
+    if (!world) return;
+    let nextStatus = world.status;
+    if (world.status === 'build_pending' && active.length === 0) {
+      nextStatus = 'build_mode';
+    } else if (world.status === 'live') {
+      const staff = await this.database().query(
+        "SELECT user_id,role FROM ll_world_collaborators WHERE world_id=$1 AND role IN ('co_owner','moderator')",
+        [worldId]
+      ) as Array<{user_id:string;role:string}>;
+      const qualifying = new Set([world.owner_id,...staff.map(row=>row.user_id)]);
+      if (!active.some(player => qualifying.has(player.userId))) nextStatus = 'available';
+    }
+    if (nextStatus !== world.status) {
+      await this.database().query('UPDATE ll_worlds SET status=$1,published=$2,updated_at=$3 WHERE id=$4',[nextStatus,nextStatus==='live',Date.now(),worldId]);
+      this.broadcast(instanceId,{t:'world_status',status:nextStatus,activeCount:active.length});
+    }
   }
   private broadcast(instanceId: string, value: unknown, except?: HibernatableWebSocket) {
     for (const ws of this.ctx.getWebSockets()) {
@@ -507,6 +635,7 @@ export class LoftLifeRealtime {
     return payload;
   }
   private async handleParty(ws:HibernatableWebSocket,player:Player,message:Record<string,unknown>) {
+    if (player.isGuest) { error(ws, 'forbidden', 'Guest visitors cannot use parties'); return; }
     const namespace=this.env.REALTIME;
     if(!namespace){error(ws,'party_unavailable','Party service is not configured');return;}
     const id=namespace.idFromName('party:global');
@@ -546,6 +675,10 @@ export class LoftLifeRealtime {
       error(ws,'unsupported_scope','Unknown chat scope');
       return;
     }
+    if (player.isGuest && !['city','local'].includes(scope)) {
+      error(ws, 'forbidden', 'Guest visitors can only use public city and nearby chat');
+      return;
+    }
     const world = player.instanceId.startsWith('world:');
     let dbScope = scope === 'local' ? 'local' : world ? 'world' : 'city';
     let scopeId = world ? player.instanceId.slice(6) : 'main';
@@ -576,12 +709,14 @@ export class LoftLifeRealtime {
       dbScope='party';scopeId=state.party.id;partyId=state.party.id;recipients=state.party.members.map(member=>member.userId);
     }
     const id=crypto.randomUUID();
-    await this.database().query(
-      'INSERT INTO ll_chat_messages (id, scope, scope_id, user_id, body, created_at) VALUES ($1,$2,$3,$4,$5,$6)',
-      [id,dbScope,scopeId,player.userId,body,now]
-    );
+    if (!player.isGuest && scope !== 'local') {
+      await this.database().query(
+        'INSERT INTO ll_chat_messages (id, scope, scope_id, user_id, body, created_at) VALUES ($1,$2,$3,$4,$5,$6)',
+        [id,dbScope,scopeId,player.userId,body,now]
+      );
+    }
     const mode=String(message.mode??'say');
-    const event={t:'chat',scope,mode,body,from:{userId:player.userId,handle:player.handle,displayName:player.name},to,at:now,id,scopeId};
+    const event={t:'chat',scope,mode,body,from:{userId:player.userId,handle:player.handle,displayName:player.isGuest ? `Guest · ${player.name}` : player.name,isGuest:Boolean(player.isGuest)},to,at:now,id,scopeId};
     if(scope==='local'){
       const range=mode==='whisper'?6:mode==='shout'?60:24;
       for(const peer of this.ctx.getWebSockets()){
@@ -607,16 +742,18 @@ export class LoftLifeRealtime {
     else ws.close();
     const player = ws.deserializeAttachment() as Player | undefined;
     if (player?.userId) {
-      await this.updatePartyPresence(player.userId, null);
+      if (!player.isGuest) await this.updatePartyPresence(player.userId, null);
       this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
       this.broadcastSnapshot(player.instanceId, true);
+      if (player.instanceId.startsWith('world:')) await this.syncWorldStatus(player.instanceId.slice(6),player.connId);
     }
   }
   async webSocketError(ws: HibernatableWebSocket) {
     const player = ws.deserializeAttachment() as Player | undefined;
     if (player?.userId) {
-      await this.updatePartyPresence(player.userId, null);
+      if (!player.isGuest) await this.updatePartyPresence(player.userId, null);
       this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
+      if (player.instanceId.startsWith('world:')) await this.syncWorldStatus(player.instanceId.slice(6),player.connId);
     }
   }
 }

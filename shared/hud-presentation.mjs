@@ -148,3 +148,23 @@ export function contextActionVerb(kind) {
       return 'Interact';
   }
 }
+
+/**
+ * Guest visits can explore, use nearby chat and furnish their device-local
+ * guest room, but account surfaces stay hidden. The API enforces the same
+ * limits; these helpers keep the HUD from offering dead ends.
+ */
+export const ACCOUNT_ONLY_MENU_SECTIONS = Object.freeze(['friends', 'messages']);
+
+export function hudSectionAvailable(section, {guest = false} = {}) {
+  if (!guest) return true;
+  return !ACCOUNT_ONLY_MENU_SECTIONS.includes(section);
+}
+
+export const GUEST_CHAT_SCOPES = Object.freeze(['local', 'city']);
+export const ACCOUNT_CHAT_SCOPES = Object.freeze(['local', 'city', 'party', 'dm']);
+
+/** Chat channels offered for the current session; guests have no DM/party. */
+export function hudChatScopesFor({guest = false} = {}) {
+  return guest ? GUEST_CHAT_SCOPES : ACCOUNT_CHAT_SCOPES;
+}
