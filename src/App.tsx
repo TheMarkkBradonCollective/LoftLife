@@ -61,6 +61,7 @@ import { RoomSettingsModal } from './components/RoomSettingsModal';
 import { SyncConflictModal } from './components/SyncConflictModal';
 import { SocialHud } from './components/SocialHud';
 import { PlatformNotice } from './components/PlatformNotice';
+import { WorldMenu } from './components/WorldMenu';
 import { TouchControls } from './components/TouchControls';
 import { useDeviceEnvironment } from './game/platform';
 import { MOBILE_GAMEPLAY_MESSAGE } from '../shared/device-platform.mjs';
@@ -70,9 +71,11 @@ import { MOBILE_GAMEPLAY_MESSAGE } from '../shared/device-platform.mjs';
 const RoomViewport = lazy(() =>
   import('./components/RoomViewport').then((module) => ({ default: module.RoomViewport }))
 );
-import { api } from './net/api';
+import { api, type WorldSummary } from './net/api';
 import { MIC_MODE_INFO, VOICE_RANGE_INFO } from '../shared/voice-controls.mjs';
-import { isEditableElement, resolveShortcut } from '../shared/desktop-shortcuts.mjs';
+import { isEditableElement } from '../shared/desktop-shortcuts.mjs';
+import { bindingMatchesEvent } from '../shared/keybindings.mjs';
+import { useKeybindings } from './game/keybindings';
 import { wallAxis } from '../shared/room-walls.mjs';
 import { useSession } from './session';
 import { sfx } from './game/audio';
@@ -345,11 +348,12 @@ export default function App() {
   const [mood, setMood] = useState<LightingMood>(initial.mood);
   const [roomName, setRoomName] = useState<string>(initial.roomName);
   const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(initial.avatar);
-  const [activeWorld, setActiveWorld] = useState<{
-    id: string;
-    name: string;
-    canEdit: boolean;
-  } | null>(null);
+  const [activeWorld, setActiveWorld] = useState<WorldSummary | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const controls = useKeybindings({
+    online: session.status === 'online',
+    userId: session.user?.id ?? null,
+  });
 
   // Walk & Emote state
   const [activeEmote, setActiveEmote] = useState<EmoteType>('idle');
@@ -769,7 +773,7 @@ export default function App() {
           showHint('You do not have access to that world');
           return;
         }
-        setActiveWorld({ id: world.id, name: world.name, canEdit: world.canEdit });
+        setActiveWorld(world);
         setItems(world.items);
         if (world.surfaces) setSurfaces(world.surfaces);
         setMood(world.mood ?? 'morning');
@@ -811,6 +815,41 @@ export default function App() {
     session.enterCity();
     showHint('Back in your suite');
   }, [session, showHint, conflict]);
+
+  const handleWorldUpdated = useCallback((updated: WorldSummary) => {
+    setActiveWorld((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
+    if (updated.name) setRoomName(updated.name);
+  }, []);
+
+  /** Confirm-leave path: flush the latest build state, then restore the suite. */
+  const handleLeaveWorldConfirmed = useCallback(async () => {
+    if (!activeWorld) return;
+    if (activeWorld.canEdit && session.status === 'online') {
+      try {
+        await api.saveWorldState(activeWorld.id, { items, surfaces, mood });
+      } catch {
+        showHint('World could not sync before leaving · the saved copy is unchanged');
+      }
+    }
+    handleLeaveWorld();
+  }, [activeWorld, session.status, items, surfaces, mood, showHint, handleLeaveWorld]);
+
+  /** M-menu travel: player worlds leave first, then Main City. */
+  const handleTravelCity = useCallback(() => {
+    if (activeWorld) {
+      handleLeaveWorld();
+      setLocation('world');
+      session.enterCity();
+      showHint('Main City · press M for the map and world menu');
+      return;
+    }
+    handleChangeLocation('world');
+  }, [activeWorld, handleLeaveWorld, session, handleChangeLocation, showHint]);
+
+  const handleTravelSuite = useCallback(() => {
+    if (activeWorld) handleLeaveWorld();
+    handleChangeLocation('room');
+  }, [activeWorld, handleLeaveWorld, handleChangeLocation]);
 
   const pushHistory = useCallback((prevItems: PlacedItem[]) => {
     setHistory((h) => [...h.slice(-19), prevItems]);
@@ -985,9 +1024,6 @@ export default function App() {
         setDockCollapsed((c) => !c);
       } else if ((e.key === 'v' || e.key === 'V') && gameplayAllowed) {
         handleTogglePlayView();
-      } else if ((e.key === 'm' || e.key === 'M') && location === 'world') {
-        sfx.playClick();
-        setCityMapOpen((o) => !o);
       } else if (e.key === 'Escape' && cityMapOpen) {
         setCityMapOpen(false);
       } else if (mode === 'edit') {
@@ -1174,6 +1210,7 @@ export default function App() {
     elevatorModalOpen ||
     roomSettingsOpen ||
     authOpen ||
+    menuOpen ||
     conflictOpen;
 
   // Desktop shortcuts. T drives whichever microphone mode is selected, R
@@ -1184,41 +1221,47 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return;
-      const action = resolveShortcut({
-        code: event.code,
-        key: event.key,
-        typing: isTypingTarget(document.activeElement),
-        modalOpen: anyModalOpen,
-        mode,
-      });
-      if (!action || action === 'rotate') return;
-      if (action === 'microphone') {
+      if (isTypingTarget(document.activeElement)) return;
+      // M is handled before the dialog gate so it can close its own menu.
+      if (bindingMatchesEvent(controls.bindings.menu, event)) {
+        if (anyModalOpen && !menuOpen) return;
+        event.preventDefault();
+        sfx.playClick();
+        setMenuOpen((open) => !open);
+        return;
+      }
+      if (anyModalOpen) return;
+      if (bindingMatchesEvent(controls.bindings.zoom, event)) {
+        event.preventDefault();
+        toggleCloseZoom();
+      } else if (bindingMatchesEvent(controls.bindings.playToggle, event)) {
+        if (!gameplayAllowed) return;
+        event.preventDefault();
+        handleTogglePlayView();
+      } else if (bindingMatchesEvent(controls.bindings.follow, event)) {
+        event.preventDefault();
+        toggleFollowCharacter();
+      } else if (bindingMatchesEvent(controls.bindings.voice, event)) {
         event.preventDefault();
         sfx.playClick();
         if (session.voice.range === 'off') {
-          showHint('Voice range is Off — press R to pick Whisper, Talk or Shout');
+          showHint(`Voice range is Off — press ${controls.bindings.voiceRange ? 'the range key' : 'the range key'} to pick Whisper, Talk or Shout`);
           return;
         }
         void session.pressMicrophone();
-      } else if (action === 'voice-range') {
+      } else if (mode !== 'edit' && bindingMatchesEvent(controls.bindings.voiceRange, event)) {
         event.preventDefault();
         cycleRange();
-      } else if (action === 'chat') {
+      } else if (bindingMatchesEvent(controls.bindings.chat, event)) {
         event.preventDefault();
         sfx.playClick();
         session.toggleChat();
-      } else if (action === 'camera-zoom') {
-        event.preventDefault();
-        toggleCloseZoom();
-      } else if (action === 'follow-camera') {
-        event.preventDefault();
-        toggleFollowCharacter();
       }
     };
     // Key-up is deliberately not gated by focus or dialogs, so a held talk key
     // can never stay latched after the composer steals focus.
     const onKeyUp = (event: KeyboardEvent) => {
-      if (event.code === 'KeyT') session.releaseMicrophone();
+      if (bindingMatchesEvent(controls.bindings.voice, event)) session.releaseMicrophone();
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
@@ -1229,8 +1272,11 @@ export default function App() {
     };
   }, [
     anyModalOpen,
-    mode,
+    menuOpen,
+    gameplayAllowed,
+    controls.bindings,
     cycleRange,
+    handleTogglePlayView,
     toggleCloseZoom,
     toggleFollowCharacter,
     showHint,
@@ -1448,66 +1494,19 @@ export default function App() {
           </span>
         )}
 
-        {/* Leave a player-created world and restore the hotel suite */}
-        {activeWorld && (
-          <button
-            type="button"
-            onClick={handleLeaveWorld}
-            className="px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-[#ffb878] text-[#1a1005] border-[#ffb878] hover:bg-[#ffc894]"
-          >
-            <Home className="w-3.5 h-3.5" />
-            Leave {activeWorld.name}
-          </button>
-        )}
-        {/* Exit to Main World / Return to My Suite Quick Travel */}
-        {gameplayAllowed && (
-        <button
-          type="button"
-          onClick={() => {
-            if (activeWorld) {
-              handleLeaveWorld();
-              setLocation('world');
-              session.enterCity();
-              return;
-            }
-            handleChangeLocation(location === 'world' ? 'room' : 'world');
-          }}
-          className={`px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-            location === 'world'
-              ? 'bg-[#39ff14] text-[#051205] border-[#39ff14] hover:bg-[#5bff3b] neon-btn-glow'
-              : 'bg-[#111914] text-[#39ff14] border-[#39ff14]/45 hover:bg-[#19261d]'
-          }`}
-        >
-          {location === 'world' ? (
-            <>
-              <Home className="w-3.5 h-3.5" />
-              Return to Suite {PLAYER_SUITE_NUMBER}
-            </>
-          ) : (
-            <>
-              <DoorOpen className="w-3.5 h-3.5" />
-              Main City
-            </>
-          )}
-        </button>
-        )}
-
-        {/* City Grid Map Toggle (when in Main City) */}
-        {location === 'world' && (
+        {/* Desktop entry point; the APK uses its touch Map button. */}
+        {gameplayAllowed && device.desktop && (
           <button
             type="button"
             onClick={() => {
               sfx.playClick();
-              setCityMapOpen((v) => !v);
+              setMenuOpen(true);
             }}
-            className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-              cityMapOpen
-                ? 'bg-[#39ff14] text-[#051205] border-[#39ff14] neon-btn-glow'
-                : hudPanelClass
-            }`}
+            aria-label="Map and world menu"
+            className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${hudPanelClass}`}
           >
-            <MapIcon className="w-3.5 h-3.5" />
-            City Map (M)
+            <MapIcon className="w-3.5 h-3.5 text-[#39ff14]" />
+            Map &amp; World <span className="text-[10px] text-slate-400">(M)</span>
           </button>
         )}
 
@@ -1963,7 +1962,7 @@ export default function App() {
                   <>
                     <span>Click street to walk · WASD pans · Shift sprint</span>
                     <span aria-hidden="true">·</span>
-                    <span>M City Map</span>
+                    <span>M Map &amp; World</span>
                     <span aria-hidden="true">·</span>
                     <span>At Hotel Door: press E for Keycard or Ring Active User</span>
                   </>
@@ -1993,7 +1992,7 @@ export default function App() {
                   </>
                 ) : (
                   <>
-                    <span>Click floor to walk · WASD pans · F follow · Z zoom</span>
+                    <span>Click floor to walk · WASD pans · F follow · Z zoom · M menu</span>
                     <span aria-hidden="true">·</span>
                     <span>West Door: press E to enter Keycard → Lobby &amp; Elevator</span>
                   </>
@@ -2302,6 +2301,11 @@ export default function App() {
         followCharacter={followCharacter}
         onToggleZoom={toggleCloseZoom}
         onToggleFollow={toggleFollowCharacter}
+        onOpenMenu={() => {
+          sfx.playClick();
+          setMenuOpen(true);
+        }}
+        layout={controls.touch}
       />
 
       {/* Community: chat, presence, friends, shop and worlds */}
@@ -2384,6 +2388,53 @@ export default function App() {
         currentStreet={cityStreet}
         playerPoseRef={playerPoseRef}
         onClose={() => setCityMapOpen(false)}
+      />
+
+      {/* Central M menu: map, world info, management, leave and controls. */}
+      <WorldMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        location={location}
+        world={activeWorld}
+        suite={session.suite}
+        roomName={roomName}
+        items={items}
+        userHandle={session.profile?.handle ?? session.user?.handle ?? avatarConfig.name}
+        userRole={session.user?.role ?? 'player'}
+        viewMode={viewMode}
+        closeZoom={closeZoom}
+        followCharacter={followCharacter}
+        playerPoseRef={playerPoseRef}
+        instance={
+          session.instance
+            ? {
+                id: session.instance.id,
+                kind: session.instance.kind,
+                worldId: (session.instance as { worldId?: string | null }).worldId ?? null,
+                count: session.instance.count,
+                capacity: session.instance.capacity,
+              }
+            : null
+        }
+        players={remoteInThisScene.map((player) => ({
+          handle: player.handle,
+          displayName: '',
+        }))}
+        bindings={controls.bindings}
+        touch={controls.touch}
+        syncing={controls.syncing}
+        syncError={controls.syncError}
+        onSetBinding={controls.setBinding}
+        onResetBinding={controls.resetOne}
+        onResetAllBindings={controls.resetAll}
+        onSetTouch={controls.setTouch}
+        onResetTouch={controls.resetTouch}
+        onWorldUpdated={handleWorldUpdated}
+        onTravelCity={handleTravelCity}
+        onTravelSuite={handleTravelSuite}
+        onLeaveWorld={handleLeaveWorldConfirmed}
+        onOpenCityMap={() => setCityMapOpen(true)}
+        onEditRoom={() => handleModeSwitch('edit')}
       />
 
       {/* Hotel Main Door Keycard & Up/Down Active Resident Ring Terminal */}

@@ -16,6 +16,7 @@ import {
   verifyPassword,
 } from '../../shared/auth-core.mjs';
 import { normalizeVoicePreferences } from '../../shared/voice-controls.mjs';
+import { normalizeControlsPayload } from '../../shared/keybindings.mjs';
 
 /**
  * Cloudflare Worker: static assets, Neon-backed game APIs and Durable Object realtime.
@@ -541,6 +542,27 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
       sql.query('UPDATE ll_profiles SET display_name=$1,avatar_json=$2,bio=$3,voice_json=$4,updated_at=$5 WHERE user_id=$6',[displayName,JSON.stringify(avatar),bio ?? String(rows[0]?.bio ?? ''),JSON.stringify(voice),Date.now(),account.id]),
     ]);
     return json({userId:account.id,handle:account.handle,displayName,bio:bio ?? String(rows[0]?.bio ?? ''),avatar,voice});
+  }
+  if (path === '/api/preferences/controls' && sql && account) {
+    if (request.method === 'GET') {
+      const rows = await sql.query(
+        'SELECT controls_json,controls_updated_at FROM ll_profiles WHERE user_id=$1 LIMIT 1',
+        [account.id]
+      ) as Array<Record<string, unknown>>;
+      let stored: Record<string, unknown> = {};
+      try { stored = parseJsonField(rows[0]?.controls_json, {}); } catch { stored = {}; }
+      return json(normalizeControlsPayload({ ...stored, updatedAt: Number(rows[0]?.controls_updated_at) || 0 }));
+    }
+    if (request.method === 'PUT') {
+      const body = await readJson(request);
+      const normalized = normalizeControlsPayload(body);
+      const updatedAt = Date.now();
+      await sql.query(
+        'UPDATE ll_profiles SET controls_json=$1,controls_updated_at=$2 WHERE user_id=$3',
+        [JSON.stringify({ bindings: normalized.bindings, touch: normalized.touch }), updatedAt, account.id]
+      );
+      return json({ ...normalized, updatedAt });
+    }
   }
   if (path === '/api/inventory' && request.method === 'GET' && sql && account) {
     const rows = await sql.query('SELECT kind,catalog_id,qty,acquired_at FROM ll_inventory WHERE user_id=$1 ORDER BY acquired_at DESC',[account.id]) as Array<Record<string,unknown>>;

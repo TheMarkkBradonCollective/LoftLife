@@ -241,6 +241,49 @@ test('wardrobe is enforced against owned clothing', async () => {
   assert.equal(allowed.json.avatar.topStyle, 'blazer');
 });
 
+test('control preferences persist per account and reject reserved keys', async () => {
+  const account = await newAccount();
+  const other = await newAccount();
+
+  const initial = await api('GET', '/api/preferences/controls', { token: account.token });
+  assert.equal(initial.status, 200);
+  assert.equal(initial.json.bindings.menu, 'KeyM');
+  assert.equal(initial.json.touch.size, 'md');
+
+  const saved = await api('PUT', '/api/preferences/controls', {
+    token: account.token,
+    body: {
+      bindings: { menu: 'KeyN', isoForward: 'KeyI', playForward: 'KeyO', invalid: 'KeyX' },
+      touch: { size: 'lg', handedness: 'left', opacity: 90 },
+    },
+  });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.json.bindings.menu, 'KeyN');
+  assert.equal(saved.json.bindings.isoForward, 'KeyI');
+  assert.equal(saved.json.bindings.playForward, 'KeyO');
+  assert.equal(saved.json.bindings.isoBack, 'KeyS', 'missing actions keep defaults');
+  assert.equal(saved.json.bindings.invalid, undefined, 'unknown actions are dropped');
+  assert.equal(saved.json.touch.handedness, 'left');
+  assert.ok(saved.json.updatedAt > 0);
+
+  const reserved = await api('PUT', '/api/preferences/controls', {
+    token: account.token,
+    body: { bindings: { menu: 'F5' }, touch: { size: 'md', handedness: 'right' } },
+  });
+  assert.equal(reserved.status, 200);
+  assert.equal(reserved.json.bindings.menu, 'KeyM', 'reserved shortcuts fall back to the default');
+
+  const reread = await api('GET', '/api/preferences/controls', { token: account.token });
+  assert.equal(reread.json.bindings.menu, 'KeyM');
+
+  const isolated = await api('GET', '/api/preferences/controls', { token: other.token });
+  assert.equal(isolated.json.bindings.menu, 'KeyM');
+  assert.equal(isolated.json.updatedAt, 0);
+
+  const anonymous = await api('GET', '/api/preferences/controls');
+  assert.equal(anonymous.status, 401);
+});
+
 test('suite saves validate furniture and persist', async () => {
   const account = await newAccount();
 

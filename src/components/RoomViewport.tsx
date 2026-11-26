@@ -46,6 +46,8 @@ import {
   playViewDistance,
 } from '../../shared/camera-modes.mjs';
 import { WALL_ROT_STEPS, wallAxis } from '../../shared/room-walls.mjs';
+import { bindingHeld, bindingMatchesEvent } from '../../shared/keybindings.mjs';
+import { getBinding } from '../game/keybindings';
 import type {
   ActiveResident,
   AvatarConfig,
@@ -1235,7 +1237,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       }
       keys[e.code] = true;
 
-      if (e.code === 'KeyE') {
+      if (bindingMatchesEvent(getBinding('interact'), e)) {
         const action = getNearbyAction();
         if (action) {
           e.preventDefault();
@@ -1244,7 +1246,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       }
 
       if (
-        e.code === 'Space' &&
+        bindingMatchesEvent(getBinding('jump'), e) &&
         (propsRef.current.mode === 'walk' || propsRef.current.location !== 'room')
       ) {
         e.preventDefault();
@@ -2061,7 +2063,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       }
 
       const floorHits = raycaster.intersectObject(roomHandles.floorRaycastPlane);
-      if (floorHits.length > 0) {
+      // Play View never accepts point-and-click movement; touch taps there are
+      // interactions only. Isometric remains the click/tap-to-walk mode.
+      if (propsRef.current.viewMode !== 'play' && floorHits.length > 0) {
         const pt = floorHits[0].point;
         standUpFromSeat();
         av.pendingSeat = null;
@@ -2200,7 +2204,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       const canWalk =
         !propsRef.current.modalOpen && (currentLoc !== 'room' || currentMode === 'walk');
       let isMoving = false;
-      const sprinting = Boolean(keys['ShiftLeft'] || keys['ShiftRight'] || touchInput.sprint);
+      const held = (actionId: string) => bindingHeld(getBinding(actionId), keys);
+      const sprinting = Boolean(held('sprint') || touchInput.sprint);
       const prevAvX = av.x;
       const prevAvZ = av.z;
       const ride = propsRef.current.ridingVehicle;
@@ -2258,19 +2263,19 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       let moveX = 0;
       let moveZ = 0;
       if (currentView === 'play') {
-        if (keys['KeyW'] || keys['ArrowUp']) moveZ -= 1;
-        if (keys['KeyS'] || keys['ArrowDown']) moveZ += 1;
-        if (keys['KeyA'] || keys['ArrowLeft']) moveX -= 1;
-        if (keys['KeyD'] || keys['ArrowRight']) moveX += 1;
+        if (held('playForward')) moveZ -= 1;
+        if (held('playBack')) moveZ += 1;
+        if (held('playLeft')) moveX -= 1;
+        if (held('playRight')) moveX += 1;
         moveX += touchInput.moveX;
         moveZ += touchInput.moveZ;
       } else {
-        // In edit mode the arrows nudge the selected item, so only WASD pans.
-        const arrowsPan = currentMode !== 'edit';
-        if (keys['KeyW'] || (arrowsPan && keys['ArrowUp'])) moveZ -= 1;
-        if (keys['KeyS'] || (arrowsPan && keys['ArrowDown'])) moveZ += 1;
-        if (keys['KeyA'] || (arrowsPan && keys['ArrowLeft'])) moveX -= 1;
-        if (keys['KeyD'] || (arrowsPan && keys['ArrowRight'])) moveX += 1;
+        // Custom bindings are authoritative; arrows no longer silently bypass a
+        // remap. The editor's own arrow-nudge lives outside this loop.
+        if (held('isoForward')) moveZ -= 1;
+        if (held('isoBack')) moveZ += 1;
+        if (held('isoLeft')) moveX -= 1;
+        if (held('isoRight')) moveX += 1;
         if (currentMode === 'walk') {
           moveX += touchInput.moveX;
           moveZ += touchInput.moveZ;

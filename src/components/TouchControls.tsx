@@ -3,6 +3,7 @@ import {
   ArrowUp,
   FastForward,
   Maximize2,
+  Map as MapIcon,
   MessageCircle,
   Mic,
   MicOff,
@@ -37,6 +38,10 @@ interface TouchControlsProps {
   followCharacter: boolean;
   onToggleZoom: () => void;
   onToggleFollow: () => void;
+  /** Opens the same M Map & World Menu. */
+  onOpenMenu: () => void;
+  /** Account/local touch layout preferences. */
+  layout: { size: 'sm' | 'md' | 'lg'; handedness: 'right' | 'left'; opacity: number };
 }
 
 const STICK_RADIUS = 48;
@@ -88,6 +93,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
   followCharacter,
   onToggleZoom,
   onToggleFollow,
+  onOpenMenu,
+  layout,
 }) => {
   const stickRef = useRef<HTMLDivElement>(null);
   const stickPointer = useRef<number | null>(null);
@@ -134,12 +141,12 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
     const dx = clientX - cx;
     const dy = clientY - cy;
     const distance = Math.hypot(dx, dy);
-    const scale = distance > STICK_RADIUS ? STICK_RADIUS / distance : 1;
+    const scale = distance > stickRadius ? stickRadius / distance : 1;
     const kx = dx * scale;
     const ky = dy * scale;
     setKnob({ x: kx, y: ky });
-    touchInput.moveX = kx / STICK_RADIUS;
-    touchInput.moveZ = ky / STICK_RADIUS;
+    touchInput.moveX = kx / stickRadius;
+    touchInput.moveZ = ky / stickRadius;
   };
 
   const releaseStick = () => {
@@ -155,6 +162,21 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
     touchInput.sprint = next;
   };
 
+  const sizeScale = layout.size === 'sm' ? 0.86 : layout.size === 'lg' ? 1.16 : 1;
+  const stickSize = Math.round(STICK_SIZE * sizeScale);
+  const stickRadius = STICK_RADIUS * sizeScale;
+  const knobSize = Math.round(56 * sizeScale);
+  const leftHanded = layout.handedness === 'left';
+  const stickSide = leftHanded ? { right: 20 } : { left: 20 };
+  const otherSide = leftHanded ? { left: 16 } : { right: 16 };
+  // The voice/camera cluster is always right-aligned. With a right-side stick
+  // it is lifted above the stick, which also keeps the Community launcher on
+  // the left clear.
+  const infoSide = { right: 16 };
+  const voiceBottom = leftHanded ? 17 : 9.75;
+  const cameraBottom = leftHanded
+    ? 24 + (sizeScale - 1) * 6
+    : 13.5 + (sizeScale - 1) * 18;
   const range = VOICE_RANGE_INFO[voice.range];
   const micMode = MIC_MODE_INFO[voice.micMode];
   const indicator = INDICATOR_STYLE[voice.indicator];
@@ -164,8 +186,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       {/* Virtual stick */}
       <div
         ref={stickRef}
-        className="fixed left-5 bottom-24 z-40 rounded-full border border-[#39ff14]/40 bg-[#0b100d]/70 backdrop-blur-sm touch-none select-none"
-        style={{ width: STICK_SIZE, height: STICK_SIZE }}
+        className="fixed bottom-24 z-40 rounded-full border border-[#39ff14]/40 bg-[#0b100d]/70 backdrop-blur-sm touch-none select-none"
+        style={{ width: stickSize, height: stickSize, opacity: layout.opacity / 100, ...stickSide }}
         onPointerDown={(event) => {
           stickPointer.current = event.pointerId;
           event.currentTarget.setPointerCapture(event.pointerId);
@@ -188,13 +210,26 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
           </span>
         </div>
         <div
-          className="absolute left-1/2 top-1/2 w-14 h-14 rounded-full bg-[#39ff14]/85 border border-[#8eff78] pointer-events-none"
-          style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }}
+          className="absolute left-1/2 top-1/2 rounded-full bg-[#39ff14]/85 border border-[#8eff78] pointer-events-none"
+          style={{
+            width: knobSize,
+            height: knobSize,
+            transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))`,
+          }}
         />
       </div>
 
       {/* Grouped voice bubble: range, microphone mode and status in one place */}
-      <div className="fixed right-4 bottom-[9.75rem] z-40 flex flex-col items-end gap-1.5">
+      <div
+        className="fixed z-40 flex flex-col items-end gap-1.5"
+        style={{
+          ...infoSide,
+          bottom: `${voiceBottom}rem`,
+          opacity: layout.opacity / 100,
+          transform: `scale(${sizeScale})`,
+          transformOrigin: 'bottom right',
+        }}
+      >
         <div className="flex items-stretch rounded-2xl border border-[#39ff14]/30 bg-[#0b100d]/90 backdrop-blur-sm overflow-hidden shadow-lg">
           <button
             type="button"
@@ -271,7 +306,18 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       {/* Camera controls: Follow (isometric only) and Close/Wide zoom. Both
           are independent, mirror the F and Z keys, and stay out of the way of
           the canvas gestures. */}
-      <div className="fixed right-4 bottom-[13.5rem] z-40 flex items-center gap-1.5">
+      <div
+        className="fixed z-40 flex items-center gap-1.5"
+        style={{
+          ...infoSide,
+          // Larger controls grow upward; lift this row so it never covers the
+          // voice bubble below it (and vice versa when left-handed).
+          bottom: `${cameraBottom}rem`,
+          opacity: layout.opacity / 100,
+          transform: `scale(${sizeScale})`,
+          transformOrigin: 'bottom right',
+        }}
+      >
         {viewMode === 'isometric' && (
           <button
             type="button"
@@ -290,6 +336,14 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         )}
         <button
           type="button"
+          aria-label="Map and world menu"
+          onClick={onOpenMenu}
+          className="h-10 w-10 rounded-xl border bg-[#0b100d]/85 text-slate-200 border-[#39ff14]/40 flex items-center justify-center active:scale-95"
+        >
+          <MapIcon className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
           aria-label={closeZoom ? 'Switch to the wide room view' : 'Switch to the close avatar view'}
           aria-pressed={closeZoom}
           onClick={onToggleZoom}
@@ -305,7 +359,10 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       </div>
 
       {/* Contextual buttons */}
-      <div className="fixed right-5 bottom-24 z-40 flex flex-col items-end gap-2">
+      <div
+        className={`fixed bottom-24 z-40 flex flex-col gap-2 ${leftHanded ? 'items-start' : 'items-end'}`}
+        style={{ ...otherSide, opacity: layout.opacity / 100, transform: `scale(${sizeScale})`, transformOrigin: leftHanded ? 'bottom left' : 'bottom right' }}
+      >
         <div className="flex items-center gap-2">
           <button
             type="button"

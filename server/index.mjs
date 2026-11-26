@@ -67,6 +67,7 @@ import {
   setSuiteVisibility,
   updateWorld,
 } from './worlds.mjs';
+import { readControls, saveControls } from './preferences.mjs';
 
 const PORT = Number(process.env.PORT || process.env.LOFTLIFE_PORT || 8787);
 const ROOT = process.cwd();
@@ -151,6 +152,20 @@ export function createApp() {
     requireAuth,
     writeLimiter,
     handler((req, res) => res.json(updateProfile(req.user.id, req.body ?? {})))
+  );
+
+  // Keybindings + touch layout: local-first on the client, account-synced here.
+  app.get(
+    '/api/preferences/controls',
+    requireAuth,
+    handler((req, res) => res.json(readControls(req.user.id)))
+  );
+
+  app.put(
+    '/api/preferences/controls',
+    requireAuth,
+    writeLimiter,
+    handler((req, res) => res.json(saveControls(req.user.id, req.body ?? {})))
   );
 
   app.get(

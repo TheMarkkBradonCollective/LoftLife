@@ -59,6 +59,9 @@ CREATE TABLE IF NOT EXISTS profiles (
   bio          TEXT NOT NULL DEFAULT '',
   -- Voice range + microphone mode + sensitivity, synced to the account.
   voice_json   TEXT NOT NULL DEFAULT '{}',
+  -- Keybindings and touch layout, synced per account.
+  controls_json TEXT NOT NULL DEFAULT '{}',
+  controls_updated_at INTEGER NOT NULL DEFAULT 0,
   updated_at   INTEGER NOT NULL
 );
 
@@ -196,6 +199,12 @@ const profileColumns = db
   .map((row) => row.name);
 if (!profileColumns.includes('voice_json')) {
   db.exec("ALTER TABLE profiles ADD COLUMN voice_json TEXT NOT NULL DEFAULT '{}'");
+}
+if (!profileColumns.includes('controls_json')) {
+  db.exec("ALTER TABLE profiles ADD COLUMN controls_json TEXT NOT NULL DEFAULT '{}'");
+}
+if (!profileColumns.includes('controls_updated_at')) {
+  db.exec('ALTER TABLE profiles ADD COLUMN controls_updated_at INTEGER NOT NULL DEFAULT 0');
 }
 
 /** Run `fn` inside an IMMEDIATE transaction; rolls back on any throw. */

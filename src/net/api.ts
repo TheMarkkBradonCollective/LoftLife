@@ -28,6 +28,19 @@ export interface VoicePreferences {
   sensitivity: number;
 }
 
+export interface TouchLayoutPreferences {
+  size: 'sm' | 'md' | 'lg';
+  handedness: 'right' | 'left';
+  opacity: number;
+}
+
+/** Account-synced keybindings and touch layout. */
+export interface ControlsPreferences {
+  bindings: Record<string, string>;
+  touch: TouchLayoutPreferences;
+  updatedAt: number;
+}
+
 export interface Profile {
   userId: string;
   handle: string;
@@ -237,6 +250,14 @@ export const api = {
       suite: SuiteState;
     }>('/auth/me'),
 
+  getControls: () => request<ControlsPreferences>('/preferences/controls'),
+
+  saveControls: (body: {
+    bindings: Record<string, string>;
+    touch: TouchLayoutPreferences;
+    updatedAt?: number;
+  }) => request<ControlsPreferences>('/preferences/controls', { method: 'PUT', body }),
+
   updateProfile: (body: {
     displayName?: string;
     bio?: string;
@@ -275,10 +296,12 @@ export const api = {
     if (params.mine) search.set('mine', '1');
     if (params.q) search.set('q', params.q);
     const suffix = search.toString();
-    return request<WorldSummary[]>(`/worlds${suffix ? `?${suffix}` : ''}`, { auth: false });
+    // "My worlds" is account-scoped; public discovery stays anonymous.
+    return request<WorldSummary[]>(`/worlds${suffix ? `?${suffix}` : ''}`, { auth: params.mine === true });
   },
 
-  world: (id: string) => request<WorldSummary>(`/worlds/${id}`, { auth: false }),
+  // Send the session when available so owner/editor flags and state are correct.
+  world: (id: string) => request<WorldSummary>(`/worlds/${id}`),
 
   createWorld: (body: { name: string; kind: WorldKind; access: WorldAccess; description?: string }) =>
     request<WorldSummary>('/worlds', { method: 'POST', body }),
