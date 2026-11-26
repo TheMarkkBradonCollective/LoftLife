@@ -22,11 +22,15 @@ jobs:
       - name: Validate Cloudflare Worker bundle
         run: npx --yes wrangler@4 deploy --dry-run --outdir .wrangler-out
 
-      - name: Package Worker bundle for deployment
+      - name: Bundle Worker entrypoint
+        run: npx esbuild src/cloudflare/worker.ts --bundle --format=esm --platform=browser --target=es2022 --external:node:* --outfile=worker.js
+      - name: Package Worker and static assets for deployment
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: loftlife-worker-bundle
-          path: .wrangler-out/
+          path: |
+            worker.js
+            dist/
           if-no-files-found: error
           retention-days: 3
