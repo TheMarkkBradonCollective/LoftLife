@@ -696,7 +696,14 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     [gameplayAllowed, hallwayFloor, playerSuiteFloor, playerSuiteNumber, roomName, showHint, touchDevice]
   );
 
+  const handleEnterGuestRoom = useCallback(() => {
+    if (session.status !== 'guest') return;
+    setRoomName('Guest Room'); setRoomDoorUnlocked(true); setActiveResident(null); setMode('walk'); setLocation('room');
+    showHint('Your Guest Room is private and saved only on this device.');
+  }, [session.status, showHint]);
+
   const handleUnlockRoomDoor = useCallback(() => {
+    if (session.status === 'guest') { showHint('Guest visits cannot enter shared resident suites.'); return; }
     setRoomDoorUnlocked(true);
     setUnlockedRooms((prev) =>
       prev.includes(playerSuiteNumber) ? prev : [...prev, playerSuiteNumber]
@@ -704,6 +711,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   }, [playerSuiteNumber]);
 
   const handleUnlockHallwayDoor = useCallback((roomNumber: string) => {
+    if (session.status === 'guest') { showHint('Guest visits cannot enter shared resident suites.'); return; }
     setUnlockedRooms((prev) => (prev.includes(roomNumber) ? prev : [...prev, roomNumber]));
     if (roomNumber === playerSuiteNumber) {
       setRoomDoorUnlocked(true);
@@ -712,6 +720,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
 
   const handleEnterSuiteFromHallway = useCallback(
     (roomNumber: string) => {
+      if (session.status === 'guest') { showHint('Guest visits do not include shared hotel rooms.'); return; }
       if (!gameplayAllowed) {
         showHint(MOBILE_GAMEPLAY_MESSAGE);
         return;
@@ -739,6 +748,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   );
 
   const handleUnlockMainWithKeycard = useCallback(() => {
+    if (session.status === 'guest') { showHint('Guest visits do not include shared hotel rooms.'); return; }
     setMainDoorUnlocked(true);
     setRoomDoorUnlocked(true);
     setUnlockedRooms((prev) =>
@@ -750,6 +760,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
 
   const handleUnlockMainFromResident = useCallback(
     (resident: ActiveResident) => {
+      if (session.status === 'guest') { showHint('Guest visits do not include shared hotel rooms.'); return; }
       setMainDoorUnlocked(true);
       setTargetVisitResident(resident);
       setUnlockedRooms((prev) =>
@@ -1454,6 +1465,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       >
       <RoomViewport
         location={location}
+        guestMode={session.status === 'guest'}
         hallwayFloor={hallwayFloor}
         playerSuiteNumber={playerSuiteNumber}
         playerSuiteFloor={playerSuiteFloor}
@@ -2537,6 +2549,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
         location={location}
+        guestMode={session.status === 'guest'}
+        onEnterGuestRoom={handleEnterGuestRoom}
         world={activeWorld}
         suite={session.suite}
         roomName={roomName}
