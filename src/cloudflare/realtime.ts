@@ -360,6 +360,97 @@ export class LoftLifeRealtime {
     }
     error(ws,'bad_request','Unknown transit action');
   }
+  private async partyData(): Promise<{ parties: Record<string,{id:string;leaderId:string;members:string[];invites:string[];createdAt:number}>; memberParty: Record<string,string> }> {
+    return await this.ctx.storage.get('party_state') ?? { parties: {}, memberParty: {} };
+  }
+  private async partyView(party: {id:string;leaderId:string;members:string[];invites:string[];createdAt:number} | null) {
+    if (!party) return null;
+    const ids=[...new Set([...party.members,...party.invites])];
+    const rows=ids.length ? await this.database().query(
+      'SELECT a.id,a.handle,COALESCE(p.display_name,a.handle) AS display_name FROM ll_accounts a LEFT JOIN ll_profiles p ON p.user_id=a.id WHERE a.id = ANY($1::text[])',
+      [ids]
+    ) as Array<{id:string;handle:string;display_name:string}> : [];
+    const cards=new Map(rows.map(row=>[row.id,{userId:row.id,handle:row.handle,displayName:row.display_name}]));
+    return {id:party.id,leaderId:party.leaderId,members:party.members.map(id=>cards.get(id)).filter(Boolean),invites:party.invites.map(id=>cards.get(id)).filter(Boolean),maxMembers:8,createdAt:party.createdAt};
+  }
+  private async partyState(userId: string) {
+    const state=await this.partyData();
+    const currentId=state.memberParty[userId];
+    const current=currentId?state.parties[currentId]??null:null;
+    const pending=Object.values(state.parties).filter(party=>party.invites.includes(userId)).sort((a,b)=>b.createdAt-a.createdAt);
+    return {party:await this.partyView(current),invites:await Promise.all(pending.map(party=>this.partyView(party)))};
+  }
+  private async partyAction(userId:string,action:string,handle?:string,targetUserId?:string) {
+    const state=await this.partyData();
+    const oldId=state.memberParty[userId];
+    const oldParty=oldId?state.parties[oldId]??null:null;
+    const notify=new Set<string>(oldParty?[...oldParty.members,...oldParty.invites]:[userId]);
+    const conflict=(message:string)=>({error:message,code:'conflict',status:409});
+    const bad=(message:string)=>({error:message,code:'bad_request',status:400});
+    const forbidden=(message:string)=>({error:message,code:'forbidden',status:403});
+    const missing=(message:string)=>({error:message,code:'not_found',status:404});
+    if(action==='create'){
+      if(oldParty)return conflict('You are already in a party');
+      const party={id:`party_${crypto.randomUUID()}`,leaderId:userId,members:[userId],invites:[],createdAt:Date.now()};
+      state.parties[party.id]=party;state.memberParty[userId]=party.id;notify.add(userId);
+    } else if(action==='invite'){
+      if(!oldParty)return bad('Create or join a party first');
+      const cleaned=String(handle??'').trim().replace(/^@/,'').toLowerCase();
+      if(!cleaned)return bad('A player handle is required');
+      const targets=await this.database().query('SELECT id FROM ll_accounts WHERE handle=$1 LIMIT 1',[cleaned]) as Array<{id:string}>;
+      if(!targets[0])return missing('No player with that handle');
+      const target=targets[0].id;
+      if(target===userId)return bad('You are already in this party');
+      if(oldParty.members.includes(target))return conflict('That player is already in your party');
+      if(oldParty.members.length>=8)return conflict('This party is full');
+      const blocked=await this.database().query('SELECT 1 FROM ll_blocks WHERE (user_id=$1 AND blocked_id=$2) OR (user_id=$2 AND blocked_id=$1) LIMIT 1',[userId,target]);
+      if(blocked.length)return forbidden('You cannot invite this player');
+      if(!oldParty.invites.includes(target))oldParty.invites.push(target);
+      notify.add(target);
+    } else if(action==='accept'||action==='join'){
+      if(oldParty)return conflict('Leave your current party first');
+      const pending=Object.values(state.parties).filter(party=>party.invites.includes(userId)).sort((a,b)=>b.createdAt-a.createdAt);
+      const party=pending[0];
+      if(!party)return missing('No pending party invitation');
+      if(party.members.length>=8)return conflict('That party is full');
+      party.invites=party.invites.filter(id=>id!==userId);party.members.push(userId);state.memberParty[userId]=party.id;
+      for(const id of [...party.members,...party.invites])notify.add(id);
+    } else if(action==='leave'){
+      if(!oldParty)return {party:null,invites:[],notifyUserIds:[userId]};
+      oldParty.members=oldParty.members.filter(id=>id!==userId);oldParty.invites=oldParty.invites.filter(id=>id!==userId);delete state.memberParty[userId];
+      if(!oldParty.members.length)delete state.parties[oldParty.id];
+      else if(oldParty.leaderId===userId)oldParty.leaderId=oldParty.members[0];
+    } else if(action==='kick'){
+      if(!oldParty)return bad('You are not in a party');
+      if(oldParty.leaderId!==userId)return forbidden('Only the party leader can remove members');
+      const target=String(targetUserId??'');
+      if(target===userId)return bad('Leaders leave the party instead of kicking themselves');
+      if(!oldParty.members.includes(target))return missing('That player is not in your party');
+      oldParty.members=oldParty.members.filter(id=>id!==target);delete state.memberParty[target];notify.add(target);
+    } else return bad('Unknown party action');
+    await this.ctx.storage.put('party_state',state);
+    const snapshot=await this.partyState(userId);
+    for(const id of snapshot.party?.members.map(member=>member.userId)??[])notify.add(id);
+    for(const party of snapshot.invites)for(const member of party?.invites??[])notify.add(member.userId);
+    return {...snapshot,notifyUserIds:[...notify]};
+  }
+  private async handleParty(ws:HibernatableWebSocket,player:Player,message:Record<string,unknown>) {
+    const namespace=this.env.REALTIME;
+    if(!namespace){error(ws,'party_unavailable','Party service is not configured');return;}
+    const id=namespace.idFromName('party:global');
+    const response=await namespace.get(id).fetch(new Request('https://loftlife-internal/internal/party/action',{
+      method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({userId:player.userId,action:String(message.action??''),handle:message.handle,targetUserId:message.userId}),
+    }));
+    const result=await response.json() as {error?:string;code?:string;party?:unknown;invites?:unknown[];notifyUserIds?:string[]};
+    if(!response.ok){error(ws,result.code??'party_error',result.error??'Party action failed');return;}
+    const notify=new Set(result.notifyUserIds??[player.userId]);
+    for(const peer of this.ctx.getWebSockets()){
+      const state=peer.deserializeAttachment() as Player|undefined;
+      if(state?.userId&&notify.has(state.userId))send(peer,{t:'party',party:result.party??null,invites:result.invites??[]});
+    }
+  }
+
   private async chat(ws: HibernatableWebSocket, player: Player, message: Record<string, unknown>) {
     const body = typeof message.body === 'string' ? message.body.trim().slice(0, MAX_CHAT_LENGTH) : '';
     if (!body) return;
