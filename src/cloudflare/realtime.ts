@@ -5,6 +5,7 @@ import { TRANSIT_LINES } from './transit';
 interface Env {
   DATABASE_URL?: string;
   LOFTLIFE_SESSION_SECRET?: string;
+  REALTIME?: { idFromName(name: string): unknown; get(id: unknown): { fetch(request: Request): Promise<Response> } };
 }
 type Sql = { query(query: string, params?: unknown[]): Promise<unknown[]> };
 type Player = {
@@ -44,6 +45,7 @@ interface HibernatableWebSocket extends WebSocket {
 interface DurableObjectStateLike {
   acceptWebSocket(socket: HibernatableWebSocket): void;
   getWebSockets(): HibernatableWebSocket[];
+  storage: { get<T>(key: string): Promise<T | undefined>; put(key: string, value: unknown): Promise<void> };
 }
 declare class WebSocketPair {
   0: WebSocket;
@@ -63,6 +65,18 @@ export class LoftLifeRealtime {
 
   async fetch(request: Request): Promise<Response> {
     const requestUrl = new URL(request.url);
+    if (requestUrl.pathname === '/internal/party/state' && request.method === 'POST') {
+      const body = await request.json().catch(() => ({})) as { userId?: string };
+      if (!body.userId) return new Response('userId required',{status:400});
+      return Response.json(await this.partyState(body.userId));
+    }
+    if (requestUrl.pathname === '/internal/party/action' && request.method === 'POST') {
+      const body = await request.json().catch(() => ({})) as { userId?: string; action?: string; handle?: string; targetUserId?: string };
+      if (!body.userId) return new Response('userId required',{status:400});
+      const result = await this.partyAction(body.userId, body.action ?? '', body.handle, body.targetUserId);
+      if ('error' in result) return Response.json({error:result.error,code:result.code},{status:result.status});
+      return Response.json(result);
+    }
     if (requestUrl.pathname === '/internal/presence') {
       const players = this.players('city:main');
       return new Response(JSON.stringify({
@@ -143,6 +157,9 @@ export class LoftLifeRealtime {
         return;
       case 'transit':
         this.transit(ws, player, message);
+        return;
+      case 'party':
+        await this.handleParty(ws, player, message);
         return;
       case 'ping':
         send(ws, { t: 'pong', at: Date.now() });
