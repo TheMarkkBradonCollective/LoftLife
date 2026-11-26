@@ -17,7 +17,14 @@ export const AuthGate: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
   const [password, setPassword] = useState('');
 
   useEffect(() => {
-    if (status === 'online') onClose?.();
+    if (status !== 'online') return;
+    if (onClose) {
+      onClose();
+    } else if (window.location.hash && window.location.hash !== '#/') {
+      // Signing in from the platform always lands on Home, never on a stale
+      // deep link or straight into a world.
+      window.location.hash = '#/';
+    }
   }, [status, onClose]);
 
   const submit = async (event: React.FormEvent) => {
@@ -64,8 +71,8 @@ export const AuthGate: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
           <h1 className="font-display text-2xl font-bold text-[#39ff14] tracking-tight">LoftLife</h1>
         </div>
         <p className="text-xs text-slate-400 mb-5">
-          Bringing your character online keeps the name, outfit and suite from this device and lets
-          other people see them. You can keep playing offline for as long as you like.
+          Sign in to open your dashboard, messages, friends and destinations. Your character, outfit
+          and suite from this device come online with you. You can also keep playing offline.
         </p>
 
         <div className="flex gap-1 p-1 rounded-xl border border-white/10 mb-4">

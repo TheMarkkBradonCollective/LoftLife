@@ -65,6 +65,7 @@ export function PlatformLayout({
 
   const logout = async () => {
     await session.logout();
+    onNavigate('home');
     setAuthOpen(true);
   };
 
@@ -224,7 +225,10 @@ export function PlatformLayout({
             {!online && (
               <button
                 type="button"
-                onClick={() => setAuthOpen(true)}
+                onClick={() => {
+                  onNavigate('home');
+                  setAuthOpen(true);
+                }}
                 className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/25 bg-amber-400/8 px-2.5 py-1 text-[10px] font-semibold text-amber-100 hover:bg-amber-400/15"
               >
                 <WifiOff className="h-3 w-3" />

@@ -1472,7 +1472,15 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         {onExitPlatform && (
           <button
             type="button"
-            onClick={onExitPlatform}
+            onClick={() => {
+              // A player-built world has its own save-confirm path; finish it
+              // before the platform takes over so edits are not discarded.
+              if (activeWorld) {
+                void handleLeaveWorldConfirmed().then(() => onExitPlatform?.());
+              } else {
+                onExitPlatform?.();
+              }
+            }}
             title="Leave this destination and return to the LoftLife platform"
             aria-label="Exit to LoftLife"
             className="px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-[#0b100d]/95 text-slate-200 border-white/15 hover:bg-[#131d17]"
