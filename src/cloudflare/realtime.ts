@@ -54,6 +54,15 @@ export class LoftLifeRealtime {
   }
 
   async fetch(request: Request): Promise<Response> {
+    const requestUrl = new URL(request.url);
+    if (requestUrl.pathname === '/internal/presence') {
+      const players = this.players('city:main');
+      return new Response(JSON.stringify({
+        online: players.length,
+        instances: [{ id: 'city:main', kind: 'city', worldId: null, capacity: MAX_PLAYERS, count: players.length }],
+        cityCapacity: MAX_PLAYERS,
+      }), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    }
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return new Response('Expected WebSocket upgrade', { status: 426 });
     }
