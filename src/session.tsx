@@ -40,7 +40,12 @@ import {
   type TransitLine,
   type TransitVehicle,
 } from './net/realtime';
-import { VoiceManager, type VoiceMode, type VoiceStatus } from './net/voice';
+import {
+  VoiceManager,
+  type VoiceInputMode,
+  type VoiceMode,
+  type VoiceStatus,
+} from './net/voice';
 
 export type SessionStatus = 'loading' | 'anonymous' | 'online' | 'offline';
 
@@ -89,6 +94,7 @@ interface SessionValue {
   voiceStatus: VoiceStatus;
   voiceMode: VoiceMode;
   voicePushToTalk: boolean;
+  voiceInputMode: VoiceInputMode;
   login: (identifier: string, password: string) => Promise<void>;
   register: (payload: {
     handle: string;
@@ -129,6 +135,7 @@ interface SessionValue {
   disableVoice: () => void;
   setVoiceMode: (mode: VoiceMode) => void;
   setPushToTalk: (on: boolean) => void;
+  setVoiceInputMode: (mode: VoiceInputMode) => void;
 }
 
 const EMPTY_WALLET: Wallet = { yuanzi: 0, tongbao: 0 };
@@ -166,6 +173,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('off');
   const [voiceMode, setVoiceModeState] = useState<VoiceMode>('say');
   const [voicePushToTalk, setVoicePushToTalkState] = useState(false);
+  const [voiceInputMode, setVoiceInputModeState] = useState<VoiceInputMode>('push');
 
   const realtimeRef = useRef<RealtimeClient | null>(null);
   const selfConnRef = useRef<string | null>(null);
@@ -630,6 +638,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     voiceRef.current?.setPushToTalk(on);
   }, []);
 
+  const setVoiceInputMode = useCallback((mode: VoiceInputMode) => {
+    setVoiceInputModeState(mode);
+    voiceRef.current?.setOpenMic(mode === 'open');
+  }, []);
+
   const value = useMemo<SessionValue>(
     () => ({
       status,
@@ -657,6 +670,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       voiceStatus,
       voiceMode,
       voicePushToTalk,
+      voiceInputMode,
       login,
       register,
       continueOffline,
@@ -681,6 +695,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       disableVoice,
       setVoiceMode,
       setPushToTalk,
+      setVoiceInputMode,
     }),
     [
       status,
@@ -708,6 +723,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       voiceStatus,
       voiceMode,
       voicePushToTalk,
+      voiceInputMode,
       login,
       register,
       continueOffline,
@@ -732,6 +748,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       disableVoice,
       setVoiceMode,
       setPushToTalk,
+      setVoiceInputMode,
     ]
   );
 

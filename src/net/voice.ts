@@ -3,14 +3,18 @@
  *
  * The server only relays SDP/ICE between players in the same instance; audio
  * flows peer-to-peer. Voice is opt-in: nothing is captured until the player
- * enables it, and the microphone track stays disabled unless push-to-talk is
- * held. Audibility follows the same bands as text chat (whisper 4 m, say 14 m,
- * shout 35 m), so the spatial rules are consistent.
+ * enables it. Two input modes are supported: `open` keeps the microphone live
+ * (voice activity, the phone default) and `push` only transmits while a
+ * push-to-talk key or the on-screen hold button is down. Audibility follows
+ * the same bands as text chat (whisper 4 m, say 14 m, shout 35 m), so the
+ * spatial rules are consistent.
  */
 import type { RemotePlayer, VoiceSignal } from './realtime';
 
 export type VoiceStatus = 'off' | 'requesting' | 'ready' | 'denied' | 'unsupported';
 export type VoiceMode = 'whisper' | 'say' | 'shout';
+/** `open` is voice activity (live mic); `push` transmits only while held. */
+export type VoiceInputMode = 'open' | 'push';
 
 const ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
 const MAX_HEARING_RANGE = 35;
@@ -36,6 +40,7 @@ export class VoiceManager {
   status: VoiceStatus = 'off';
   voiceMode: VoiceMode = 'say';
   pushToTalk = false;
+  openMic = false;
 
   private localStream: MediaStream | null = null;
   private peers = new Map<string, PeerEntry>();
@@ -77,9 +82,7 @@ export class VoiceManager {
           autoGainControl: true,
         },
       });
-      for (const track of this.localStream.getAudioTracks()) {
-        track.enabled = this.pushToTalk;
-      }
+      this.applyTrackEnabled();
       this.status = 'ready';
     } catch {
       this.status = 'denied';
@@ -98,11 +101,21 @@ export class VoiceManager {
     this.emit();
   }
 
+  /** Open mic transmits whenever voice is on; push-to-talk only while held. */
+  setOpenMic(on: boolean) {
+    this.openMic = on;
+    this.applyTrackEnabled();
+  }
+
+  private applyTrackEnabled() {
+    if (!this.localStream) return;
+    const enabled = this.openMic || this.pushToTalk;
+    for (const track of this.localStream.getAudioTracks()) track.enabled = enabled;
+  }
+
   setPushToTalk(on: boolean) {
     this.pushToTalk = on;
-    if (this.localStream) {
-      for (const track of this.localStream.getAudioTracks()) track.enabled = on;
-    }
+    this.applyTrackEnabled();
   }
 
   setVoiceMode(mode: VoiceMode) {

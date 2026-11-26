@@ -126,7 +126,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         {voiceEnabled && (
           <button
             type="button"
-            aria-label="Push to talk"
+            aria-label="Hold to talk"
+            title="Hold to talk"
             className="w-14 h-14 rounded-full bg-sky-500 text-white border border-sky-300 shadow-lg flex items-center justify-center touch-none active:scale-95"
             onPointerDown={(event) => {
               event.currentTarget.setPointerCapture(event.pointerId);

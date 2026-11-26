@@ -290,13 +290,14 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld }) => {
                       title="Distance band for proximity text and voice"
                     >
                       <option value="whisper">Whisper 4m</option>
-                      <option value="say">Say 14m</option>
+                      <option value="say">Talk 14m</option>
                       <option value="shout">Shout 35m</option>
                     </select>
                   )}
                   {chatTab === 'city' && (
                     <span className="ml-auto text-[10px] text-slate-500 font-mono-tabular">
-                      voice {voiceMode} · {voiceStatus === 'ready' ? 'on' : 'off'}
+                      voice{' '}
+                      {voiceMode === 'say' ? 'talk' : voiceMode} · {voiceStatus === 'ready' ? 'on' : 'off'}
                     </span>
                   )}
                 </div>

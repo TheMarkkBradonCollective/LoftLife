@@ -1,7 +1,8 @@
-import React from 'react';
-import { Eye, Footprints, Move, PencilRuler, Smartphone, X } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Eye, Footprints, Keyboard, Mic, Move, PencilRuler, Radio, Smartphone, X } from 'lucide-react';
 import { sfx } from '../game/audio';
 import type { GameMode } from '../game/types';
+import type { VoiceInputMode, VoiceMode } from '../net/voice';
 
 interface RoomSettingsModalProps {
   open: boolean;
@@ -11,6 +12,13 @@ interface RoomSettingsModalProps {
   canEdit: boolean;
   touchDevice: boolean;
   isPortrait: boolean;
+  voiceInputMode: VoiceInputMode;
+  voiceMode: VoiceMode;
+  voiceReady: boolean;
+  pushToTalkKeyLabel: string;
+  onVoiceInputModeChange: (mode: VoiceInputMode) => void;
+  onVoiceModeChange: (mode: VoiceMode) => void;
+  onPushToTalkKeyChange: (code: string) => void;
   onEnterEdit: () => void;
   onExitEdit: () => void;
   onClose: () => void;
@@ -42,13 +50,48 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
   canEdit,
   touchDevice,
   isPortrait,
+  voiceInputMode,
+  voiceMode,
+  voiceReady,
+  pushToTalkKeyLabel,
+  onVoiceInputModeChange,
+  onVoiceModeChange,
+  onPushToTalkKeyChange,
   onEnterEdit,
   onExitEdit,
   onClose,
 }) => {
+  const [capturingKey, setCapturingKey] = useState(false);
+
+  useEffect(() => {
+    if (!open) setCapturingKey(false);
+  }, [open]);
+
+  // Rebind the desktop talk key by pressing it. Capture phase so the game's
+  // movement and shortcut handlers never see the chosen key.
+  useEffect(() => {
+    if (!capturingKey) return;
+    const onKey = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.code === 'Escape') {
+        setCapturingKey(false);
+        return;
+      }
+      onPushToTalkKeyChange(event.code);
+      setCapturingKey(false);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [capturingKey, onPushToTalkKeyChange]);
+
   if (!open) return null;
 
   const editing = mode === 'edit';
+  const segment = (active: boolean) =>
+    `px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${
+      active ? 'bg-[#39ff14] text-[#051205]' : 'text-slate-300 hover:bg-white/10'
+    }`;
 
   return (
     <div
@@ -183,6 +226,114 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
                 >
                   {canEdit ? (editing ? 'Editing' : 'Owner') : 'Visiting'}
                 </span>
+              </div>
+            </div>
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-[11px] font-bold uppercase tracking-widest text-[#39ff14]/70">
+              Voice
+            </h3>
+
+            <div className="rounded-xl border border-white/10 bg-[#101713] divide-y divide-white/8">
+              <div className={rowClass}>
+                <RowLabel
+                  icon={<Mic className="w-3.5 h-3.5" />}
+                  label="Microphone"
+                  detail={
+                    !voiceReady
+                      ? 'Turn voice on from the mic button in the top bar'
+                      : voiceInputMode === 'open'
+                      ? touchDevice
+                        ? 'Mic stays live · hold the mic button to talk'
+                        : 'Mic stays live while voice is on'
+                      : touchDevice
+                      ? 'Hold the mic button to talk'
+                      : `Hold ${pushToTalkKeyLabel} to talk`
+                  }
+                />
+                <div className="flex items-center rounded-lg border border-white/12 overflow-hidden shrink-0">
+                  <button
+                    type="button"
+                    aria-pressed={voiceInputMode === 'open'}
+                    onClick={() => {
+                      sfx.playClick();
+                      onVoiceInputModeChange('open');
+                    }}
+                    className={segment(voiceInputMode === 'open')}
+                  >
+                    Open
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={voiceInputMode === 'push'}
+                    onClick={() => {
+                      sfx.playClick();
+                      onVoiceInputModeChange('push');
+                    }}
+                    className={segment(voiceInputMode === 'push')}
+                  >
+                    {touchDevice ? 'Hold' : 'Push'}
+                  </button>
+                </div>
+              </div>
+
+              {!touchDevice && voiceInputMode === 'push' && (
+                <div className={rowClass}>
+                  <RowLabel
+                    icon={<Keyboard className="w-3.5 h-3.5" />}
+                    label="Talk key"
+                    detail="Click the key, then press the one you want"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sfx.playClick();
+                      setCapturingKey(true);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border shrink-0 transition-colors ${
+                      capturingKey
+                        ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]'
+                        : 'bg-white/10 text-slate-100 border-white/15 hover:bg-white/20'
+                    }`}
+                  >
+                    {capturingKey ? 'Press a key…' : pushToTalkKeyLabel}
+                  </button>
+                </div>
+              )}
+
+              <div className="px-3.5 py-3 space-y-2">
+                <RowLabel
+                  icon={<Radio className="w-3.5 h-3.5" />}
+                  label="Range"
+                  detail="Whisper 4 m · Talk 14 m · Shout 35 m"
+                />
+                <div className="grid grid-cols-3 rounded-lg border border-white/12 overflow-hidden">
+                  {(
+                    [
+                      { id: 'whisper' as VoiceMode, label: 'Whisper' },
+                      { id: 'say' as VoiceMode, label: 'Talk' },
+                      { id: 'shout' as VoiceMode, label: 'Shout' },
+                    ] as const
+                  ).map((entry) => (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      aria-pressed={voiceMode === entry.id}
+                      onClick={() => {
+                        sfx.playClick();
+                        onVoiceModeChange(entry.id);
+                      }}
+                      className={`py-2 text-[11px] font-semibold transition-colors ${
+                        voiceMode === entry.id
+                          ? 'bg-[#39ff14] text-[#051205]'
+                          : 'text-slate-300 hover:bg-white/10'
+                      }`}
+                    >
+                      {entry.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </section>
