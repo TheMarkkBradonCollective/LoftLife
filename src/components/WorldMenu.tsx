@@ -730,7 +730,7 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                 </dl>
                 {world && (
                   <div className="flex flex-wrap gap-2 border-t border-white/8 pt-3">
-                    {canManage && world.status !== 'live' && (
+                    {canManage && world.status !== 'live' && !['build_mode','build_pending','maintenance'].includes(world.status) && (
                       <button type="button" disabled={memberBusy} onClick={() => void changeWorldStatus('live')} className="px-3 py-1.5 rounded-lg bg-[#39ff14] text-[#051205] text-xs font-bold disabled:opacity-40">Go Live</button>
                     )}
                     {canManage && world.status !== 'available' && (
