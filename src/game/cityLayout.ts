@@ -56,6 +56,7 @@ export interface CityLayout {
   airportArrivalPos: { x: number; z: number };
   airportDeparturePos: { x: number; z: number };
   airportShopPos: { x: number; z: number };
+  salonPos: { x: number; z: number };
   bounds: { zMin: number; zMax: number; uMin: number; uMax: number };
 }
 
@@ -210,6 +211,7 @@ export function buildCityLayout(): CityLayout {
   const airportArrivalPos = { x: airportCenterX, z: airportMidZ + 7.2 };
   const airportDeparturePos = { x: airportCenterX + 4.4, z: airportMidZ + 6.5 };
   const airportShopPos = { x: airportCenterX - 4.4, z: airportMidZ + 6.5 };
+  const salonPos = { x: loftCenterX - 7.4, z: loftCenterZ + 5.4 };
 
   // Major intersections get working Traffic Lights
   const signalIntersections: TrafficSignalIntersection[] = [];
@@ -277,6 +279,7 @@ export function buildCityLayout(): CityLayout {
     airportArrivalPos,
     airportDeparturePos,
     airportShopPos,
+    salonPos,
     bounds: {
       uMin: uLines[0] - 8.0,
       uMax: uLines[uLines.length - 1] + 8.0,

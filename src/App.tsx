@@ -1517,6 +1517,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onEnterGuestRoom={handleEnterGuestRoom}
         onOpenCloset={() => { setAvatarStudioMode('closet'); setAvatarModalOpen(true); }}
         onOpenBathroomMirror={() => { setAvatarStudioMode('hair'); setAvatarModalOpen(true); }}
+        onOpenSalon={() => { setAvatarStudioMode('hair'); setAvatarModalOpen(true); }}
         onOpenElevator={() => setElevatorModalOpen(true)}
         onUnlockRoomDoor={handleUnlockRoomDoor}
         onUnlockHallwayDoor={handleUnlockHallwayDoor}

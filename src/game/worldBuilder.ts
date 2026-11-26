@@ -485,6 +485,7 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     airportCenter,
     airportDeparturePos,
     airportShopPos,
+    salonPos,
   } = CITY_LAYOUT;
 
   // 0. Atmospheric Sky Dome
@@ -1610,6 +1611,28 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
   obstacles.push({type:'box',x:airportCenter.x,z:airportCenter.z-1.0,hw:7.15,hd:3.65});
   obstacles.push({type:'box',x:airportShopPos.x,z:airportShopPos.z-1.7,hw:1.2,hd:0.48});
   obstacles.push({type:'box',x:airportDeparturePos.x,z:airportDeparturePos.z-1.7,hw:1.2,hd:0.48});
+
+  // 10b. Walk-up salon in the central plaza district.
+  const salonGroup = new THREE.Group();
+  salonGroup.position.set(salonPos.x, 0.12, salonPos.z);
+  const salonWall = new THREE.MeshStandardMaterial({ color: 0xe9e3dc, roughness: 0.72 });
+  const salonDark = new THREE.MeshStandardMaterial({ color: 0x263038, roughness: 0.42, metalness: 0.18 });
+  const salonGlass = new THREE.MeshPhysicalMaterial({ color: 0xb7d7dc, roughness: 0.12, metalness: 0.12, transparent: true, opacity: 0.72 });
+  const salonBody = new THREE.Mesh(new THREE.BoxGeometry(5.2, 3.4, 3.4), salonWall);
+  salonBody.position.set(0, 1.7, -0.45); salonBody.castShadow = true; salonGroup.add(salonBody);
+  const salonRoof = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.24, 3.7), salonDark);
+  salonRoof.position.set(0, 3.45, -0.45); salonGroup.add(salonRoof);
+  const salonWindow = new THREE.Mesh(new THREE.BoxGeometry(3.5, 1.8, 0.08), salonGlass);
+  salonWindow.position.set(0, 1.9, 1.28); salonGroup.add(salonWindow);
+  const salonSignCanvas = document.createElement('canvas'); salonSignCanvas.width = 512; salonSignCanvas.height = 128;
+  const salonSignCtx = salonSignCanvas.getContext('2d')!; salonSignCtx.fillStyle = '#263038'; salonSignCtx.fillRect(0,0,512,128);
+  salonSignCtx.fillStyle = '#ffffff'; salonSignCtx.font = 'bold 62px sans-serif'; salonSignCtx.textAlign = 'center'; salonSignCtx.fillText('THE SALON',256,84);
+  const salonSign = new THREE.Mesh(new THREE.PlaneGeometry(3.2,0.8),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(salonSignCanvas)}));
+  salonSign.position.set(0,2.95,1.34); salonGroup.add(salonSign);
+  const salonAccent = new THREE.Mesh(new THREE.BoxGeometry(3.7,0.07,0.1),new THREE.MeshStandardMaterial({color:0x39ff14,emissive:0x39ff14,emissiveIntensity:0.45}));
+  salonAccent.position.set(0,2.43,1.36); salonGroup.add(salonAccent);
+  worldGroup.add(salonGroup);
+  obstacles.push({type:'box',x:salonPos.x,z:salonPos.z-0.45,hw:2.65,hd:1.75});
 
   // 11. Animated City Visitors / NPCs
   const npcSpecs: {

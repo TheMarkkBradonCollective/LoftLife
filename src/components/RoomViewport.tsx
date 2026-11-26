@@ -171,6 +171,7 @@ interface RoomViewportProps {
   onEnterGuestRoom: () => void;
   onOpenCloset: () => void;
   onOpenBathroomMirror: () => void;
+  onOpenSalon: () => void;
   onOpenElevator: () => void;
   onUnlockRoomDoor: () => void;
   onUnlockHallwayDoor: (roomNumber: string) => void;
@@ -284,6 +285,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   onEnterGuestRoom,
   onOpenCloset,
   onOpenBathroomMirror,
+  onOpenSalon,
   onOpenElevator,
   onUnlockRoomDoor,
   onUnlockHallwayDoor,
@@ -356,6 +358,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onEnterGuestRoom,
     onOpenCloset,
     onOpenBathroomMirror,
+    onOpenSalon,
     onOpenElevator,
     onUnlockRoomDoor,
     onUnlockHallwayDoor,
@@ -412,6 +415,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onEnterGuestRoom,
     onOpenCloset,
     onOpenBathroomMirror,
+    onOpenSalon,
     onOpenElevator,
     onUnlockRoomDoor,
     onUnlockHallwayDoor,
@@ -1216,6 +1220,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       }
       if (Math.hypot(av.x - CITY_LAYOUT.airportDeparturePos.x, av.z - CITY_LAYOUT.airportDeparturePos.z) < 2.25) {
         return { label: actionLabel('Take a flight'), execute: () => { releaseCursorForModal(); propsRef.current.onOpenAirportDeparture(); } };
+      }
+      if (Math.hypot(av.x - CITY_LAYOUT.salonPos.x, av.z - CITY_LAYOUT.salonPos.z) < 3.0) {
+        return { label: actionLabel('Visit The Salon'), execute: () => { releaseCursorForModal(); propsRef.current.onOpenSalon(); } };
       }
       if (Math.hypot(av.x - mainWorld.loftDoorEntryPos.x, av.z - mainWorld.loftDoorEntryPos.z) < 2.5) {
         if (propsRef.current.guestMode) {
