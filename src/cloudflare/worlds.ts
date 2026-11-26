@@ -40,7 +40,6 @@ async function permission(sql: Sql, world: World, user: User | null) {
   }
   const canBuild = role === 'owner' || role === 'co_owner' || role === 'builder';
   const canManageStatus = role === 'owner' || role === 'co_owner';
-  if (role === 'owner') return { canEnter: true, canEdit: status === 'build_mode', canBuild, canManageStatus, role };
   if (status === 'maintenance') return { canEnter: false, canEdit: false, canBuild, canManageStatus, role };
   if (status === 'build_mode') {
     return { canEnter: canBuild, canEdit: canBuild, canBuild, canManageStatus, role };
@@ -51,6 +50,7 @@ async function permission(sql: Sql, world: World, user: User | null) {
   if (status === 'build_pending') {
     return { canEnter: false, canEdit: false, canBuild, canManageStatus, role };
   }
+  if (role === 'owner') return { canEnter: true, canEdit: false, canBuild, canManageStatus, role };
   if (status === 'live') {
     return { canEnter: true, canEdit: false, canBuild, canManageStatus, role };
   }
