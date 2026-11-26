@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowUp,
+  Camera,
   FastForward,
+  Hand,
   Maximize2,
   Map as MapIcon,
   MessageCircle,
@@ -40,6 +42,10 @@ interface TouchControlsProps {
   onToggleFollow: () => void;
   /** Opens the same M Map & World Menu. */
   onOpenMenu: () => void;
+  /** Context label from the viewport; null when nothing is in reach. */
+  actionLabel: string | null;
+  /** Dedicated drag-look area, only in third-person Play View. */
+  lookEnabled: boolean;
   /** Account/local touch layout preferences. */
   layout: { size: 'sm' | 'md' | 'lg'; handedness: 'right' | 'left'; opacity: number };
 }
@@ -53,6 +59,15 @@ const VOICE_RANGE_STYLE: Record<string, string> = {
   talk: 'bg-sky-500 text-white border-sky-300',
   shout: 'bg-amber-400 text-[#1a1005] border-amber-200',
 };
+
+function actionText(label: string | null): string | null {
+  if (!label) return null;
+  const text = label
+    .replace(/^Tap\s*·?\s*/i, '')
+    .replace(/^Press E\s*·?\s*/i, '')
+    .trim();
+  return text || null;
+}
 
 const INDICATOR_STYLE: Record<VoiceSnapshot['indicator'], { label: string; dot: string }> = {
   off: { label: 'Mic off', dot: 'bg-slate-500' },
@@ -94,14 +109,38 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
   onToggleZoom,
   onToggleFollow,
   onOpenMenu,
+  actionLabel,
+  lookEnabled,
   layout,
 }) => {
   const stickRef = useRef<HTMLDivElement>(null);
   const stickPointer = useRef<number | null>(null);
   const micPointer = useRef<number | null>(null);
+  const lookPointer = useRef<number | null>(null);
+  const lookLast = useRef({ x: 0, y: 0 });
   const [knob, setKnob] = useState({ x: 0, y: 0 });
   const [sprint, setSprint] = useState(false);
   const [micHeld, setMicHeld] = useState(false);
+  // On a narrow portrait phone the right-aligned camera row is wider than the
+  // free space beside the movement stick. Lift it above the stick and the
+  // voice bubble instead of letting the two overlap.
+  const [compactPortrait, setCompactPortrait] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      window.innerWidth < 640 &&
+      window.innerHeight >= window.innerWidth
+  );
+
+  useEffect(() => {
+    const update = () =>
+      setCompactPortrait(window.innerWidth < 640 && window.innerHeight >= window.innerWidth);
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+    };
+  }, []);
 
   // A modal can open mid-drag; the matching pointerup never arrives, so release
   // everything instead of leaving the character walking on its own.
@@ -109,6 +148,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
     if (active) return;
     stickPointer.current = null;
     micPointer.current = null;
+    lookPointer.current = null;
     setKnob({ x: 0, y: 0 });
     setSprint(false);
     setMicHeld(false);
@@ -117,6 +157,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
     touchInput.moveZ = 0;
     touchInput.sprint = false;
     touchInput.jump = false;
+    touchInput.lookDx = 0;
+    touchInput.lookDy = 0;
     // onMicRelease is a stable session callback.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
@@ -127,6 +169,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       touchInput.moveZ = 0;
       touchInput.sprint = false;
       touchInput.jump = false;
+      touchInput.lookDx = 0;
+      touchInput.lookDy = 0;
     },
     []
   );
@@ -162,32 +206,94 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
     touchInput.sprint = next;
   };
 
-  const sizeScale = layout.size === 'sm' ? 0.86 : layout.size === 'lg' ? 1.16 : 1;
+  const requestedScale = layout.size === 'sm' ? 0.86 : layout.size === 'lg' ? 1.16 : 1;
+  // A narrow portrait phone cannot fit four large buttons beside a large stick;
+  // keep the layout usable by treating Large as Standard there.
+  const sizeScale = compactPortrait ? Math.min(requestedScale, 1) : requestedScale;
   const stickSize = Math.round(STICK_SIZE * sizeScale);
   const stickRadius = STICK_RADIUS * sizeScale;
   const knobSize = Math.round(56 * sizeScale);
   const leftHanded = layout.handedness === 'left';
-  const stickSide = leftHanded ? { right: 20 } : { left: 20 };
-  const otherSide = leftHanded ? { left: 16 } : { right: 16 };
-  // The voice/camera cluster is always right-aligned. With a right-side stick
-  // it is lifted above the stick, which also keeps the Community launcher on
-  // the left clear.
-  const infoSide = { right: 16 };
-  const voiceBottom = leftHanded ? 17 : 9.75;
-  const cameraBottom = leftHanded
-    ? 24 + (sizeScale - 1) * 6
-    : 13.5 + (sizeScale - 1) * 18;
+  const stickSide = leftHanded
+    ? { right: 'calc(20px + env(safe-area-inset-right, 0px))' }
+    : { left: 'calc(20px + env(safe-area-inset-left, 0px))' };
+  const leftSide = { left: 'calc(16px + env(safe-area-inset-left, 0px))' };
+  const infoSide = { right: 'calc(16px + env(safe-area-inset-right, 0px))' };
+  const otherSide = leftHanded ? leftSide : infoSide;
+  // Right-handed: camera and voice stack on the right, above the stick.
+  // Left-handed portrait: voice stays above the right-side stick and the
+  // camera row moves left so it cannot collide with it. In left-handed
+  // landscape the camera sits above the stick on the right and the voice moves
+  // left, above the context row, which keeps both off the top bar.
+  const cameraOnLeft = leftHanded && compactPortrait;
+  const cameraCentered = !compactPortrait;
+  const voiceOnLeft = leftHanded && !compactPortrait;
+  const cameraSide = cameraOnLeft ? leftSide : infoSide;
+  const voiceSide = voiceOnLeft ? leftSide : infoSide;
+  const voiceBottom = leftHanded && compactPortrait ? 17 : 9.75;
+  // Landscape puts the camera row in the free bottom-center band between the
+  // stick and the context buttons. Portrait stacks it above the voice bubble
+  // on one side.
+  const cameraBottom = compactPortrait ? (leftHanded ? 22.5 : 17) : 6;
   const range = VOICE_RANGE_INFO[voice.range];
   const micMode = MIC_MODE_INFO[voice.micMode];
   const indicator = INDICATOR_STYLE[voice.indicator];
+  const contextLabel = actionText(actionLabel);
 
   return (
     <>
+      {/* Dedicated camera area: a compact strip above the stick. The rest of
+          the canvas stays free for taps, so this never swallows interactions. */}
+      {lookEnabled && (
+        <div
+          role="application"
+          aria-label="Camera look area — drag to rotate the camera"
+          className="fixed z-30 left-2 top-[14%] h-[20%] w-14 rounded-2xl border border-[#39ff14]/30 bg-[#0b100d]/55 backdrop-blur-sm touch-none select-none"
+          style={{
+            left: 'calc(8px + env(safe-area-inset-left, 0px))',
+            opacity: layout.opacity / 100,
+          }}
+          onPointerDown={(event) => {
+            lookPointer.current = event.pointerId;
+            lookLast.current = { x: event.clientX, y: event.clientY };
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            if (lookPointer.current !== event.pointerId) return;
+            const dx = event.clientX - lookLast.current.x;
+            const dy = event.clientY - lookLast.current.y;
+            lookLast.current = { x: event.clientX, y: event.clientY };
+            touchInput.lookDx += dx * 0.005;
+            touchInput.lookDy += dy * 0.004;
+          }}
+          onPointerUp={() => {
+            lookPointer.current = null;
+          }}
+          onPointerCancel={() => {
+            lookPointer.current = null;
+          }}
+          onLostPointerCapture={() => {
+            lookPointer.current = null;
+          }}
+        >
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 pointer-events-none text-[#39ff14]/80">
+            <Camera className="w-4 h-4" />
+            <span className="text-[9px] font-bold uppercase tracking-widest">Look</span>
+          </div>
+        </div>
+      )}
+
       {/* Virtual stick */}
       <div
         ref={stickRef}
         className="fixed bottom-24 z-40 rounded-full border border-[#39ff14]/40 bg-[#0b100d]/70 backdrop-blur-sm touch-none select-none"
-        style={{ width: stickSize, height: stickSize, opacity: layout.opacity / 100, ...stickSide }}
+        style={{
+          width: stickSize,
+          height: stickSize,
+          opacity: layout.opacity / 100,
+          bottom: 'calc(6rem + env(safe-area-inset-bottom, 0px))',
+          ...stickSide,
+        }}
         onPointerDown={(event) => {
           stickPointer.current = event.pointerId;
           event.currentTarget.setPointerCapture(event.pointerId);
@@ -223,11 +329,11 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       <div
         className="fixed z-40 flex flex-col items-end gap-1.5"
         style={{
-          ...infoSide,
-          bottom: `${voiceBottom}rem`,
+          ...voiceSide,
+          bottom: `calc(${voiceBottom}rem + env(safe-area-inset-bottom, 0px))`,
           opacity: layout.opacity / 100,
           transform: `scale(${sizeScale})`,
-          transformOrigin: 'bottom right',
+          transformOrigin: voiceOnLeft ? 'bottom left' : 'bottom right',
         }}
       >
         <div className="flex items-stretch rounded-2xl border border-[#39ff14]/30 bg-[#0b100d]/90 backdrop-blur-sm overflow-hidden shadow-lg">
@@ -309,15 +415,40 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       <div
         className="fixed z-40 flex items-center gap-1.5"
         style={{
-          ...infoSide,
+          ...(cameraCentered ? {} : cameraSide),
+          ...(cameraCentered ? { left: '50%', translate: '-50% 0' } : {}),
           // Larger controls grow upward; lift this row so it never covers the
           // voice bubble below it (and vice versa when left-handed).
-          bottom: `${cameraBottom}rem`,
+          bottom: `calc(${cameraBottom}rem + env(safe-area-inset-bottom, 0px))`,
           opacity: layout.opacity / 100,
           transform: `scale(${sizeScale})`,
-          transformOrigin: 'bottom right',
+          transformOrigin: cameraCentered
+            ? 'bottom center'
+            : cameraOnLeft
+            ? 'bottom left'
+            : 'bottom right',
         }}
       >
+        <button
+          type="button"
+          aria-label={
+            contextLabel ? `Interact: ${contextLabel}` : 'Nothing to interact with nearby'
+          }
+          aria-disabled={!contextLabel}
+          disabled={!contextLabel}
+          onClick={() => {
+            if (contextLabel) touchInput.interact = true;
+          }}
+          className={`h-10 px-2.5 rounded-xl border flex items-center gap-1.5 text-[10px] font-bold active:scale-95 transition-colors ${
+            contextLabel
+              ? 'bg-[#39ff14] text-[#051205] border-[#8eff78]'
+              : 'bg-[#0b100d]/85 text-slate-500 border-white/15'
+          }`}
+        >
+          <Hand className="w-3.5 h-3.5" />
+          {contextLabel ? 'Use' : 'Action'}
+        </button>
+
         {viewMode === 'isometric' && (
           <button
             type="button"
@@ -361,7 +492,13 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       {/* Contextual buttons */}
       <div
         className={`fixed bottom-24 z-40 flex flex-col gap-2 ${leftHanded ? 'items-start' : 'items-end'}`}
-        style={{ ...otherSide, opacity: layout.opacity / 100, transform: `scale(${sizeScale})`, transformOrigin: leftHanded ? 'bottom left' : 'bottom right' }}
+        style={{
+          ...otherSide,
+          bottom: 'calc(6rem + env(safe-area-inset-bottom, 0px))',
+          opacity: layout.opacity / 100,
+          transform: `scale(${sizeScale})`,
+          transformOrigin: leftHanded ? 'bottom left' : 'bottom right',
+        }}
       >
         <div className="flex items-center gap-2">
           <button

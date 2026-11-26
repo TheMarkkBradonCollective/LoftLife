@@ -348,11 +348,13 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const device = useDeviceEnvironment();
   const gameplayAllowed = device.gameplayAllowed;
   const touchDevice = device.controls === 'touch';
-  // Phones have no camera switcher: portrait renders isometric, landscape renders
-  // play view, and the view follows device rotation.
+  // Only phones and tablets derive the camera from orientation. A hybrid
+  // desktop that briefly uses its touchscreen must keep the view the player
+  // already chose.
+  const mobileRuntime = device.deviceClass === 'mobile' || device.deviceClass === 'tablet';
   const [isPortrait, setIsPortrait] = useState<boolean>(() => readPortraitOrientation());
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
-    device.controls === 'touch' ? (readPortraitOrientation() ? 'isometric' : 'play') : 'isometric'
+    mobileRuntime ? (readPortraitOrientation() ? 'isometric' : 'play') : 'isometric'
   );
   const [mode, setMode] = useState<GameMode>(() =>
     entry?.kind === 'suite' && entry.edit ? 'edit' : gameplayAllowed ? 'walk' : 'edit'
@@ -433,12 +435,13 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     };
   }, []);
 
-  // Touch devices derive the camera from orientation. Editing pins isometric so
-  // taps land on the grid, and rotating back restores the orientation view.
+  // Phones and tablets derive the camera from orientation. Editing pins
+  // isometric so taps land on the grid, and rotating back restores the
+  // orientation view. A desktop touchscreen keeps its chosen camera mode.
   useEffect(() => {
-    if (!touchDevice || mode === 'edit') return;
+    if (!mobileRuntime || mode === 'edit') return;
     setViewMode(isPortrait ? 'isometric' : 'play');
-  }, [touchDevice, isPortrait, mode]);
+  }, [mobileRuntime, isPortrait, mode]);
 
   // Mobile browsers and unsupported runtimes get the loft manager only: no
   // walking, no worlds, no second camera. This is enforced in app state, not
@@ -1249,6 +1252,79 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     menuOpen ||
     conflictOpen;
 
+  // Android back closes the top layer first, then minimizes the app. The
+  // wrapper dispatches `loftlife:native-back`; Cordova WebViews use the
+  // standard `backbutton` event. Browsers are left alone.
+  useEffect(() => {
+    if (!device.androidApp) return;
+    const bridge = (window as unknown as {
+      LoftLifeAndroid?: { minimizeApp?: () => void };
+      LoftLifeAndroidApp?: { minimizeApp?: () => void };
+    });
+    const closeTopLayer = (): boolean => {
+      if (conflictOpen) {
+        setConflictOpen(false);
+        return true;
+      }
+      if (authOpen) {
+        setAuthOpen(false);
+        return true;
+      }
+      if (menuOpen) {
+        setMenuOpen(false);
+        return true;
+      }
+      if (roomSettingsOpen) {
+        setRoomSettingsOpen(false);
+        return true;
+      }
+      if (avatarModalOpen) {
+        setAvatarModalOpen(false);
+        return true;
+      }
+      if (cityMapOpen) {
+        setCityMapOpen(false);
+        return true;
+      }
+      if (doorTerminalOpen) {
+        setDoorTerminalOpen(false);
+        return true;
+      }
+      if (elevatorModalOpen) {
+        setElevatorModalOpen(false);
+        return true;
+      }
+      return false;
+    };
+    const onBack = (event: Event) => {
+      if (closeTopLayer()) {
+        event.preventDefault();
+        return;
+      }
+      const native = bridge.LoftLifeAndroid ?? bridge.LoftLifeAndroidApp;
+      if (native?.minimizeApp) {
+        event.preventDefault();
+        native.minimizeApp();
+      }
+    };
+    window.addEventListener('loftlife:native-back', onBack);
+    document.addEventListener('backbutton', onBack);
+    return () => {
+      window.removeEventListener('loftlife:native-back', onBack);
+      document.removeEventListener('backbutton', onBack);
+    };
+  }, [
+    device.androidApp,
+    conflictOpen,
+    authOpen,
+    menuOpen,
+    roomSettingsOpen,
+    avatarModalOpen,
+    cityMapOpen,
+    doorTerminalOpen,
+    elevatorModalOpen,
+  ]);
+
   // Desktop shortcuts. T drives whichever microphone mode is selected, R
   // cycles the voice range, C toggles the shared chat panel, Z toggles the
   // close/wide camera distance and F toggles Isometric follow. Shared
@@ -1389,6 +1465,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         viewMode={viewMode}
         mode={mode}
         isTouch={touchDevice}
+        lowPowerGraphics={device.lowPowerGraphics}
         items={items}
         surfaces={surfaces}
         mood={mood}
@@ -1465,8 +1542,10 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
 
       {/* Top-Right Compact Mode & Utility Bar */}
       <div
-        className={`fixed top-[4.5rem] sm:top-4 right-3 sm:right-4 z-20 max-w-[calc(100vw-1.5rem)] sm:max-w-[calc(100vw-27rem)] flex flex-wrap items-center justify-end gap-2 pointer-events-auto ${
-          touchDevice ? '[&_button]:min-h-10 [&_button]:min-w-10' : ''
+        className={`fixed top-[4.5rem] sm:top-4 right-3 sm:right-4 z-20 max-w-[calc(100vw-1.5rem)] sm:max-w-[calc(100vw-27rem)] flex items-center gap-2 pointer-events-auto ${
+          touchDevice
+            ? 'flex-nowrap justify-start overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&_button]:min-h-10 [&_button]:min-w-10'
+            : 'flex-wrap justify-end'
         }`}
       >
         {onExitPlatform && (
@@ -1553,7 +1632,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         )}
 
         {/* Desktop entry point; the APK uses its touch Map button. */}
-        {gameplayAllowed && device.desktop && (
+        {gameplayAllowed && device.desktop && !touchDevice && (
           <button
             type="button"
             onClick={() => {
@@ -1569,7 +1648,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         )}
 
         {/* Camera switcher is desktop-only: phones derive the view from orientation. */}
-        {device.desktop && (
+        {device.desktop && !touchDevice && (
           <div className={`p-1 rounded-xl border flex items-center gap-1 ${hudPanelClass}`}>
             <button
               type="button"
@@ -1683,20 +1762,22 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
             <span className="hidden sm:inline">Avatar</span>
           </button>
 
-          <button
-            type="button"
-            title={closeZoom ? 'Wide room view (Z)' : 'Close avatar view (Z)'}
-            aria-label={closeZoom ? 'Wide room view' : 'Close avatar view'}
-            aria-pressed={closeZoom}
-            onClick={toggleCloseZoom}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-              closeZoom
-                ? 'bg-[#39ff14] text-[#051205]'
-                : 'text-slate-300 hover:bg-white/10 hover:text-[#39ff14]'
-            }`}
-          >
-            <Camera className="w-3.5 h-3.5" />
-          </button>
+          {!touchDevice && (
+            <button
+              type="button"
+              title={closeZoom ? 'Wide room view (Z)' : 'Close avatar view (Z)'}
+              aria-label={closeZoom ? 'Wide room view' : 'Close avatar view'}
+              aria-pressed={closeZoom}
+              onClick={toggleCloseZoom}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                closeZoom
+                  ? 'bg-[#39ff14] text-[#051205]'
+                  : 'text-slate-300 hover:bg-white/10 hover:text-[#39ff14]'
+              }`}
+            >
+              <Camera className="w-3.5 h-3.5" />
+            </button>
+          )}
 
           <button
             type="button"
@@ -1994,7 +2075,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
               <div className="text-xs opacity-70 flex items-center gap-2 whitespace-nowrap">
                 {!gameplayAllowed ? (
                   <span>
-                    Loft manager · gameplay needs the Android app or a supported desktop browser
+                    Loft manager · this runtime is not supported for walking; manage your suite here
                   </span>
                 ) : touchDevice ? (
                   <span>
@@ -2363,6 +2444,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
           sfx.playClick();
           setMenuOpen(true);
         }}
+        actionLabel={proximityPrompt}
+        lookEnabled={viewMode === 'play' && touchDevice}
         layout={controls.touch}
       />
 

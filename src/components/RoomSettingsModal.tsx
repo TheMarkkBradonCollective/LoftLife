@@ -218,8 +218,8 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
                 <div className="px-3 py-2.5 rounded-xl border border-amber-300/30 bg-amber-400/10 text-[11px] leading-snug text-amber-100 flex items-start gap-2">
                   <Lock className="w-3.5 h-3.5 text-amber-300 shrink-0 mt-0.5" />
                   <span>
-                    Loft manager only on {platformLabel}. Walking and world entry need the Android
-                    app or a supported desktop browser.
+                    Walking and world entry are unavailable on {platformLabel}. You can still
+                    manage the suite, chat and change settings here.
                   </span>
                 </div>
               )

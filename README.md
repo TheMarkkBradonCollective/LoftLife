@@ -101,9 +101,12 @@ split and the pieces that still need a live Neon sign-in test.
   mic test; preferences save on-device offline and to the account when signed in.
 - **Rideable transit**: two LoftLine routes with marked stops. Seats are assigned by the server,
   rider positions are server-authoritative, and passengers who board the same line share the tram.
-- **Mobile controls**: virtual stick, drag-look, sprint toggle, jump, interact, a grouped voice
-  bubble (range + mode-aware mic + status indicator) and a chat button, driven through the same
-  shared state and movement code as the desktop keyboard (`T`, `R`, `C`, `Z`).
+- **Device-aware HUD**: runtime/input detection (desktop web, installed PWA, Windows EXE,
+  Android APK, Android/iOS browser, tablet, hybrid touch laptop) allows gameplay on every
+  supported platform and chooses a keyboard/mouse or touch HUD, switching live as the player
+  changes input without resetting the camera. Touch gets a virtual stick, camera Look strip,
+  contextual Action, sprint, jump, emote, voice bubble, chat and map/menu, with a lighter
+  renderer budget. See [docs/DEVICE-COMPATIBILITY.md](docs/DEVICE-COMPATIBILITY.md).
 - **Avatar zoom**: `Z` (or the camera button) eases the camera toward the avatar and back to the
   exact previous distance and angle in both isometric and third-person views.
 - Wardrobe studio locks unowned clothing with its server price; the 3D viewport is lazy-loaded so
@@ -146,4 +149,6 @@ docs/              AUDIT.md, ARCHITECTURE.md, ROADMAP.md
 - [docs/AUDIT.md](docs/AUDIT.md) — honest audit of the codebase as found, plus the work done.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — server design, data model, realtime protocol,
   hosting and costs, and the path to Unity.
+- [docs/DEVICE-COMPATIBILITY.md](docs/DEVICE-COMPATIBILITY.md) — runtime/input matrix, HUD rules,
+  mobile renderer budget and the test report.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased plan with current status.

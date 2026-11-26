@@ -7,8 +7,8 @@ interface PlatformNoticeProps {
 }
 
 /**
- * Persistent dashboard notice for mobile browsers and unsupported runtimes.
- * Gameplay entry points are removed and refused in app logic; this explains why.
+ * Persistent notice for runtimes with no usable game HUD (TV/console browsers).
+ * Entry points are removed and refused in app logic; this explains why.
  */
 export const PlatformNotice: React.FC<PlatformNoticeProps> = ({ platformLabel }) => (
   <aside
@@ -22,12 +22,12 @@ export const PlatformNotice: React.FC<PlatformNoticeProps> = ({ platformLabel })
       </span>
       <div className="min-w-0">
         <p className="text-[11px] font-bold uppercase tracking-widest text-amber-300">
-          {platformLabel} · Play access limited
+          {platformLabel} · Gameplay unavailable
         </p>
         <p className="mt-1 text-xs leading-snug text-amber-100/90">{MOBILE_GAMEPLAY_MESSAGE}</p>
         <p className="mt-1.5 flex items-center gap-1.5 text-[10px] text-amber-200/70">
           <Smartphone className="w-3 h-3" />
-          Account, chat, friends, worlds browsing, settings and loft editing are available.
+          Account, chat, friends, worlds browsing, settings and loft editing stay available.
         </p>
       </div>
     </div>

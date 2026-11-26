@@ -667,9 +667,10 @@ export function SettingsPage({ onNavigate }: { onNavigate: (page: PlatformPage) 
                 Restore default layout
               </button>
               <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-                Touch controls appear automatically on touch devices and in the Android app. These
-                preferences are the same ones used by the in-game controls panel, and sync to your
-                account when you are signed in.
+                Touch controls appear automatically on phones, tablets, mobile browsers and the
+                Android app. A desktop touchscreen switches to them while touch is the last input.
+                These preferences are the same ones used by the in-game controls panel, and sync to
+                your account when you are signed in.
               </p>
             </section>
           )}

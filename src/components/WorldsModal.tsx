@@ -30,7 +30,7 @@ interface WorldsModalProps {
   open: boolean;
   onClose: () => void;
   onEnter: (worldId: string) => void;
-  /** Mobile browsers can browse/manage but never launch a world. */
+  /** Unsupported runtimes can browse/manage but never launch a world. */
   gameplayAllowed?: boolean;
 }
 

@@ -136,6 +136,8 @@ interface RoomViewportProps {
   isTouch?: boolean;
   /** Platform graphics preference; applied when the renderer is created. */
   graphicsQuality?: 'low' | 'medium' | 'high';
+  /** Mobile/tablet: cap pixel ratio and shadows for the smaller GPU budget. */
+  lowPowerGraphics?: boolean;
   remotePlayers?: RemotePlayer[];
   playerPoseRef?: React.MutableRefObject<{ x: number; z: number; yaw: number }>;
   transitLines?: TransitLine[];
@@ -246,6 +248,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   graphicsQuality = 'high',
   modalOpen = false,
   isTouch = false,
+  lowPowerGraphics = false,
   remotePlayers = [],
   playerPoseRef,
   transitLines = [],
@@ -494,7 +497,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({
-        antialias: !isSoftwareGl,
+        antialias: !isSoftwareGl && !lowPowerGraphics,
         powerPreference: 'high-performance',
       });
     } catch {
@@ -505,11 +508,17 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.08;
-    const qualityCap = graphicsQuality === 'low' ? 1 : graphicsQuality === 'medium' ? 1.5 : 2;
+    // The player's platform setting is the baseline. Phones and tablets cap it
+    // one step lower at most, so a mobile GPU renders the same scene with fewer
+    // pixels and no shadow pass without overriding an explicit low setting.
+    const effectiveQuality =
+      lowPowerGraphics && graphicsQuality === 'high' ? 'medium' : graphicsQuality;
+    const qualityCap =
+      effectiveQuality === 'low' ? 1 : effectiveQuality === 'medium' ? 1.5 : 2;
     renderer.setPixelRatio(
       isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, qualityCap)
     );
-    renderer.shadowMap.enabled = !isSoftwareGl && graphicsQuality !== 'low';
+    renderer.shadowMap.enabled = !isSoftwareGl && effectiveQuality !== 'low';
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.setSize(mount.clientWidth, mount.clientHeight);
     renderer.domElement.style.display = 'block';
