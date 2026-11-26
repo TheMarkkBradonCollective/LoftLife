@@ -654,8 +654,8 @@ export default {
       }
       if (url.pathname === '/api/presence' && request.method === 'GET') {
         if (!env.REALTIME) return fail('Realtime Durable Object binding is not configured.',503,'realtime_unconfigured');
-        const id = env.REALTIME.idFromName('city:main');
-        return env.REALTIME.get(id).fetch(new Request('https://loftlife-internal/internal/presence'));
+        const id = env.REALTIME.idFromName('party:global');
+        return env.REALTIME.get(id).fetch(new Request('https://loftlife-internal/internal/party/presence-snapshot'));
       }
 
       if (url.pathname.startsWith('/api/')) {
