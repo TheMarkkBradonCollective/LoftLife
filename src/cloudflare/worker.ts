@@ -443,6 +443,11 @@ const MOODS = ['morning','golden','night'];
 
 async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): Promise<Response | null> {
   const path = url.pathname;
+  const handled = new Set([
+    '/api/shop','/api/auth/me','/api/profile','/api/inventory',
+    '/api/economy/wallet','/api/economy/history','/api/suite','/api/suite/visibility',
+  ]);
+  if (!handled.has(path)) return null;
   const isPublic = path === '/api/shop';
   const auth = isPublic ? null : await currentAccount(request, env);
   if (!isPublic && !auth) return fail('Sign in to continue.', 401, 'unauthorized');
