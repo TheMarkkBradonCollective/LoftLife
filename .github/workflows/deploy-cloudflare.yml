@@ -23,22 +23,20 @@ jobs:
       - run: npm test
       - run: npm run lint
       - run: npm run build
-      - name: Check deployment credentials
-        id: credentials
+      - name: Require production deployment credentials
         shell: bash
         run: |
-          if [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$DATABASE_URL" && -n "$LOFTLIFE_SESSION_SECRET" ]]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "Cloudflare deployment secrets are not configured; build checks completed without publishing."
+          missing=()
+          [[ -n "$CLOUDFLARE_API_TOKEN" ]] || missing+=("CLOUDFLARE_API_TOKEN")
+          [[ -n "$DATABASE_URL" ]] || missing+=("DATABASE_URL")
+          [[ -n "$LOFTLIFE_SESSION_SECRET" ]] || missing+=("LOFTLIFE_SESSION_SECRET")
+          if (( ${#missing[@]} )); then
+            printf 'Missing required GitHub Actions secrets: %s\\n' "${missing[*]}"
+            exit 1
           fi
       - name: Configure Neon connection secret
-        if: steps.credentials.outputs.configured == 'true'
         run: printf '%s' "$DATABASE_URL" | npx --yes wrangler@4 secret put DATABASE_URL
       - name: Configure session signing secret
-        if: steps.credentials.outputs.configured == 'true'
         run: printf '%s' "$LOFTLIFE_SESSION_SECRET" | npx --yes wrangler@4 secret put LOFTLIFE_SESSION_SECRET
       - name: Deploy Worker and Durable Objects
-        if: steps.credentials.outputs.configured == 'true'
         run: npx --yes wrangler@4 deploy
