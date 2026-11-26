@@ -177,7 +177,10 @@ export class RealtimeClient {
     this.options.onStatus?.(this.retry === 0 ? 'connecting' : 'reconnecting');
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
+    const instance = this.options.place.kind === 'world'
+      ? `world:${this.options.place.worldId}`
+      : 'city:main';
+    const socket = new WebSocket(`${protocol}://${window.location.host}/ws?instance=${encodeURIComponent(instance)}`);
     this.socket = socket;
 
     socket.onopen = () => {

@@ -1,0 +1,36 @@
+name: LoftLife checks
+
+on:
+  pull_request:
+    branches: [main, feat/neon-game-schema]
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
+      - name: Validate Cloudflare Worker bundle
+        run: npx --yes wrangler@4 deploy --dry-run --outdir .wrangler-out
+
+      - name: Bundle Worker entrypoint
+        run: npx esbuild src/cloudflare/worker.ts --bundle --format=esm --platform=browser --target=es2022 --external:node:* --outfile=worker.js
+      - name: Package Worker and static assets for deployment
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: loftlife-worker-bundle
+          path: |
+            worker.js
+            dist/
+          if-no-files-found: error
+          retention-days: 3
