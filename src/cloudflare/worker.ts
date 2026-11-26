@@ -54,7 +54,7 @@ interface AccountRow {
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
 const STARTER_SUITE = {
-  name: 'Grand Suite 402',
+  name: 'Grand Hotel Suite',
   surfaces: { floor: 'oak_parquet', wall: 'warm_chalk' },
   mood: 'morning',
   items: [
@@ -119,8 +119,20 @@ async function provisionGameAccount(sql: Sql, account: AccountRow, avatarInput?:
     );
   }
   await sql.query(
+    'INSERT INTO ll_hotel_room_allocations (owner_id, created_at) VALUES ($1,$2) ON CONFLICT (owner_id) DO NOTHING',
+    [account.id, at]
+  );
+  const allocationRows = await sql.query(
+    'SELECT room_index FROM ll_hotel_room_allocations WHERE owner_id=$1 LIMIT 1',
+    [account.id]
+  ) as Array<{ room_index: number | string }>;
+  const roomIndex = Math.max(1, Number(allocationRows[0]?.room_index) || 1);
+  const suiteFloor = 5 + Math.floor((roomIndex - 1) / 10);
+  const suiteDoor = ((roomIndex - 1) % 10) + 1;
+  const suiteNumber = `${suiteFloor}${String(suiteDoor).padStart(2, '0')}`;
+  await sql.query(
     'INSERT INTO ll_suites (id,owner_id,number,floor,name,items_json,surfaces_json,mood,is_public,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9) ON CONFLICT (owner_id) DO NOTHING',
-    [crypto.randomUUID(), account.id, '402', 4, STARTER_SUITE.name, JSON.stringify(STARTER_SUITE.items), JSON.stringify(STARTER_SUITE.surfaces), STARTER_SUITE.mood, at]
+    [crypto.randomUUID(), account.id, suiteNumber, suiteFloor, STARTER_SUITE.name, JSON.stringify(STARTER_SUITE.items), JSON.stringify(STARTER_SUITE.surfaces), STARTER_SUITE.mood, at]
   );
   for (const item of DEFAULT_CLOTHING) {
     await sql.query(
@@ -155,6 +167,9 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS ll_sessions_account ON ll_sessions(account_id)`,
   `CREATE TABLE IF NOT EXISTS ll_guest_sessions (jti_hash TEXT PRIMARY KEY, guest_id TEXT NOT NULL, display_name TEXT NOT NULL, created_at BIGINT NOT NULL, expires_at BIGINT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS ll_guest_sessions_expiry ON ll_guest_sessions(expires_at)`,
+  `CREATE TABLE IF NOT EXISTS ll_hotel_room_allocations (room_index BIGSERIAL PRIMARY KEY, owner_id TEXT NOT NULL UNIQUE REFERENCES ll_accounts(id) ON DELETE CASCADE, created_at BIGINT NOT NULL)`,
+  `INSERT INTO ll_hotel_room_allocations (owner_id, created_at) SELECT owner_id, updated_at FROM ll_suites ORDER BY owner_id ON CONFLICT (owner_id) DO NOTHING`,
+  `UPDATE ll_suites s SET floor=5+((a.room_index-1)/10)::INTEGER, number=(5+((a.room_index-1)/10))::TEXT || lpad((((a.room_index-1)%10)+1)::TEXT,2,'0') FROM ll_hotel_room_allocations a WHERE a.owner_id=s.owner_id`,
   `CREATE TABLE IF NOT EXISTS ll_account_settings (
      user_id TEXT PRIMARY KEY REFERENCES ll_accounts(id) ON DELETE CASCADE,
      data_json TEXT NOT NULL,
