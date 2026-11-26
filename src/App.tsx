@@ -26,7 +26,6 @@ import {
   Layers,
   Loader2,
   LogIn,
-  LogOut,
   Map as MapIcon,
   MessageCircle,
   Monitor,
