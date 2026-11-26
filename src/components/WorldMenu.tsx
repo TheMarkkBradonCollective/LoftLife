@@ -32,7 +32,7 @@ import {
   keyLabel,
 } from '../../shared/keybindings.mjs';
 import type { PlacedItem, ViewMode, WorldLocation } from '../game/types';
-import type { SuiteState, TouchLayoutPreferences, WorldAccess, WorldSummary } from '../net/api';
+import type { SuiteState, TouchLayoutPreferences, WorldAccess, WorldRole, WorldSummary } from '../net/api';
 import { api, ApiError } from '../net/api';
 import { CITY_LAYOUT, worldToU } from '../game/cityLayout';
 import { GRID_SIZE } from '../game/catalog';
@@ -296,7 +296,7 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
   // "Administrator" means an editor on this world; a site-wide admin has no
   // implicit build rights, matching the API's owner/collaborator checks.
   const isAdmin = userRole === 'admin';
-  const canManage = canEdit;
+  const canManage = Boolean(world?.canManageStatus);
   const worldName = world?.name ?? (location === 'world' ? 'Main City' : roomName);
   const ownerHandle = world?.ownerHandle ?? suite?.ownerHandle ?? userHandle;
   const memberCount = 1 + players.length;
@@ -307,13 +307,13 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
     description: '',
     access: 'public' as WorldAccess,
     maxVisitors: 30,
-    published: false,
   });
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [manageError, setManageError] = useState<string | null>(null);
   const [inviteHandle, setInviteHandle] = useState('');
   const [editorHandle, setEditorHandle] = useState('');
+  const [editorRole, setEditorRole] = useState<Exclude<WorldRole, 'owner'>>('builder');
   const [memberBusy, setMemberBusy] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<{ userId: string; handle: string } | null>(null);
 
@@ -324,7 +324,6 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
       description: world.description,
       access: world.access,
       maxVisitors: world.maxVisitors,
-      published: world.published,
     });
   }, [world?.id, world?.updatedAt]);
 
@@ -397,7 +396,7 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
   }, [controlMode]);
 
   const saveWorld = async () => {
-    if (!world || !canEdit) return;
+    if (!world || !canManage) return;
     setSaving(true);
     setManageError(null);
     setSaveMessage(null);
@@ -407,7 +406,6 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
         description: form.description,
         access: form.access,
         maxVisitors: form.maxVisitors,
-        ...(isOwner ? { published: form.published } : {}),
       });
       onWorldUpdated(updated);
       setSaveMessage('World settings saved');
@@ -415,6 +413,36 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
       setManageError(error instanceof ApiError ? error.message : 'Could not save world settings');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const changeWorldStatus = async (status: 'live' | 'available' | 'offline') => {
+    if (!world || !canManage) return;
+    setMemberBusy(true);
+    setManageError(null);
+    try {
+      await api.setWorldStatus(world.id, status);
+      onWorldUpdated(await api.world(world.id));
+      setSaveMessage(`City status set to ${status.replace('_',' ')}`);
+    } catch (error) {
+      setManageError(error instanceof ApiError ? error.message : 'Could not change city status');
+    } finally {
+      setMemberBusy(false);
+    }
+  };
+
+  const requestBuildMode = async () => {
+    if (!world || !world.canBuild || world.status !== 'offline') return;
+    setMemberBusy(true);
+    setManageError(null);
+    try {
+      const result = await api.requestWorldBuildMode(world.id);
+      onWorldUpdated(await api.world(world.id));
+      setSaveMessage(result.pending ? 'Build Mode is queued until everyone leaves.' : 'Build Mode is ready.');
+    } catch (error) {
+      setManageError(error instanceof ApiError ? error.message : 'Could not enter Build Mode');
+    } finally {
+      setMemberBusy(false);
     }
   };
 
@@ -438,10 +466,10 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
     setMemberBusy(true);
     setManageError(null);
     try {
-      const updated = await api.addCollaborator(world.id, editorHandle.trim());
+      const updated = await api.addCollaborator(world.id, editorHandle.trim(), editorRole);
       onWorldUpdated(updated);
       setEditorHandle('');
-      setSaveMessage('Editor added');
+      setSaveMessage(`${editorRole.replace('_',' ')} assigned`);
     } catch (error) {
       setManageError(error instanceof ApiError ? error.message : 'Could not add editor');
     } finally {
@@ -668,10 +696,10 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                       {world
                         ? isOwner
                           ? 'Owner'
-                          : canEdit
-                          ? 'Editor / administrator'
+                          : world.role
+                          ? world.role === 'co_owner' ? 'Co-Owner' : world.role.charAt(0).toUpperCase() + world.role.slice(1)
                           : isAdmin
-                          ? 'Site admin · no world edit rights'
+                          ? 'Site admin · no world permissions'
                           : 'Visitor'
                         : 'Suite owner'}
                     </dd>
@@ -687,7 +715,7 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                     <dt className="text-[10px] uppercase tracking-widest text-slate-500">Privacy</dt>
                     <dd className="font-semibold">
                       {world
-                        ? `${world.access}${world.published ? ' · published' : ' · unpublished'}`
+                        ? world.access
                         : suite?.isPublic
                         ? 'Public suite'
                         : 'Private suite'}
@@ -696,10 +724,27 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                   <div>
                     <dt className="text-[10px] uppercase tracking-widest text-slate-500">Status</dt>
                     <dd className="font-semibold">
-                      {instance ? `Live · ${instance.count} in instance` : 'Saved'}
+                      {world ? `${world.status.replace('_',' ')} · ${instance?.count ?? 0} here` : instance ? `Live · ${instance.count} in instance` : 'Saved'}
                     </dd>
                   </div>
                 </dl>
+                {world && (
+                  <div className="flex flex-wrap gap-2 border-t border-white/8 pt-3">
+                    {canManage && world.status !== 'live' && !['build_mode','build_pending','maintenance'].includes(world.status) && (
+                      <button type="button" disabled={memberBusy} onClick={() => void changeWorldStatus('live')} className="px-3 py-1.5 rounded-lg bg-[#39ff14] text-[#051205] text-xs font-bold disabled:opacity-40">Go Live</button>
+                    )}
+                    {canManage && world.status !== 'available' && (
+                      <button type="button" disabled={memberBusy} onClick={() => void changeWorldStatus('available')} className="px-3 py-1.5 rounded-lg bg-white/10 text-xs font-semibold disabled:opacity-40">Set Available</button>
+                    )}
+                    {canManage && !['offline','build_mode','build_pending','maintenance'].includes(world.status) && (
+                      <button type="button" disabled={memberBusy} onClick={() => void changeWorldStatus('offline')} className="px-3 py-1.5 rounded-lg bg-white/10 text-xs font-semibold disabled:opacity-40">Set Offline</button>
+                    )}
+                    {world.canBuild && world.status === 'offline' && (
+                      <button type="button" disabled={memberBusy} onClick={() => void requestBuildMode()} className="px-3 py-1.5 rounded-lg bg-white/10 text-xs font-semibold disabled:opacity-40">Build Mode</button>
+                    )}
+                    {world.status === 'build_pending' && <span className="text-xs text-amber-200 self-center">Waiting for everyone to leave before Build Mode starts.</span>}
+                  </div>
+                )}
                 {world?.description && (
                   <p className="text-xs leading-relaxed text-slate-300 border-t border-white/8 pt-2">
                     {world.description}
@@ -821,8 +866,8 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                         setForm((prev) => ({ ...prev, access: event.target.value as WorldAccess }))
                       }
                     >
-                      <option value="public">Public — listed when published</option>
-                      <option value="private">Private — owner only</option>
+                      <option value="public">Public — anyone can enter when Live</option>
+                      <option value="private">Private — owner and authorized staff</option>
                       <option value="friends">Friends</option>
                       <option value="invite">Invited players</option>
                       <option value="collab">Invited + editors</option>
@@ -840,24 +885,6 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                       }
                     />
                   </Field>
-                  <label className="flex items-center justify-between gap-3 text-xs">
-                    <span>
-                      Published
-                      <span className="block text-[10px] text-slate-500">
-                        {isOwner
-                          ? 'Listed in Worlds when access is public.'
-                          : 'Only the owner can publish or unpublish.'}
-                      </span>
-                    </span>
-                    <input
-                      type="checkbox"
-                      disabled={!isOwner}
-                      checked={form.published}
-                      onChange={(event) =>
-                        setForm((prev) => ({ ...prev, published: event.target.checked }))
-                      }
-                    />
-                  </label>
                 </section>
 
                 <section className="rounded-xl border border-white/10 bg-black/20 p-3.5 space-y-3">
@@ -865,8 +892,7 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                     Members &amp; Permissions
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    Owner @{world.ownerHandle}. Editors can build and save this world; they cannot
-                    publish it, remove editors or delete it. Permissions are enforced by the API.
+                    Owner @{world.ownerHandle}. Co-Owners manage city settings and staff; Moderators help maintain Live status; Builders can edit only in Build Mode. Permissions are enforced by the server.
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     {(world.collaborators ?? []).map((entry) => (
@@ -874,8 +900,8 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                         key={entry.userId}
                         className="inline-flex items-center gap-1 rounded-md bg-white/8 px-2 py-1 text-[11px]"
                       >
-                        <Shield className="w-3 h-3 text-[#39ff14]" /> @{entry.handle}
-                        {isOwner && (
+                        <Shield className="w-3 h-3 text-[#39ff14]" /> @{entry.handle} · {entry.role.replace('_',' ')}
+                        {canManage && (
                           <button
                             type="button"
                             aria-label={`Remove editor ${entry.handle}`}
@@ -891,21 +917,27 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                       <span className="text-[11px] text-slate-500">No editors yet.</span>
                     )}
                   </div>
-                  {isOwner && (
-                    <div className="flex gap-2">
+                  {canManage && (
+                    <div className="flex flex-wrap gap-2">
                       <input
                         className={inputClass}
-                        placeholder="Editor handle"
+                        placeholder="Player handle"
                         value={editorHandle}
                         onChange={(event) => setEditorHandle(event.target.value)}
                       />
+                      <select className={inputClass} value={editorRole} onChange={event => setEditorRole(event.target.value as Exclude<WorldRole,'owner'>)}>
+                        <option value="co_owner" disabled={!isOwner}>Co-Owner (owner appoints)</option>
+                        <option value="moderator">Moderator</option>
+                        <option value="builder">Builder</option>
+                        <option value="member">Member</option>
+                      </select>
                       <button
                         type="button"
                         disabled={memberBusy || !editorHandle.trim()}
                         onClick={() => void addEditor()}
                         className="px-3 rounded-lg text-xs font-bold bg-white/10 disabled:opacity-40 flex items-center gap-1"
                       >
-                        <UserPlus className="w-3.5 h-3.5" /> Add
+                        <UserPlus className="w-3.5 h-3.5" /> Assign role
                       </button>
                     </div>
                   )}
@@ -988,9 +1020,9 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                   {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                   Save world settings
                 </button>
-                {!isOwner && (
+                {!canManage && (
                   <span className="text-[10px] text-slate-500">
-                    Publishing and editor removal are owner-only; the API rejects them.
+                    Only the owner or co-owner can change city settings and staff.
                   </span>
                 )}
                 {saveMessage && <SmallBadge tone="green"><Check className="w-3 h-3" /> {saveMessage}</SmallBadge>}

@@ -81,6 +81,8 @@ export interface SuiteState {
 }
 
 export type WorldAccess = 'public' | 'private' | 'invite' | 'friends' | 'collab';
+export type WorldRole = 'owner' | 'co_owner' | 'moderator' | 'builder' | 'member';
+export type WorldStatus = 'live' | 'available' | 'offline' | 'build_mode' | 'build_pending' | 'maintenance';
 export type WorldKind =
   | 'hangout'
   | 'house'
@@ -99,6 +101,10 @@ export interface WorldSummary {
   description: string;
   access: WorldAccess;
   published: boolean;
+  status: WorldStatus;
+  role: WorldRole | null;
+  canBuild: boolean;
+  canManageStatus: boolean;
   ownerId: string;
   ownerHandle: string;
   maxVisitors: number;
@@ -109,7 +115,7 @@ export interface WorldSummary {
   items?: PlacedItem[];
   surfaces?: RoomSurfaceConfig;
   mood?: LightingMood;
-  collaborators?: { userId: string; handle: string }[];
+  collaborators?: { userId: string; handle: string; role: Exclude<WorldRole, 'owner'> }[];
 }
 
 export interface ShopEntry {
@@ -332,10 +338,15 @@ export const api = {
       kind: WorldKind;
       access: WorldAccess;
       description: string;
-      published: boolean;
       maxVisitors: number;
     }>
   ) => request<WorldSummary>(`/worlds/${id}`, { method: 'PATCH', body }),
+
+  setWorldStatus: (id: string, status: Extract<WorldStatus, 'live' | 'available' | 'offline'>) =>
+    request<{ status: WorldStatus; activeCount: number }>(`/worlds/${id}/status`, { method: 'POST', body: { status } }),
+
+  requestWorldBuildMode: (id: string) =>
+    request<{ status: WorldStatus; activeCount: number; pending: boolean }>(`/worlds/${id}/build-mode`, { method: 'POST' }),
 
   saveWorldState: (
     id: string,
@@ -344,8 +355,8 @@ export const api = {
 
   deleteWorld: (id: string) => request<{ deleted: boolean }>(`/worlds/${id}`, { method: 'DELETE' }),
 
-  addCollaborator: (id: string, handle: string) =>
-    request<WorldSummary>(`/worlds/${id}/collaborators`, { method: 'POST', body: { handle } }),
+  addCollaborator: (id: string, handle: string, role: Exclude<WorldRole, 'owner'> = 'builder') =>
+    request<WorldSummary>(`/worlds/${id}/collaborators`, { method: 'POST', body: { handle, role } }),
 
   removeCollaborator: (id: string, userId: string) =>
     request<WorldSummary>(`/worlds/${id}/collaborators/${userId}`, { method: 'DELETE' }),
@@ -354,7 +365,7 @@ export const api = {
     request<{ invited: string }>(`/worlds/${id}/invite`, { method: 'POST', body: { handle } }),
 
   worldEntry: (id: string) =>
-    request<{ instanceId: string; capacity: number; name: string }>(`/worlds/${id}/entry`),
+    request<{ instanceId: string; capacity: number; name: string; status: WorldStatus }>(`/worlds/${id}/entry`),
 
   friends: () => request<FriendEntry[]>('/friends'),
 

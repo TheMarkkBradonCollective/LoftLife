@@ -3,6 +3,10 @@ import { invitationsAllowedWith } from './platform';
 type Sql = { query(query: string, params?: unknown[]): Promise<unknown[]> };
 type User = { id: string; handle: string };
 type World = Record<string, unknown>;
+type RealtimeBinding = { idFromName(name: string): unknown; get(id: unknown): { fetch(request: Request): Promise<Response> } };
+type WorldRole = 'co_owner' | 'moderator' | 'builder' | 'member';
+const ROLES: WorldRole[] = ['co_owner', 'moderator', 'builder', 'member'];
+const WORLD_STATUSES = ['live', 'available', 'offline', 'build_mode', 'build_pending', 'maintenance'];
 
 const ACCESS = ['public', 'private', 'invite', 'friends', 'collab'];
 const KINDS = ['hangout', 'house', 'apartment', 'club', 'restaurant', 'shop', 'park', 'venue', 'neighborhood'];
@@ -18,23 +22,59 @@ function parse(value: unknown, fallback: unknown) {
   try { return JSON.parse(value); } catch { return fallback; }
 }
 async function permission(sql: Sql, world: World, user: User | null) {
-  if (user && world.owner_id === user.id) return { canEnter: true, canEdit: true };
-  if (!user) return { canEnter: Boolean(world.published && world.access === 'public'), canEdit: false };
+  let role: string | null = null;
+  if (user) {
+    if (world.owner_id === user.id) role = 'owner';
+    else {
+      const rows = await sql.query(
+        'SELECT role FROM ll_world_collaborators WHERE world_id=$1 AND user_id=$2 LIMIT 1',
+        [world.id, user.id]
+      ) as Array<{ role: string }>;
+      role = rows[0]?.role ?? null;
+    }
+  }
+  const status = String(world.status ?? 'offline');
+  if (user && world.owner_id !== user.id) {
+    const blocked = await sql.query('SELECT 1 FROM ll_blocks WHERE user_id=$1 AND blocked_id=$2 LIMIT 1', [world.owner_id, user.id]);
+    if (blocked.length) return { canEnter: false, canEdit: false, canBuild: false, canManageStatus: false, role };
+  }
+  const canBuild = role === 'owner' || role === 'co_owner' || role === 'builder';
+  const canManageStatus = role === 'owner' || role === 'co_owner';
+  if (status === 'maintenance') return { canEnter: false, canEdit: false, canBuild, canManageStatus, role };
+  if (status === 'build_mode') {
+    return { canEnter: canBuild, canEdit: canBuild, canBuild, canManageStatus, role };
+  }
+  if (status === 'offline') {
+    return { canEnter: canManageStatus, canEdit: false, canBuild, canManageStatus, role };
+  }
+  if (status === 'build_pending') {
+    return { canEnter: false, canEdit: false, canBuild, canManageStatus, role };
+  }
+  if (role === 'owner') return { canEnter: true, canEdit: false, canBuild, canManageStatus, role };
+  if (status === 'live') {
+    return { canEnter: true, canEdit: false, canBuild, canManageStatus, role };
+  }
+  if (!user) return { canEnter: false, canEdit: false, canBuild, canManageStatus, role };
+  if (world.owner_id === user.id || role) {
+    return { canEnter: true, canEdit: false, canBuild, canManageStatus, role };
+  }
   const blocked = await sql.query('SELECT 1 FROM ll_blocks WHERE user_id=$1 AND blocked_id=$2 LIMIT 1', [world.owner_id, user.id]);
-  if (blocked.length) return { canEnter: false, canEdit: false };
-  let canEnter = Boolean(world.published && world.access === 'public');
+  if (blocked.length) return { canEnter: false, canEdit: false, canBuild, canManageStatus, role };
+  let canEnter = world.access === 'public';
   if (world.access === 'friends') {
     const rows = await sql.query("SELECT 1 FROM ll_friendships WHERE status='accepted' AND ((a=$1 AND b=$2) OR (a=$2 AND b=$1)) LIMIT 1", [world.owner_id, user.id]);
     canEnter = rows.length > 0;
-  } else if (world.access === 'invite' || world.access === 'collab') {
+  } else if (world.access === 'invite') {
+    const rows = await sql.query('SELECT 1 FROM ll_world_invites WHERE world_id=$1 AND user_id=$2 LIMIT 1', [world.id, user.id]);
+    canEnter = rows.length > 0;
+  } else if (world.access === 'collab') {
     const [invites, collaborators] = await Promise.all([
       sql.query('SELECT 1 FROM ll_world_invites WHERE world_id=$1 AND user_id=$2 LIMIT 1', [world.id, user.id]),
       sql.query('SELECT 1 FROM ll_world_collaborators WHERE world_id=$1 AND user_id=$2 LIMIT 1', [world.id, user.id]),
     ]);
-    canEnter = invites.length > 0 || (world.access === 'collab' && collaborators.length > 0);
-  } else if (world.access === 'private') canEnter = false;
-  const editors = await sql.query('SELECT 1 FROM ll_world_collaborators WHERE world_id=$1 AND user_id=$2 LIMIT 1', [world.id, user.id]);
-  return { canEnter, canEdit: editors.length > 0 };
+    canEnter = invites.length > 0 || collaborators.length > 0;
+  }
+  return { canEnter, canEdit: false, canBuild, canManageStatus, role };
 }
 async function view(sql: Sql, world: World, user: User | null, state = false) {
   const [owners, access] = await Promise.all([
@@ -43,20 +83,23 @@ async function view(sql: Sql, world: World, user: User | null, state = false) {
   ]);
   const result: World = {
     id: world.id, name: world.name, kind: world.kind, description: world.description,
-    access: world.access, published: Boolean(world.published), ownerId: world.owner_id,
+    access: world.access, status: String(world.status ?? 'offline'), published: String(world.status ?? 'offline') === 'live', ownerId: world.owner_id,
     ownerHandle: owners[0]?.handle ?? 'unknown', maxVisitors: Number(world.max_visitors),
     updatedAt: Number(world.updated_at), createdAt: Number(world.created_at),
-    canEdit: access.canEdit, canEnter: access.canEnter,
+    role: access.role, canEdit: access.canEdit, canBuild: access.canBuild,
+    canManageStatus: access.canManageStatus, canEnter: access.canEnter,
   };
   if (state && access.canEnter) {
     result.items = parse(world.items_json, []);
     result.surfaces = parse(world.surfaces_json, {});
     result.mood = world.mood;
+  }
+  if (access.canManageStatus) {
     const collaborators = await sql.query(
-      'SELECT c.user_id,a.handle FROM ll_world_collaborators c JOIN ll_accounts a ON a.id=c.user_id WHERE c.world_id=$1',
+      'SELECT c.user_id,a.handle,c.role FROM ll_world_collaborators c JOIN ll_accounts a ON a.id=c.user_id WHERE c.world_id=$1',
       [world.id]
-    ) as Array<{ user_id: string; handle: string }>;
-    result.collaborators = collaborators.map(row => ({ userId: row.user_id, handle: row.handle }));
+    ) as Array<{ user_id: string; handle: string; role: string }>;
+    result.collaborators = collaborators.map(row => ({ userId: row.user_id, handle: row.handle, role: row.role }));
   }
   return result;
 }
@@ -83,7 +126,7 @@ function sanitizeState(body: Record<string, unknown>) {
   return { items, surfaces: { floor: surfaces.floor, wall: surfaces.wall }, mood };
 }
 
-export async function handleWorldRoute(request: Request, sql: Sql, user: User | null): Promise<Response | null> {
+export async function handleWorldRoute(request: Request, sql: Sql, user: User | null, realtime?: RealtimeBinding): Promise<Response | null> {
   const url = new URL(request.url);
   const path = url.pathname;
   if (path === '/api/worlds' && request.method === 'POST') {
@@ -98,7 +141,7 @@ export async function handleWorldRoute(request: Request, sql: Sql, user: User | 
     const id = `wld_${crypto.randomUUID()}`;
     const at = Date.now();
     const created = await sql.query(
-      "INSERT INTO ll_worlds (id,owner_id,name,kind,description,access,published,items_json,surfaces_json,mood,max_visitors,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,FALSE,'[]',$7,'morning',30,$8,$8) RETURNING *",
+      "INSERT INTO ll_worlds (id,owner_id,name,kind,description,access,published,status,items_json,surfaces_json,mood,max_visitors,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,FALSE,'offline','[]',$7,'morning',30,$8,$8) RETURNING *",
       [id,user.id,name,kind,typeof body.description==='string'?body.description.slice(0,280):'',access,JSON.stringify({floor:'oak_parquet',wall:'warm_chalk'}),at]
     ) as World[];
     return json(await view(sql,created[0],user,true),201);
@@ -110,7 +153,7 @@ export async function handleWorldRoute(request: Request, sql: Sql, user: User | 
     const kind = url.searchParams.get('kind') ?? '';
     const rows = mine
       ? await sql.query('SELECT * FROM ll_worlds WHERE owner_id=$1 ORDER BY updated_at DESC', [user!.id]) as World[]
-      : await sql.query("SELECT * FROM ll_worlds WHERE published=TRUE AND access='public' AND name ILIKE $1 AND ($2='' OR kind=$2) ORDER BY updated_at DESC LIMIT 100", [`%${search}%`, kind]) as World[];
+      : await sql.query("SELECT * FROM ll_worlds WHERE status IN ('live','available') AND (status='live' OR access='public') AND name ILIKE $1 AND ($2='' OR kind=$2) ORDER BY CASE WHEN status='live' THEN 0 ELSE 1 END, updated_at DESC LIMIT 100", [`%${search}%`, kind]) as World[];
     const results = await Promise.all(rows.map(async world => {
       if (user) {
         const blocked = await sql.query('SELECT 1 FROM ll_blocks WHERE user_id=$1 AND blocked_id=$2 LIMIT 1', [world.owner_id,user.id]);
@@ -132,21 +175,45 @@ export async function handleWorldRoute(request: Request, sql: Sql, user: User | 
   if (action === '' && request.method === 'GET') return json(await view(sql,world,user,true));
   if (action === 'entry' && request.method === 'GET') {
     const access = await permission(sql,world,user);
-    if (!access.canEnter) return fail('You do not have access to this world.',403,'forbidden');
-    return json({instanceId:`world:${id}`,capacity:Number(world.max_visitors),name:world.name});
+    if (!access.canEnter) return fail('This city is not currently available to your account.',403,'forbidden');
+    return json({instanceId:`world:${id}`,capacity:Number(world.max_visitors),name:world.name,status:String(world.status ?? 'offline')});
+  }
+  if (action === 'status' && request.method === 'POST') {
+    if (!user || !realtime) return fail('World status service is unavailable.',503,'realtime_unavailable');
+    const body = await request.json().catch(()=>({})) as World;
+    const status = String(body.status ?? '');
+    if (!['live','available','offline'].includes(status)) return fail('Invalid city status.',400,'invalid_status');
+    const service = realtime.get(realtime.idFromName(`world:${id}`));
+    return service.fetch(new Request('https://loftlife-internal/internal/world/action', {
+      method:'POST', headers:{'content-type':'application/json'},
+      body:JSON.stringify({worldId:id,userId:user.id,action:'set_status',status}),
+    }));
+  }
+  if (action === 'build-mode' && request.method === 'POST') {
+    if (!user || !realtime) return fail('World build service is unavailable.',503,'realtime_unavailable');
+    const service = realtime.get(realtime.idFromName(`world:${id}`));
+    return service.fetch(new Request('https://loftlife-internal/internal/world/action', {
+      method:'POST', headers:{'content-type':'application/json'},
+      body:JSON.stringify({worldId:id,userId:user.id,action:'request_build'}),
+    }));
   }
   if (action === 'collaborators' && request.method === 'POST') {
-    if (world.owner_id !== user?.id) return fail('Only the owner can add collaborators.',403,'forbidden');
+    if (!user) return fail('Sign in to manage city roles.',401,'unauthorized');
+    const manager = await permission(sql,world,user);
+    if (!manager.canManageStatus) return fail('Only the owner or co-owner can manage city roles.',403,'forbidden');
     const body = await request.json().catch(()=>({})) as World;
+    const role = String(body.role ?? 'builder');
+    if (!ROLES.includes(role as WorldRole)) return fail('Invalid city role.',400,'invalid_role');
+    if (role === 'co_owner' && world.owner_id !== user.id) return fail('Only the owner can appoint a co-owner.',403,'forbidden');
     const targets = await sql.query('SELECT id FROM ll_accounts WHERE handle=$1 LIMIT 1',[String(body.handle??'').toLowerCase()]) as Array<{id:string}>;
     if (!targets[0]) return fail('No player with that handle.',404,'not_found');
     if (targets[0].id === user!.id) return fail('You already own this world.',400,'bad_request');
-    await sql.query("INSERT INTO ll_world_collaborators(world_id,user_id,role,created_at) VALUES($1,$2,'editor',$3) ON CONFLICT DO NOTHING",[id,targets[0].id,Date.now()]);
+    await sql.query("INSERT INTO ll_world_collaborators(world_id,user_id,role,created_at) VALUES($1,$2,$3,$4) ON CONFLICT(world_id,user_id) DO UPDATE SET role=EXCLUDED.role",[id,targets[0].id,role,Date.now()]);
     const updated = await sql.query('SELECT * FROM ll_worlds WHERE id=$1 LIMIT 1',[id]) as World[];
     return json(await view(sql,updated[0],user,true));
   }
   if (action.startsWith('collaborators/') && request.method === 'DELETE') {
-    if (world.owner_id !== user?.id) return fail('Only the owner can remove collaborators.',403,'forbidden');
+    if (!user || !(await permission(sql,world,user)).canManageStatus) return fail('Only the owner or co-owner can remove city roles.',403,'forbidden');
     const targetId = decodeURIComponent(action.slice('collaborators/'.length));
     await sql.query('DELETE FROM ll_world_collaborators WHERE world_id=$1 AND user_id=$2',[id,targetId]);
     const updated = await sql.query('SELECT * FROM ll_worlds WHERE id=$1 LIMIT 1',[id]) as World[];
@@ -154,7 +221,7 @@ export async function handleWorldRoute(request: Request, sql: Sql, user: User | 
   }
   if (action === 'invite' && request.method === 'POST') {
     const access = await permission(sql,world,user);
-    if (!access.canEdit) return fail('Only the owner or a collaborator can invite players.',403,'forbidden');
+    if (!access.canManageStatus) return fail('Only the owner or co-owner can invite players.',403,'forbidden');
     const body = await request.json().catch(()=>({})) as World;
     const targets = await sql.query('SELECT id FROM ll_accounts WHERE handle=$1 LIMIT 1',[String(body.handle??'').toLowerCase()]) as Array<{id:string}>;
     if (!targets[0]) return fail('No player with that handle.',404,'not_found');
@@ -169,7 +236,7 @@ export async function handleWorldRoute(request: Request, sql: Sql, user: User | 
   }
   if (action === 'state' && request.method === 'PUT') {
     const access = await permission(sql,world,user);
-    if (!access.canEdit) return fail('You do not have build permission for this world.',403,'forbidden');
+    if (!access.canBuild || String(world.status ?? 'offline') !== 'build_mode') return fail('Build Mode must be active and you must be the owner, co-owner, or builder.',403,'build_mode_required');
     const state = sanitizeState(await request.json().catch(()=>({})));
     if (!state) return fail('Invalid world room state.',400,'invalid_input');
     const at = Date.now();
@@ -177,16 +244,15 @@ export async function handleWorldRoute(request: Request, sql: Sql, user: User | 
     return json({id,...state,updatedAt:at});
   }
   if (action === '' && request.method === 'PATCH') {
-    if (world.owner_id !== user!.id) return fail('Only the owner can change this world.',403,'forbidden');
+    if (!user || !(await permission(sql,world,user)).canManageStatus) return fail('Only the owner or co-owner can change this city.',403,'forbidden');
     const body = await request.json().catch(()=>({})) as World;
     const name = body.name===undefined?String(world.name):String(body.name).trim().slice(0,48);
     const kind = body.kind===undefined?String(world.kind):String(body.kind);
     const access = body.access===undefined?String(world.access):String(body.access);
     if (!name || !KINDS.includes(kind) || !ACCESS.includes(access)) return fail('Invalid world name, kind, or access.',400,'invalid_input');
     const description = body.description===undefined?String(world.description):String(body.description).slice(0,280);
-    const published = body.published===undefined?Boolean(world.published):Boolean(body.published);
     const visitors = body.maxVisitors===undefined?Number(world.max_visitors):Math.min(60,Math.max(2,Number(body.maxVisitors)||Number(world.max_visitors)));
-    const updated = await sql.query('UPDATE ll_worlds SET name=$1,kind=$2,access=$3,description=$4,published=$5,max_visitors=$6,updated_at=$7 WHERE id=$8 RETURNING *',[name,kind,access,description,published,visitors,Date.now(),id]) as World[];
+    const updated = await sql.query('UPDATE ll_worlds SET name=$1,kind=$2,access=$3,description=$4,max_visitors=$5,updated_at=$6 WHERE id=$7 RETURNING *',[name,kind,access,description,visitors,Date.now(),id]) as World[];
     return json(await view(sql,updated[0],user,true));
   }
   return null;

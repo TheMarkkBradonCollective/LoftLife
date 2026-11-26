@@ -722,7 +722,7 @@ export default {
         const auth = await currentAccount(request, env);
         const sql = auth?.sql ?? await database(env);
         if (!sql) return fail('DATABASE_URL is not configured.', 503, 'unconfigured');
-        const worldResponse = await handleWorldRoute(request, sql, auth?.account ?? null);
+        const worldResponse = await handleWorldRoute(request, sql, auth?.account ?? null, env.REALTIME);
         if (worldResponse) return worldResponse;
       }
 
