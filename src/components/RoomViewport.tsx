@@ -488,6 +488,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         | 'toLobby'
         | 'toHallway'
         | 'openDoorTerminal'
+        | 'openGuestRoom'
         | 'openElevator'
         | null;
       pendingHallDoor: string | null;
@@ -770,6 +771,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           | 'toLobby'
           | 'toHallway'
           | 'openDoorTerminal'
+          | 'openGuestRoom'
           | 'openElevator'
           | null,
         pendingHallDoor: null as string | null,
@@ -1698,11 +1700,11 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             Math.hypot(av.x - mainWorld.loftDoorEntryPos.x, av.z - mainWorld.loftDoorEntryPos.z) <
             2.6;
 
+          if (!unlocked && nearDoor && propsRef.current.guestMode) {
+            releaseCursorForModal(); sfx.playClick(); propsRef.current.onEnterGuestRoom(); return;
+          }
           if (!unlocked && nearDoor && !propsRef.current.guestMode) {
-            releaseCursorForModal();
-            sfx.playClick();
-            propsRef.current.onOpenDoorTerminal();
-            return;
+            releaseCursorForModal(); sfx.playClick(); propsRef.current.onOpenDoorTerminal(); return;
           }
 
           if (unlocked) {
@@ -1714,13 +1716,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             );
             av.pendingPortal = 'toLobby';
             propsRef.current.onWalkHint?.('Walking through Hotel Main Doors...');
-          } else if (!propsRef.current.guestMode) {
-            av.path = buildPlazaPath(
-              av.x,
-              av.z,
-              mainWorld.loftDoorEntryPos.x,
-              mainWorld.loftDoorEntryPos.z
-            );
+          } else if (propsRef.current.guestMode) {
+            av.path = buildPlazaPath(av.x, av.z, mainWorld.loftDoorEntryPos.x, mainWorld.loftDoorEntryPos.z);
+            av.pendingPortal = 'openGuestRoom';
+            propsRef.current.onWalkHint?.('Walking to your private guest-room entrance...');
+          } else {
+            av.path = buildPlazaPath(av.x, av.z, mainWorld.loftDoorEntryPos.x, mainWorld.loftDoorEntryPos.z);
             av.pendingPortal = 'openDoorTerminal';
             propsRef.current.onWalkHint?.('Walking to Hotel Main Entrance Intercom...');
           }
@@ -2487,6 +2488,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
                   sfx.playClick();
                   propsRef.current.onOpenDoorTerminal();
                   propsRef.current.onEmoteChange('idle');
+                } else if (av.pendingPortal === 'openGuestRoom') {
+                  av.pendingPortal = null; av.portalCooldown = 1.0; releaseCursorForModal(); sfx.playClick();
+                  propsRef.current.onEnterGuestRoom(); propsRef.current.onEmoteChange('idle');
                 } else if (av.pendingPortal === 'openElevator') {
                   av.pendingPortal = null;
                   av.portalCooldown = 1.4;

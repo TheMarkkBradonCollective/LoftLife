@@ -680,7 +680,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
             : 'Main City · Walk to Hotel Main Entrance & press E for Keycard / Guest Intercom'
         );
       } else if (next === 'lobby') {
-        showHint('Main Lobby · Walk into the North brass elevator to ride to Floors 2–4');
+        showHint('Main Lobby · Walk into the North brass elevator to ride to your residential floor');
       } else if (next === 'hallway') {
         setActiveResident(null);
         showHint(`Floor ${hallwayFloor} Hallway · Find a numbered suite door or ride the elevator`);
