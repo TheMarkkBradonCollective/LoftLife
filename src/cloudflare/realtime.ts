@@ -340,7 +340,7 @@ export class LoftLifeRealtime {
   }
   private riderPose(player: Player, now: number): Player {
     const line=TRANSIT_LINES.find(entry=>entry.id===player.transitLineId);
-    if(!line||player.transitSeat===undefined||player.transitStartStop===undefined||player.transitStartedAt===undefined)return player;
+    if(!line||player.transitSeat==null||player.transitStartStop===undefined||player.transitStartedAt===undefined)return player;
     const route=this.routePosition(line,player.transitStartStop,now-player.transitStartedAt);
     const side=player.transitSeat%2===0?-1:1,row=Math.floor(player.transitSeat/2);
     const lateral=side*0.62,along=1.35-row*1.25;
@@ -388,14 +388,14 @@ export class LoftLifeRealtime {
       return;
     }
     if(action==='exit'){
-      if(!player.riding){send(ws,{t:'transit',riding:null,vehicles:this.vehiclesFor(player.instanceId)});return;}
+      if(!player.riding){send(ws,{t:'transit',riding:null,vehicles:this.vehiclesFor(player.instanceId,Date.now())});return;}
       const line=TRANSIT_LINES.find(entry=>entry.id===player.transitLineId);
       const route=line&&player.transitStartStop!==undefined&&player.transitStartedAt!==undefined
         ? this.routePosition(line,player.transitStartStop,Date.now()-player.transitStartedAt)
         : {x:player.x,z:player.z,heading:player.yaw};
       const next:Player={...player,x:route.x,y:0,z:route.z,yaw:route.heading,location:'world',riding:null,transitLineId:null,transitSeat:null,transitStartStop:undefined,transitStartedAt:undefined,lastSeen:Date.now()};
       ws.serializeAttachment(next);
-      send(ws,{t:'transit',riding:null,exited:{x:route.x,z:route.z,lineId:line?.id??null,label:line?.label??null},vehicles:this.vehiclesFor(player.instanceId)});
+      send(ws,{t:'transit',riding:null,exited:{x:route.x,z:route.z,lineId:line?.id??null,label:line?.label??null},vehicles:this.vehiclesFor(player.instanceId,Date.now())});
       this.broadcastSnapshot(player.instanceId,true);
       return;
     }
@@ -486,8 +486,8 @@ export class LoftLifeRealtime {
     } else return bad('Unknown party action');
     await this.ctx.storage.put('party_state',state);
     const snapshot=await this.partyState(userId);
-    for(const id of snapshot.party?.members.map(member=>member.userId)??[])notify.add(id);
-    for(const party of snapshot.invites)for(const member of party?.invites??[])notify.add(member.userId);
+    for(const id of snapshot.party?.members.map(member=>member?.userId).filter((id):id is string=>Boolean(id))??[])notify.add(id);
+    for(const party of snapshot.invites)for(const member of party?.invites??[])if(member?.userId)notify.add(member.userId);
     const notifyUserIds=[...notify];
     const payload={...snapshot,notifyUserIds};
     if(this.env.REALTIME){
