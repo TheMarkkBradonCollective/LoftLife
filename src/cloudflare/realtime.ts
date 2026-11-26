@@ -65,6 +65,28 @@ export class LoftLifeRealtime {
 
   async fetch(request: Request): Promise<Response> {
     const requestUrl = new URL(request.url);
+    if (requestUrl.pathname === '/internal/chat/broadcast' && request.method === 'POST') {
+      const body = await request.json().catch(() => ({})) as { userIds?: string[]; message?: unknown };
+      const recipients = new Set(body.userIds ?? []);
+      for (const socket of this.ctx.getWebSockets()) {
+        const player = socket.deserializeAttachment() as Player | undefined;
+        if (player?.userId && recipients.has(player.userId)) send(socket,body.message);
+      }
+      return Response.json({ok:true});
+    }
+    if (requestUrl.pathname === '/internal/relay' && request.method === 'POST') {
+      const body = await request.json().catch(() => ({})) as { userIds?: string[]; message?: unknown };
+      await this.relayUsers(body.userIds ?? [],body.message);
+      return Response.json({ok:true});
+    }
+    if (requestUrl.pathname === '/internal/party/chat' && request.method === 'POST') {
+      const body = await request.json().catch(() => ({})) as { partyId?: string; userId?: string; message?: unknown };
+      const state = await this.partyData();
+      const party = body.partyId ? state.parties[body.partyId] : null;
+      if (!party || !body.userId || !party.members.includes(body.userId)) return Response.json({error:'You are not in that party',code:'forbidden'},{status:403});
+      await this.relayUsers(party.members,body.message);
+      return Response.json({ok:true});
+    }
     if (requestUrl.pathname === '/internal/party/state' && request.method === 'POST') {
       const body = await request.json().catch(() => ({})) as { userId?: string };
       if (!body.userId) return new Response('userId required',{status:400});
@@ -378,6 +400,14 @@ export class LoftLifeRealtime {
       return;
     }
     error(ws,'bad_request','Unknown transit action');
+  }
+  private async relayUsers(userIds:string[],message:unknown) {
+    if(!this.env.REALTIME||!userIds.length)return;
+    const state=await this.partyData();
+    const instances=[...new Set(userIds.map(id=>state.userInstances[id]).filter((value):value is string=>Boolean(value)))];
+    await Promise.all(instances.map(instanceId=>this.env.REALTIME!.get(this.env.REALTIME!.idFromName(instanceId)).fetch(new Request('https://loftlife-internal/internal/chat/broadcast',{
+      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({userIds,message}),
+    }))));
   }
   private async updatePartyPresence(userId:string,instanceId:string|null) {
     const namespace=this.env.REALTIME;
