@@ -22,10 +22,12 @@ type PanelTab = 'chat' | 'people';
 
 interface SocialHudProps {
   onEnterWorld: (worldId: string) => void;
+  /** False on mobile browsers/unsupported runtimes: browsing only. */
+  gameplayAllowed: boolean;
 }
 
 /** Chat, presence, friends and shop/world entry points. */
-export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld }) => {
+export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld, gameplayAllowed }) => {
   const {
     status,
     connection,
@@ -549,9 +551,11 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld }) => {
         open={worldsOpen}
         onClose={() => setWorldsOpen(false)}
         onEnter={(worldId) => {
+          if (!gameplayAllowed) return;
           setWorldsOpen(false);
           onEnterWorld(worldId);
         }}
+        gameplayAllowed={gameplayAllowed}
       />
     </>
   );

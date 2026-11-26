@@ -60,8 +60,10 @@ import { HotelDoorTerminalModal } from './components/HotelDoorTerminalModal';
 import { RoomSettingsModal } from './components/RoomSettingsModal';
 import { SyncConflictModal } from './components/SyncConflictModal';
 import { SocialHud } from './components/SocialHud';
+import { PlatformNotice } from './components/PlatformNotice';
 import { TouchControls } from './components/TouchControls';
-import { isTouchDevice } from './game/touchInput';
+import { useDeviceEnvironment } from './game/platform';
+import { MOBILE_GAMEPLAY_MESSAGE } from '../shared/device-platform.mjs';
 
 // Three.js is only needed once the world renders; lazy-loading keeps the
 // sign-in wall light.
@@ -71,6 +73,7 @@ const RoomViewport = lazy(() =>
 import { api } from './net/api';
 import { MIC_MODE_INFO, VOICE_RANGE_INFO } from '../shared/voice-controls.mjs';
 import { isEditableElement, resolveShortcut } from '../shared/desktop-shortcuts.mjs';
+import { wallAxis } from '../shared/room-walls.mjs';
 import { useSession } from './session';
 import { sfx } from './game/audio';
 import {
@@ -323,14 +326,19 @@ export default function App() {
   const [doorTerminalOpen, setDoorTerminalOpen] = useState(false);
   const [elevatorModalOpen, setElevatorModalOpen] = useState(false);
 
-  const touchDevice = useMemo(() => isTouchDevice(), []);
+  // Runtime environment decides controls and gameplay access. Width is never
+  // used: a narrow desktop window stays a desktop, and a mobile PWA is still a
+  // mobile browser rather than the Android APK.
+  const device = useDeviceEnvironment();
+  const gameplayAllowed = device.gameplayAllowed;
+  const touchDevice = device.controls === 'touch';
   // Phones have no camera switcher: portrait renders isometric, landscape renders
   // play view, and the view follows device rotation.
   const [isPortrait, setIsPortrait] = useState<boolean>(() => readPortraitOrientation());
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
-    isTouchDevice() ? (readPortraitOrientation() ? 'isometric' : 'play') : 'isometric'
+    device.controls === 'touch' ? (readPortraitOrientation() ? 'isometric' : 'play') : 'isometric'
   );
-  const [mode, setMode] = useState<GameMode>('walk');
+  const [mode, setMode] = useState<GameMode>(() => (gameplayAllowed ? 'walk' : 'edit'));
   const [items, setItems] = useState<PlacedItem[]>(initial.items);
   const [history, setHistory] = useState<PlacedItem[][]>([]);
   const [surfaces, setSurfaces] = useState<RoomSurfaceConfig>(initial.surfaces);
@@ -363,7 +371,7 @@ export default function App() {
   const [movingUid, setMovingUid] = useState<string | null>(null);
 
   // UI Chrome state
-  const [dockCollapsed, setDockCollapsed] = useState(() => isTouchDevice());
+  const [dockCollapsed, setDockCollapsed] = useState(() => device.controls === 'touch');
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [roomSettingsOpen, setRoomSettingsOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
@@ -380,9 +388,17 @@ export default function App() {
   const [cityMapOpen, setCityMapOpen] = useState(false);
   const [cityStreet, setCityStreet] = useState('M St & 15th St');
   const [muted, setMuted] = useState(false);
-  // Z toggles between the current camera distance and an avatar close-up.
-  const [avatarZoom, setAvatarZoom] = useState(false);
+  // Z toggles the camera distance only: close avatar view vs wide room view.
+  const [closeZoom, setCloseZoom] = useState(false);
+  // F toggles Follow Character in Isometric Mode; Play View always follows.
+  const [followCharacter, setFollowCharacter] = useState(true);
   const playerPoseRef = useRef({ x: 0, z: 0, yaw: 0 });
+
+  // Dev-only probe so each runtime can be exercised without guessing from CSS.
+  useEffect(() => {
+    if (!(import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) return;
+    (window as unknown as Record<string, unknown>).__loftlife_env = device;
+  }, [device]);
 
   useEffect(() => {
     const update = () => setIsPortrait(readPortraitOrientation());
@@ -404,6 +420,21 @@ export default function App() {
     if (!touchDevice || mode === 'edit') return;
     setViewMode(isPortrait ? 'isometric' : 'play');
   }, [touchDevice, isPortrait, mode]);
+
+  // Mobile browsers and unsupported runtimes get the loft manager only: no
+  // walking, no worlds, no second camera. This is enforced in app state, not
+  // just by hiding the entry buttons.
+  useEffect(() => {
+    if (gameplayAllowed) return;
+    setActiveWorld(null);
+    setActiveResident(null);
+    setLocation('room');
+    setMode('edit');
+    setViewMode('isometric');
+    setSelectedUid(null);
+    setPlacingCatalogId(null);
+    setMovingUid(null);
+  }, [gameplayAllowed]);
 
   // Persist locally always; mirror to the account when signed in.
   useEffect(() => {
@@ -591,6 +622,10 @@ export default function App() {
 
   const handleChangeLocation = useCallback(
     (next: WorldLocation) => {
+      if (!gameplayAllowed && next !== 'room') {
+        showHint(MOBILE_GAMEPLAY_MESSAGE);
+        return;
+      }
       sfx.playToggle(next === 'world');
       setLocation(next);
       setNpcChat(null);
@@ -624,7 +659,7 @@ export default function App() {
         );
       }
     },
-    [hallwayFloor, roomName, showHint, touchDevice]
+    [gameplayAllowed, hallwayFloor, roomName, showHint, touchDevice]
   );
 
   const handleUnlockRoomDoor = useCallback(() => {
@@ -643,6 +678,10 @@ export default function App() {
 
   const handleEnterSuiteFromHallway = useCallback(
     (roomNumber: string) => {
+      if (!gameplayAllowed) {
+        showHint(MOBILE_GAMEPLAY_MESSAGE);
+        return;
+      }
       if (roomNumber === PLAYER_SUITE_NUMBER) {
         setActiveResident(null);
         handleChangeLocation('room');
@@ -662,7 +701,7 @@ export default function App() {
         showNpcChat(res.name, res.greeting);
       }
     },
-    [handleChangeLocation, showHint, showNpcChat, touchDevice]
+    [gameplayAllowed, handleChangeLocation, showHint, showNpcChat, touchDevice]
   );
 
   const handleUnlockMainWithKeycard = useCallback(() => {
@@ -698,6 +737,11 @@ export default function App() {
 
   const handleArriveFloor = useCallback(
     (floor: 'L' | 2 | 3 | 4) => {
+      if (!gameplayAllowed) {
+        setElevatorModalOpen(false);
+        showHint(MOBILE_GAMEPLAY_MESSAGE);
+        return;
+      }
       setElevatorModalOpen(false);
       if (floor === 'L') {
         handleChangeLocation('lobby');
@@ -709,12 +753,16 @@ export default function App() {
         showHint(`Arrived on Floor ${floor} · Walk down the hallway to Suites ${floor}01–${floor}04`);
       }
     },
-    [handleChangeLocation, showHint]
+    [gameplayAllowed, handleChangeLocation, showHint]
   );
 
   /** Load a player-created world into the room builder. */
   const handleEnterWorld = useCallback(
     async (worldId: string) => {
+      if (!gameplayAllowed) {
+        showHint(MOBILE_GAMEPLAY_MESSAGE);
+        return;
+      }
       try {
         const world = await api.world(worldId);
         if (!world.canEnter || !world.items) {
@@ -741,7 +789,7 @@ export default function App() {
         showHint(error instanceof Error ? error.message : 'Could not enter that world');
       }
     },
-    [session, showHint]
+    [gameplayAllowed, session, showHint]
   );
 
   /** Return from a player world to the hotel suite. */
@@ -781,6 +829,10 @@ export default function App() {
   }, []);
 
   const handleModeSwitch = (next: GameMode) => {
+    if (next === 'walk' && !gameplayAllowed) {
+      showHint(MOBILE_GAMEPLAY_MESSAGE);
+      return;
+    }
     sfx.playClick();
     setMode(next);
     if (next === 'walk') {
@@ -794,6 +846,10 @@ export default function App() {
   };
 
   const handleTogglePlayView = useCallback(() => {
+    if (!gameplayAllowed) {
+      showHint(MOBILE_GAMEPLAY_MESSAGE);
+      return;
+    }
     sfx.playClick();
     setViewMode((prev) => {
       const next = prev === 'play' ? 'isometric' : 'play';
@@ -803,13 +859,13 @@ export default function App() {
         setPlacingCatalogId(null);
         setMovingUid(null);
         setAvatarModalOpen(false);
-        showHint('Play View · WASD move · Click or drag mouse to look · Esc unlocks cursor');
+        showHint('Play View · WASD move · drag to look · Z close/wide');
       } else {
-        showHint('Isometric View');
+        showHint('Isometric View · click to walk · WASD pans · F follow · Z zoom');
       }
       return next;
     });
-  }, [showHint]);
+  }, [gameplayAllowed, showHint]);
 
   const handlePlaceItem = useCallback(
     (candidate: Omit<PlacedItem, 'uid'>) => {
@@ -824,7 +880,7 @@ export default function App() {
   );
 
   const handleFinishMove = useCallback(
-    (uid: string, gx: number, gz: number, rot: 0 | 1 | 2 | 3, wall?: 'north' | 'west') => {
+    (uid: string, gx: number, gz: number, rot: 0 | 1 | 2 | 3, wall?: PlacedItem['wall']) => {
       pushHistory(items);
       setItems((prev) =>
         prev.map((it) => (it.uid === uid ? { ...it, gx, gz, rot, wall } : it))
@@ -927,7 +983,7 @@ export default function App() {
       }
       if (e.key === 'h' || e.key === 'H') {
         setDockCollapsed((c) => !c);
-      } else if (e.key === 'v' || e.key === 'V') {
+      } else if ((e.key === 'v' || e.key === 'V') && gameplayAllowed) {
         handleTogglePlayView();
       } else if ((e.key === 'm' || e.key === 'M') && location === 'world') {
         sfx.playClick();
@@ -961,7 +1017,8 @@ export default function App() {
           let nextGx = selectedItem.gx;
           let nextGz = selectedItem.gz;
           if (selectedCatalog.layer === 'wall') {
-            if (selectedItem.wall === 'west') {
+            // Wall items slide along their own wall: X on north/south, Z on east/west.
+            if (wallAxis(selectedItem.wall ?? 'north') === 'z') {
               nextGz = snapGrid(
                 Math.max(0, Math.min(GRID_SIZE - selectedCatalog.size[0], selectedItem.gz + dz))
               );
@@ -1044,13 +1101,17 @@ export default function App() {
 
   const handleBoardTransit = useCallback(
     (lineId: string, stopId: string) => {
+      if (!gameplayAllowed) {
+        showHint(MOBILE_GAMEPLAY_MESSAGE);
+        return;
+      }
       // Riding needs the chase camera, except in portrait where isometric is pinned.
       if (!(touchDevice && isPortrait)) setViewMode('play');
       setMode('walk');
       const sent = session.boardTransit(lineId, stopId);
       if (!sent) showHint('Connecting… try boarding again in a moment');
     },
-    [session, showHint, touchDevice, isPortrait]
+    [gameplayAllowed, session, showHint, touchDevice, isPortrait]
   );
 
   const handleExitTransit = useCallback(() => {
@@ -1065,13 +1126,31 @@ export default function App() {
     showHint(`Voice range · ${info.label}${info.meters ? ` (${info.meters} m)` : ''}`);
   }, [session, showHint]);
 
-  /** Z toggles a distance change only; the camera angle is never reset. */
-  const toggleAvatarZoom = useCallback(() => {
+  /** Z toggles a distance change only; angle, target and follow are untouched. */
+  const toggleCloseZoom = useCallback(() => {
     sfx.playClick();
-    const next = !avatarZoom;
-    setAvatarZoom(next);
-    showHint(next ? 'Avatar zoom · press Z to restore the camera' : 'Camera distance restored');
-  }, [avatarZoom, showHint]);
+    const next = !closeZoom;
+    setCloseZoom(next);
+    showHint(
+      next ? 'Close view · Z returns to the wide room view' : 'Wide room view · Z zooms in close'
+    );
+  }, [closeZoom, showHint]);
+
+  /** F changes only Follow Character, and only in Isometric Mode. */
+  const toggleFollowCharacter = useCallback(() => {
+    if (viewMode === 'play') {
+      showHint('Play View always follows · V switches to Isometric for camera-free mode');
+      return;
+    }
+    sfx.playClick();
+    const next = !followCharacter;
+    setFollowCharacter(next);
+    showHint(
+      next
+        ? 'Following your avatar · WASD pans temporarily, F stops following'
+        : 'Camera free · WASD pans freely, F follows your avatar again'
+    );
+  }, [followCharacter, showHint, viewMode]);
 
   const filteredCatalog = useMemo(() => {
     if (categoryFilter === 'all') return FURNITURE_CATALOG;
@@ -1098,9 +1177,10 @@ export default function App() {
     conflictOpen;
 
   // Desktop shortcuts. T drives whichever microphone mode is selected, R
-  // cycles the voice range, C toggles the shared chat panel and Z toggles the
-  // avatar zoom. Shared resolver: nothing fires while typing or in a dialog,
-  // and the furniture builder keeps R for rotating.
+  // cycles the voice range, C toggles the shared chat panel, Z toggles the
+  // close/wide camera distance and F toggles Isometric follow. Shared
+  // resolver: nothing fires while typing or in a dialog, and the furniture
+  // builder keeps R for rotating.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return;
@@ -1127,9 +1207,12 @@ export default function App() {
         event.preventDefault();
         sfx.playClick();
         session.toggleChat();
-      } else if (action === 'avatar-zoom') {
+      } else if (action === 'camera-zoom') {
         event.preventDefault();
-        toggleAvatarZoom();
+        toggleCloseZoom();
+      } else if (action === 'follow-camera') {
+        event.preventDefault();
+        toggleFollowCharacter();
       }
     };
     // Key-up is deliberately not gated by focus or dialogs, so a held talk key
@@ -1148,7 +1231,8 @@ export default function App() {
     anyModalOpen,
     mode,
     cycleRange,
-    toggleAvatarZoom,
+    toggleCloseZoom,
+    toggleFollowCharacter,
     showHint,
     session.voice.range,
     session.pressMicrophone,
@@ -1157,8 +1241,9 @@ export default function App() {
   ]);
 
   // Switching camera mode or leaving the scene never carries a zoom across.
+  // Follow Character is a player preference, so it survives both.
   useEffect(() => {
-    setAvatarZoom(false);
+    setCloseZoom(false);
   }, [viewMode, location]);
 
   const locationTitle = activeWorld
@@ -1233,7 +1318,8 @@ export default function App() {
         placingRotation={placingRotation}
         placingColor={placingColor}
         movingUid={movingUid}
-        avatarZoom={avatarZoom}
+        closeZoom={closeZoom}
+        followCharacter={followCharacter}
         modalOpen={anyModalOpen}
         remotePlayers={remoteInThisScene}
         playerPoseRef={playerPoseRef}
@@ -1374,6 +1460,7 @@ export default function App() {
           </button>
         )}
         {/* Exit to Main World / Return to My Suite Quick Travel */}
+        {gameplayAllowed && (
         <button
           type="button"
           onClick={() => {
@@ -1403,6 +1490,7 @@ export default function App() {
             </>
           )}
         </button>
+        )}
 
         {/* City Grid Map Toggle (when in Main City) */}
         {location === 'world' && (
@@ -1424,7 +1512,7 @@ export default function App() {
         )}
 
         {/* Camera switcher is desktop-only: phones derive the view from orientation. */}
-        {!touchDevice && (
+        {device.desktop && (
           <div className={`p-1 rounded-xl border flex items-center gap-1 ${hudPanelClass}`}>
             <button
               type="button"
@@ -1540,12 +1628,12 @@ export default function App() {
 
           <button
             type="button"
-            title={avatarZoom ? 'Restore camera distance (Z)' : 'Zoom to your avatar (Z)'}
-            aria-label={avatarZoom ? 'Restore camera distance' : 'Zoom to your avatar'}
-            aria-pressed={avatarZoom}
-            onClick={toggleAvatarZoom}
+            title={closeZoom ? 'Wide room view (Z)' : 'Close avatar view (Z)'}
+            aria-label={closeZoom ? 'Wide room view' : 'Close avatar view'}
+            aria-pressed={closeZoom}
+            onClick={toggleCloseZoom}
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-              avatarZoom
+              closeZoom
                 ? 'bg-[#39ff14] text-[#051205]'
                 : 'text-slate-300 hover:bg-white/10 hover:text-[#39ff14]'
             }`}
@@ -1633,7 +1721,7 @@ export default function App() {
               </span>
               <span className="opacity-75">
                 {placingCatalogItem?.layer === 'wall'
-                  ? 'Click North or West wall'
+                  ? 'Click any wall (N, S, E or W)'
                   : 'Click floor tile to place'}
               </span>
             </div>
@@ -1847,7 +1935,11 @@ export default function App() {
               </div>
 
               <div className="text-xs opacity-70 flex items-center gap-2 whitespace-nowrap">
-                {touchDevice ? (
+                {!gameplayAllowed ? (
+                  <span>
+                    Loft manager · gameplay needs the Android app or a supported desktop browser
+                  </span>
+                ) : touchDevice ? (
                   <span>
                     {location === 'world'
                       ? 'Tap street to walk · Tap a LoftLine stop to board · Tap Hotel doors for Keycard'
@@ -1869,7 +1961,7 @@ export default function App() {
                   </>
                 ) : location === 'world' ? (
                   <>
-                    <span>Click street or WASD + Shift sprint</span>
+                    <span>Click street to walk · WASD pans · Shift sprint</span>
                     <span aria-hidden="true">·</span>
                     <span>M City Map</span>
                     <span aria-hidden="true">·</span>
@@ -1877,7 +1969,7 @@ export default function App() {
                   </>
                 ) : location === 'lobby' ? (
                   <>
-                    <span>Click floor or WASD</span>
+                    <span>Click floor to walk · WASD pans</span>
                     <span aria-hidden="true">·</span>
                     <span>North Elevator → Floors 2–4</span>
                     <span aria-hidden="true">·</span>
@@ -1901,7 +1993,7 @@ export default function App() {
                   </>
                 ) : (
                   <>
-                    <span>Click floor or WASD</span>
+                    <span>Click floor to walk · WASD pans · F follow · Z zoom</span>
                     <span aria-hidden="true">·</span>
                     <span>West Door: press E to enter Keycard → Lobby &amp; Elevator</span>
                   </>
@@ -2188,7 +2280,7 @@ export default function App() {
 
       {/* Mobile virtual stick, drag-look and contextual buttons */}
       <TouchControls
-        active={touchDevice && !anyModalOpen && session.status !== 'loading'}
+        active={device.controls === 'touch' && !anyModalOpen && session.status !== 'loading'}
         voice={session.voice}
         chatOpen={session.chatOpen}
         onCycleRange={cycleRange}
@@ -2205,10 +2297,18 @@ export default function App() {
           setRoomSettingsOpen(true);
         }}
         onEmote={() => triggerEmote(activeEmote === 'dance' ? 'wave' : 'dance')}
+        viewMode={viewMode}
+        closeZoom={closeZoom}
+        followCharacter={followCharacter}
+        onToggleZoom={toggleCloseZoom}
+        onToggleFollow={toggleFollowCharacter}
       />
 
       {/* Community: chat, presence, friends, shop and worlds */}
-      <SocialHud onEnterWorld={handleEnterWorld} />
+      <SocialHud onEnterWorld={handleEnterWorld} gameplayAllowed={gameplayAllowed} />
+
+      {/* Unsupported runtimes see the dashboard + loft manager only. */}
+      {!gameplayAllowed && <PlatformNotice platformLabel={device.label} />}
 
       {/* Device vs account suite: nothing moves until the player chooses */}
       {conflict && (
@@ -2243,6 +2343,8 @@ export default function App() {
         mode={mode}
         canEdit={canEditRoom}
         touchDevice={touchDevice}
+        gameplayAllowed={gameplayAllowed}
+        platformLabel={device.label}
         isPortrait={isPortrait}
         voice={session.voice}
         onEnableVoice={session.enableVoice}

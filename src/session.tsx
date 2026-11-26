@@ -51,7 +51,7 @@ import {
   rangeToAudibleMode,
   sensitivityToThreshold,
 } from '../shared/voice-controls.mjs';
-import { isTouchDevice } from './game/touchInput';
+import { resolveDeviceEnvironment } from './game/platform';
 
 export type SessionStatus = 'loading' | 'anonymous' | 'online' | 'offline';
 
@@ -178,7 +178,9 @@ const EMPTY_WALLET: Wallet = { yuanzi: 0, tongbao: 0 };
 const VOICE_PREFS_KEY = 'loftlife_voice_prefs_v1';
 
 function loadDeviceVoicePreferences(): VoicePreferences {
-  const micMode: MicrophoneMode = isTouchDevice() ? 'open-mic' : 'push-to-talk';
+  // Only the Android APK defaults to open mic; desktop touchscreens use PTT.
+  const micMode: MicrophoneMode =
+    resolveDeviceEnvironment().controls === 'touch' ? 'open-mic' : 'push-to-talk';
   const fallback = normalizeVoicePreferences({ range: 'off', micMode, sensitivity: 0.55 });
   try {
     const raw = localStorage.getItem(VOICE_PREFS_KEY);

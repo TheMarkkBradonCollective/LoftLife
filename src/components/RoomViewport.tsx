@@ -36,7 +36,16 @@ import {
 } from '../game/worldBuilder';
 import { createTransitBusMesh, createTransitStopMarker } from '../game/transitBuilder';
 import { touchInput } from '../game/touchInput';
-import { AVATAR_ZOOM_MIN_DISTANCE, dampValue, zoomTowardAvatar } from '../../shared/camera-zoom.mjs';
+import { dampValue } from '../../shared/camera-zoom.mjs';
+import {
+  closeDistanceFor,
+  cutawayForCamera,
+  followCamera,
+  panBoundsFor,
+  panCamera,
+  playViewDistance,
+} from '../../shared/camera-modes.mjs';
+import { WALL_ROT_STEPS, wallAxis } from '../../shared/room-walls.mjs';
 import type {
   ActiveResident,
   AvatarConfig,
@@ -49,6 +58,12 @@ import type {
   WorldLocation,
 } from '../game/types';
 import type { RemotePlayer, TransitLine, TransitVehicle } from '../net/realtime';
+
+/** Stored rotation step for a wall item, matching its wall facing. */
+function wallRotationFor(wall: PlacedItem['wall']): 0 | 1 | 2 | 3 {
+  const step = WALL_ROT_STEPS[wall ?? 'north'];
+  return (step ?? 0) as 0 | 1 | 2 | 3;
+}
 
 /** One live avatar for another connected player. */
 interface RemoteRigEntry {
@@ -111,7 +126,10 @@ interface RoomViewportProps {
   placingRotation: 0 | 1 | 2 | 3;
   placingColor: string;
   movingUid: string | null;
-  avatarZoom?: boolean;
+  /** Z: close vs wide camera distance only. */
+  closeZoom?: boolean;
+  /** F (Isometric Mode): orbit target tracks the avatar. */
+  followCharacter?: boolean;
   modalOpen?: boolean;
   isTouch?: boolean;
   remotePlayers?: RemotePlayer[];
@@ -130,7 +148,7 @@ interface RoomViewportProps {
     gx: number,
     gz: number,
     rot: 0 | 1 | 2 | 3,
-    wall?: 'north' | 'west'
+    wall?: PlacedItem['wall']
   ) => void;
   onToggleInteractive: (uid: string) => void;
   onEmoteChange: (emote: EmoteType) => void;
@@ -219,7 +237,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   placingRotation,
   placingColor,
   movingUid,
-  avatarZoom = false,
+  closeZoom = false,
+  followCharacter = true,
   modalOpen = false,
   isTouch = false,
   remotePlayers = [],
@@ -252,10 +271,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   // Camera distance/position captured the first time Z zoomed in, so the second
   // press returns to the exact previous view instead of a default.
   const zoomStateRef = useRef<{
-    isometric?: {
-      position: { x: number; y: number; z: number };
-      target: { x: number; y: number; z: number };
-    };
+    wideDistance?: number;
     playDist?: number;
   }>({});
 
@@ -285,7 +301,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     placingRotation,
     placingColor,
     movingUid,
-    avatarZoom,
+    closeZoom,
+    followCharacter,
     modalOpen,
     isTouch,
     remotePlayers,
@@ -332,7 +349,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     placingRotation,
     placingColor,
     movingUid,
-    avatarZoom,
+    closeZoom,
+    followCharacter,
     modalOpen,
     isTouch,
     remotePlayers,
@@ -393,13 +411,13 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     selectionBox: THREE.LineSegments;
     ghostGroup: THREE.Group | null;
     ghostKey: string;
-    ghostState: {
-      valid: boolean;
-      gx: number;
-      gz: number;
-      wall?: 'north' | 'west';
-    };
-    wallCut: { north: boolean; west: boolean };
+          ghostState: {
+        valid: boolean;
+        gx: number;
+        gz: number;
+        wall?: PlacedItem['wall'];
+      };
+      wallCut: { north: boolean; south: boolean; east: boolean; west: boolean };
     cameraAnim: {
       active: boolean;
       pos: THREE.Vector3;
@@ -669,8 +687,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       selectionBox,
       ghostGroup: null as THREE.Group | null,
       ghostKey: '',
-      ghostState: { valid: false, gx: 0, gz: 0, wall: undefined as 'north' | 'west' | undefined },
-      wallCut: { north: false, west: false },
+      ghostState: { valid: false, gx: 0, gz: 0, wall: undefined as PlacedItem['wall'] },
+      wallCut: { north: false, south: false, east: false, west: false },
       cameraAnim: {
         active: false,
         pos: new THREE.Vector3(),
@@ -724,14 +742,18 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
       (window as unknown as Record<string, unknown>).__loftlife = {
         camera: () => camera.position.toArray(),
+        target: () => controls.target.toArray(),
+        distance: () => camera.position.distanceTo(controls.target),
         cutaway: () => ({ ...handles.wallCut }),
         view: () => propsRef.current.viewMode,
+        follow: () => propsRef.current.followCharacter,
+        zoom: () => propsRef.current.closeZoom,
         mode: () => propsRef.current.mode,
         location: () => propsRef.current.location,
         avatar: () => ({ x: handles.avatarState.x, z: handles.avatarState.z }),
         wallItems: () =>
           propsRef.current.items
-            .filter((item) => item.wall === 'north' || item.wall === 'west')
+            .filter((item) => Boolean(item.wall))
             .map((item) => ({
               wall: item.wall,
               visible: handles.furnitureMap.get(item.uid)?.visible ?? null,
@@ -1338,27 +1360,34 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
       let gx = 0;
       let gz = 0;
-      let wall: 'north' | 'west' | undefined;
+      let wall: PlacedItem['wall'];
       let foundHit = false;
 
       if (cat.layer === 'wall') {
-        const wallHits = raycaster.intersectObjects([
-          roomHandles.northWallRaycastPlane,
-          roomHandles.westWallRaycastPlane,
-        ]);
+        const wallPlanes: { mesh: THREE.Mesh; wall: NonNullable<PlacedItem['wall']> }[] = [
+          { mesh: roomHandles.northWallRaycastPlane, wall: 'north' },
+          { mesh: roomHandles.southWallRaycastPlane, wall: 'south' },
+          { mesh: roomHandles.westWallRaycastPlane, wall: 'west' },
+          { mesh: roomHandles.eastWallRaycastPlane, wall: 'east' },
+        ];
+        const wallHits = raycaster.intersectObjects(wallPlanes.map((entry) => entry.mesh));
         if (wallHits.length > 0) {
           const hit = wallHits[0];
-          foundHit = true;
-          if (hit.object === roomHandles.westWallRaycastPlane) {
-            wall = 'west';
-            gx = 0;
-            gz = snapGrid(hit.point.z + GRID_SIZE / 2 - cat.size[0] / 2);
-            gz = Math.max(0, Math.min(GRID_SIZE - cat.size[0], gz));
-          } else {
-            wall = 'north';
-            gz = 0;
-            gx = snapGrid(hit.point.x + GRID_SIZE / 2 - cat.size[0] / 2);
-            gx = Math.max(0, Math.min(GRID_SIZE - cat.size[0], gx));
+          const target = wallPlanes.find((entry) => entry.mesh === hit.object);
+          if (target) {
+            wall = target.wall;
+            const span = cat.size[0];
+            const along = wallAxis(wall) === 'x' ? hit.point.x : hit.point.z;
+            const start = snapGrid(along + GRID_SIZE / 2 - span / 2);
+            const clamped = Math.max(0, Math.min(GRID_SIZE - span, start));
+            if (wallAxis(wall) === 'x') {
+              gx = clamped;
+              gz = 0;
+            } else {
+              gz = clamped;
+              gx = 0;
+            }
+            foundHit = true;
           }
         }
       } else {
@@ -1385,7 +1414,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           catalogId: activeCatalogId,
           gx,
           gz,
-          rot: cat.layer === 'wall' ? (wall === 'west' ? 1 : 0) : rot,
+          rot: cat.layer === 'wall' ? wallRotationFor(wall) : rot,
           wall,
           color: '#ffffff',
         },
@@ -1398,7 +1427,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         catalogId: activeCatalogId,
         gx,
         gz,
-        rot: cat.layer === 'wall' ? (wall === 'west' ? 1 : 0) : rot,
+        rot: cat.layer === 'wall' ? wallRotationFor(wall) : rot,
         wall,
         color: '#ffffff',
       });
@@ -1533,7 +1562,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
               cand.uid,
               gx,
               gz,
-              cat?.layer === 'wall' ? (wall === 'west' ? 1 : 0) : cand.rot,
+              cat?.layer === 'wall' ? wallRotationFor(wall) : cand.rot,
               wall
             );
           } else {
@@ -1875,7 +1904,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
               catalogId: pId,
               gx,
               gz,
-              rot: cat?.layer === 'wall' ? (wall === 'west' ? 1 : 0) : rot,
+              rot: cat?.layer === 'wall' ? wallRotationFor(wall) : rot,
               wall,
               color: pColor,
               active: cat?.interactive ? true : undefined,
@@ -1897,7 +1926,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
               mUid,
               gx,
               gz,
-              cat?.layer === 'wall' ? (wall === 'west' ? 1 : 0) : rot,
+              cat?.layer === 'wall' ? wallRotationFor(wall) : rot,
               wall
             );
           } else {
@@ -2224,18 +2253,60 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         av.z = safe.z;
       }
 
-      // 1. Movement (WASD + touch stick + Click Path)
-      if (canWalk && !ride) {
-        let moveX = 0;
-        let moveZ = 0;
+      // 1. Input. In Isometric Mode WASD/stick pan the camera and the avatar
+      // only walks click paths; Play View moves the avatar with the same keys.
+      let moveX = 0;
+      let moveZ = 0;
+      if (currentView === 'play') {
         if (keys['KeyW'] || keys['ArrowUp']) moveZ -= 1;
         if (keys['KeyS'] || keys['ArrowDown']) moveZ += 1;
         if (keys['KeyA'] || keys['ArrowLeft']) moveX -= 1;
         if (keys['KeyD'] || keys['ArrowRight']) moveX += 1;
         moveX += touchInput.moveX;
         moveZ += touchInput.moveZ;
+      } else {
+        // In edit mode the arrows nudge the selected item, so only WASD pans.
+        const arrowsPan = currentMode !== 'edit';
+        if (keys['KeyW'] || (arrowsPan && keys['ArrowUp'])) moveZ -= 1;
+        if (keys['KeyS'] || (arrowsPan && keys['ArrowDown'])) moveZ += 1;
+        if (keys['KeyA'] || (arrowsPan && keys['ArrowLeft'])) moveX -= 1;
+        if (keys['KeyD'] || (arrowsPan && keys['ArrowRight'])) moveX += 1;
+        if (currentMode === 'walk') {
+          moveX += touchInput.moveX;
+          moveZ += touchInput.moveZ;
+        }
+      }
 
-        if (moveX !== 0 || moveZ !== 0) {
+      const isoPanActive =
+        currentView === 'isometric' &&
+        !propsRef.current.modalOpen &&
+        !ride &&
+        (moveX !== 0 || moveZ !== 0);
+      if (isoPanActive) {
+        // Translate target and camera together: the orbit angle, the zoom
+        // distance and the Follow Character state are all preserved.
+        handles.cameraAnim.active = false;
+        camera.getWorldDirection(_vec3);
+        _vec3.y = 0;
+        if (_vec3.lengthSq() < 1e-6) _vec3.set(0, 0, -1);
+        _vec3.normalize();
+        _vec3B.set(-_vec3.z, 0, _vec3.x);
+        const pan = panCamera({
+          camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+          target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
+          forward: { x: _vec3.x, z: _vec3.z },
+          right: { x: _vec3B.x, z: _vec3B.z },
+          moveX,
+          moveZ,
+          delta,
+          bounds: panBoundsFor(currentLoc),
+        });
+        camera.position.set(pan.camera.x, pan.camera.y, pan.camera.z);
+        controls.target.set(pan.target.x, pan.target.y, pan.target.z);
+      }
+
+      if (canWalk && !ride && currentView === 'play' && (moveX !== 0 || moveZ !== 0)) {
+        {
           av.path = [];
           av.pendingSeat = null;
           av.pendingPortal = null;
@@ -2245,23 +2316,14 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             standUpFromSeat();
           }
 
-          let dirX = 0;
-          let dirZ = 0;
-          if (currentView === 'play') {
-            const fwdX = -Math.sin(handles.playCam.yaw);
-            const fwdZ = -Math.cos(handles.playCam.yaw);
-            const rightX = Math.cos(handles.playCam.yaw);
-            const rightZ = -Math.sin(handles.playCam.yaw);
-            dirX = rightX * moveX - fwdX * moveZ;
-            dirZ = rightZ * moveX - fwdZ * moveZ;
-          } else {
-            camera.getWorldDirection(_vec3);
-            _vec3.y = 0;
-            _vec3.normalize();
-            _vec3B.set(-_vec3.z, 0, _vec3.x);
-            dirX = _vec3B.x * moveX - _vec3.x * moveZ;
-            dirZ = _vec3B.z * moveX - _vec3.z * moveZ;
-          }
+          // Play View movement is camera-relative, using the direction the
+          // player is looking rather than the avatar's facing.
+          const fwdX = -Math.sin(handles.playCam.yaw);
+          const fwdZ = -Math.cos(handles.playCam.yaw);
+          const rightX = Math.cos(handles.playCam.yaw);
+          const rightZ = -Math.sin(handles.playCam.yaw);
+          const dirX = rightX * moveX - fwdX * moveZ;
+          const dirZ = rightZ * moveX - fwdZ * moveZ;
 
           const len = Math.hypot(dirX, dirZ) || 1;
           const nx = dirX / len;
@@ -2285,17 +2347,25 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           isMoving = true;
 
           // Auto-follow camera behind player facing when walking in Play View
+          // GTA-style recentre: after the player has stopped looking around,
+          // ease behind the avatar. The manual look direction is where the
+          // transition starts, never snapped away, and zoom is untouched.
           if (
             currentView === 'play' &&
             moveZ <= 0 &&
-            performance.now() - handles.playCam.lastManualLookTime > 550
+            performance.now() - handles.playCam.lastManualLookTime > 900
           ) {
             const targetCamYaw = av.yaw + Math.PI;
             handles.playCam.yaw +=
               shortestAngleDiff(handles.playCam.yaw, targetCamYaw) *
-              (1 - Math.exp(-3.2 * delta));
+              (1 - Math.exp(-2.6 * delta));
           }
-        } else if (av.path.length > 0 && currentView === 'isometric') {
+        }
+      }
+
+      // Isometric point-and-click walking runs independently of camera pans.
+      if (canWalk && !ride && currentView === 'isometric' && av.path.length > 0) {
+        {
           const target = av.path[0];
           const dx = target.x - av.x;
           const dz = target.z - av.z;
@@ -2606,12 +2676,20 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             mainWorld.cameraOccluders
           );
         } else if (currentLoc === 'room' || currentLoc === 'resident_room') {
+          // All four walls pull the chase camera in when it would cross them.
           const minWall = -GRID_SIZE / 2 + 0.35;
+          const maxWall = GRID_SIZE / 2 - 0.35;
           if (desiredX < minWall && targetX > minWall) {
             hitScale = Math.min(hitScale, (targetX - minWall) / (targetX - desiredX));
           }
+          if (desiredX > maxWall && targetX < maxWall) {
+            hitScale = Math.min(hitScale, (maxWall - targetX) / (desiredX - targetX));
+          }
           if (desiredZ < minWall && targetZ > minWall) {
             hitScale = Math.min(hitScale, (targetZ - minWall) / (targetZ - desiredZ));
+          }
+          if (desiredZ > maxWall && targetZ < maxWall) {
+            hitScale = Math.min(hitScale, (maxWall - targetZ) / (desiredZ - targetZ));
           }
           hitScale = Math.max(0.28, hitScale);
         } else if (currentLoc === 'hallway') {
@@ -2700,33 +2778,54 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             handles.cameraAnim.active = false;
           }
         }
-        // The zoom lets the orbit come closer than its normal limit; once the
-        // camera is back home, restore the regular range.
-        if (!handles.cameraAnim.active && !propsRef.current.avatarZoom && controls.minDistance !== 5.0) {
+        // Follow Character: translate the target and camera onto the avatar
+        // while preserving the player's orbit angle and zoom distance. WASD
+        // pans are temporary; following resumes when those keys are released.
+        if (propsRef.current.followCharacter && !isoPanActive && !handles.cameraAnim.active) {
+          const follow = followCamera({
+            camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+            target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
+            focus: { x: av.x, y: av.y + 1.0, z: av.z },
+            delta,
+          });
+          camera.position.set(follow.camera.x, follow.camera.y, follow.camera.z);
+          controls.target.set(follow.target.x, follow.target.y, follow.target.z);
+        }
+        // Close zoom may sit inside the orbit's normal minimum; restore the
+        // wide range once the camera is home and Z is off.
+        if (!handles.cameraAnim.active && !propsRef.current.closeZoom && controls.minDistance !== 5.0) {
           controls.minDistance = 5.0;
         }
         controls.update();
+      }
 
-        // Rotating cutaway: keep the suite orbitable through a full 360° by
-        // hiding whichever solid wall sits between the camera and the room.
-        const inSuite = currentLoc === 'room' || currentLoc === 'resident_room';
-        const wallEdge = -GRID_SIZE / 2 + 0.35;
-        const cutNorth = inSuite && camera.position.z < wallEdge;
-        const cutWest = inSuite && camera.position.x < wallEdge;
-        if (cutNorth !== handles.wallCut.north || cutWest !== handles.wallCut.west) {
-          handles.wallCut.north = cutNorth;
-          handles.wallCut.west = cutWest;
-          handles.roomHandles.setWallCutaway(cutNorth, cutWest);
-        }
-        // Wall-mounted decor follows its wall every frame, so art placed or
-        // recoloured while a wall is hidden cannot pop back into view.
-        for (const item of currentItems) {
-          if (item.wall !== 'north' && item.wall !== 'west') continue;
-          const group = handles.furnitureMap.get(item.uid);
-          if (!group) continue;
-          const wanted = item.wall === 'north' ? !cutNorth : !cutWest;
-          if (group.visible !== wanted) group.visible = wanted;
-        }
+      // Rotating four-wall cutaway. Computed from the camera's final position in
+      // BOTH modes, so a 360° orbit works at either zoom distance: any wall the
+      // camera has passed outside of is hidden, and returns when it comes back.
+      const inSuite = currentLoc === 'room' || currentLoc === 'resident_room';
+      const cut = inSuite
+        ? cutawayForCamera(
+            { x: camera.position.x, z: camera.position.z, half: GRID_SIZE / 2 },
+            handles.wallCut
+          )
+        : { north: false, south: false, east: false, west: false };
+      if (
+        cut.north !== handles.wallCut.north ||
+        cut.south !== handles.wallCut.south ||
+        cut.east !== handles.wallCut.east ||
+        cut.west !== handles.wallCut.west
+      ) {
+        handles.wallCut = cut;
+        handles.roomHandles.setWallCutaway(cut);
+      }
+      // Wall-mounted decor follows its wall every frame, so art placed or
+      // recoloured while a wall is hidden cannot pop back into view.
+      for (const item of currentItems) {
+        if (!item.wall) continue;
+        const group = handles.furnitureMap.get(item.uid);
+        if (!group) continue;
+        const wanted = inSuite ? !cut[item.wall] : true;
+        if (group.visible !== wanted) group.visible = wanted;
       }
 
       // Proximity prompt check in BOTH Play View and Isometric Walk!
@@ -2893,15 +2992,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     const loc = propsRef.current.location;
 
     if (viewMode === 'play') {
-      h.wallCut.north = false;
-      h.wallCut.west = false;
-      h.roomHandles.setWallCutaway(false, false);
-      // The isometric cutaway hides wall decor; restore it for the chase view.
-      for (const item of propsRef.current.items) {
-        if (item.wall !== 'north' && item.wall !== 'west') continue;
-        const group = h.furnitureMap.get(item.uid);
-        if (group) group.visible = true;
-      }
+      // The per-frame cutaway recomputes for the chase camera immediately.
+      h.wallCut = { north: false, south: false, east: false, west: false };
+      h.roomHandles.setWallCutaway(h.wallCut);
       h.controls.enabled = false;
       h.cameraAnim.active = false;
       h.camera.fov = 52;
@@ -3386,63 +3479,56 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     }
   }, [location, mode, selectedUid, movingUid, items]);
 
-  // Avatar zoom (Z): shorten the camera distance toward the avatar while
-  // keeping the exact viewing direction. Nothing else about the camera changes.
+  // Close/Wide distance (Z). Only camera distance changes: the viewing
+  // direction, orbit target and Follow Character state are untouched. Play
+  // View keeps following the avatar at both distances.
   useEffect(() => {
     const h = sceneHandlesRef.current;
     if (!h) return;
     const zoom = zoomStateRef.current;
 
     if (viewMode === 'play') {
-      // A stale isometric capture must never be reused after a view switch.
-      zoom.isometric = undefined;
-      if (avatarZoom) {
+      zoom.wideDistance = undefined;
+      if (closeZoom) {
         if (zoom.playDist === undefined) zoom.playDist = h.playCam.targetDist;
-        h.playCam.targetDist = Math.max(1.5, zoom.playDist * 0.45);
+        h.playCam.targetDist = playViewDistance(zoom.playDist, true);
       } else if (zoom.playDist !== undefined) {
-        h.playCam.targetDist = zoom.playDist;
+        h.playCam.targetDist = playViewDistance(zoom.playDist, false);
         zoom.playDist = undefined;
       }
       return;
     }
 
-    if (avatarZoom) {
-      if (!zoom.isometric) {
-        zoom.isometric = {
-          position: {
-            x: h.camera.position.x,
-            y: h.camera.position.y,
-            z: h.camera.position.z,
-          },
-          target: { x: h.controls.target.x, y: h.controls.target.y, z: h.controls.target.z },
-        };
-      }
-      // OrbitControls would clamp the close-up back to its normal minimum.
-      h.controls.minDistance = Math.min(h.controls.minDistance, AVATAR_ZOOM_MIN_DISTANCE);
-      const result = zoomTowardAvatar({
-        position: zoom.isometric.position,
-        target: zoom.isometric.target,
-        avatar: { x: h.avatarState.x, y: 1.0, z: h.avatarState.z },
-        minDistance: AVATAR_ZOOM_MIN_DISTANCE,
-      });
-      h.cameraAnim.pos.set(result.position.x, result.position.y, result.position.z);
-      h.cameraAnim.target.set(result.target.x, result.target.y, result.target.z);
+    zoom.playDist = undefined;
+    const target = new THREE.Vector3(
+      h.controls.target.x,
+      h.controls.target.y,
+      h.controls.target.z
+    );
+    const offset = new THREE.Vector3().subVectors(h.camera.position, target);
+    const distance = offset.length();
+    if (distance < 1e-3) return;
+
+    if (closeZoom) {
+      if (zoom.wideDistance === undefined) zoom.wideDistance = distance;
+      const close = closeDistanceFor(zoom.wideDistance);
+      // OrbitControls would otherwise clamp the close-up to its normal range.
+      h.controls.minDistance = Math.min(h.controls.minDistance, close);
+      offset.setLength(close);
+      h.cameraAnim.pos.copy(target).add(offset);
+      h.cameraAnim.target.copy(target);
       h.cameraAnim.active = true;
-    } else if (zoom.isometric) {
-      h.cameraAnim.pos.set(
-        zoom.isometric.position.x,
-        zoom.isometric.position.y,
-        zoom.isometric.position.z
-      );
-      h.cameraAnim.target.set(
-        zoom.isometric.target.x,
-        zoom.isometric.target.y,
-        zoom.isometric.target.z
-      );
+    } else if (zoom.wideDistance !== undefined) {
+      // Restore the wide distance around the current target, so a rotation
+      // performed while zoomed in is preserved rather than snapped back.
+      h.controls.minDistance = 5.0;
+      offset.setLength(zoom.wideDistance);
+      h.cameraAnim.pos.copy(target).add(offset);
+      h.cameraAnim.target.copy(target);
       h.cameraAnim.active = true;
-      zoom.isometric = undefined;
+      zoom.wideDistance = undefined;
     }
-  }, [avatarZoom, viewMode]);
+  }, [closeZoom, viewMode]);
 
   if (webglError) {
     return (

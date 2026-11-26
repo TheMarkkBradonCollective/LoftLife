@@ -42,6 +42,8 @@ export interface FurnitureCatalogItem {
   defaultColor: string;
 }
 
+export type WallSide = 'north' | 'east' | 'south' | 'west';
+
 export interface PlacedItem {
   uid: string;
   catalogId: string;
@@ -51,8 +53,8 @@ export interface PlacedItem {
   gz: number;
   /** Rotation steps (0, 1, 2, 3) * 90 deg */
   rot: 0 | 1 | 2 | 3;
-  /** For wall items: 'north' or 'west' */
-  wall?: 'north' | 'west';
+  /** For wall items: which of the four suite walls it hangs on. */
+  wall?: WallSide;
   color: string;
   /** Interactive state (e.g., lamp on/off, tv on/off) */
   active?: boolean;

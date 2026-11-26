@@ -128,7 +128,9 @@ export function sanitizeItems(input) {
       rot: intInRange(raw.rot, 0, 3, `items[${index}].rot`),
       color: hex(raw.color, '#e6dfd3'),
     };
-    if (raw.wall === 'north' || raw.wall === 'west') item.wall = raw.wall;
+    if (raw.wall === 'north' || raw.wall === 'south' || raw.wall === 'east' || raw.wall === 'west') {
+      item.wall = raw.wall;
+    }
     if (typeof raw.active === 'boolean') item.active = raw.active;
     return item;
   });

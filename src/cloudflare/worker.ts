@@ -573,7 +573,7 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
       if (![raw.gx,raw.gz,raw.rot].every(Number.isInteger) || Number(raw.gx)<0 || Number(raw.gx)>14 || Number(raw.gz)<0 || Number(raw.gz)>14 || Number(raw.rot)<0 || Number(raw.rot)>3) return fail(`Invalid placement at index ${i}.`,400,'invalid_input');
       const color = typeof raw.color==='string' && /^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color.toLowerCase() : '#e6dfd3';
       const item: Record<string,unknown> = {uid,catalogId:raw.catalogId,gx:raw.gx,gz:raw.gz,rot:raw.rot,color};
-      if (raw.wall==='north'||raw.wall==='west') item.wall=raw.wall;
+      if (raw.wall==='north'||raw.wall==='south'||raw.wall==='east'||raw.wall==='west') item.wall=raw.wall;
       if (typeof raw.active==='boolean') item.active=raw.active;
       items.push(item);
     }

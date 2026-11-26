@@ -211,14 +211,15 @@ test('desktop shortcuts resolve to the shared voice, chat and camera actions', (
   assert.equal(resolveShortcut({ code: 'KeyT' }), 'microphone');
   assert.equal(resolveShortcut({ code: 'KeyR' }), 'voice-range');
   assert.equal(resolveShortcut({ code: 'KeyC' }), 'chat');
-  assert.equal(resolveShortcut({ code: 'KeyZ' }), 'avatar-zoom');
+  assert.equal(resolveShortcut({ code: 'KeyZ' }), 'camera-zoom');
+  assert.equal(resolveShortcut({ code: 'KeyF' }), 'follow-camera');
   assert.equal(resolveShortcut({ code: 'KeyR', mode: 'edit' }), 'rotate');
   assert.equal(resolveShortcut({ code: 'KeyE' }), null);
   assert.equal(resolveShortcut({ key: 't' }), 'microphone', 'falls back to the key label');
 });
 
 test('shortcuts never fire while typing or while a dialog owns the screen', () => {
-  for (const code of ['KeyT', 'KeyR', 'KeyC', 'KeyZ']) {
+  for (const code of ['KeyT', 'KeyR', 'KeyC', 'KeyZ', 'KeyF']) {
     assert.equal(resolveShortcut({ code, typing: true }), null);
     assert.equal(resolveShortcut({ code, modalOpen: true }), null);
   }

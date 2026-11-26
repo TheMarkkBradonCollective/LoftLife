@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { DoorOpen, Globe2, Loader2, Lock, Plus, Trash2, UserPlus, X } from 'lucide-react';
 import { api, ApiError, type WorldAccess, type WorldKind, type WorldSummary } from '../net/api';
+import { MOBILE_GAMEPLAY_MESSAGE } from '../../shared/device-platform.mjs';
 import { useSession } from '../session';
 
 const panel = 'bg-[#0b100d]/97 text-slate-100 border-[#39ff14]/30 neon-panel-glow';
@@ -29,10 +30,17 @@ interface WorldsModalProps {
   open: boolean;
   onClose: () => void;
   onEnter: (worldId: string) => void;
+  /** Mobile browsers can browse/manage but never launch a world. */
+  gameplayAllowed?: boolean;
 }
 
 /** Create, publish, share and enter player-owned worlds. */
-export const WorldsModal: React.FC<WorldsModalProps> = ({ open, onClose, onEnter }) => {
+export const WorldsModal: React.FC<WorldsModalProps> = ({
+  open,
+  onClose,
+  onEnter,
+  gameplayAllowed = true,
+}) => {
   const { status } = useSession();
   const online = status === 'online';
 
@@ -87,8 +95,8 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({ open, onClose, onEnter
       setName('');
       await load();
       setTab('mine');
-      // A brand-new world opens straight into build mode.
-      if (world.canEdit) onEnter(world.id);
+      // A brand-new world opens straight into build mode on supported runtimes.
+      if (world.canEdit && gameplayAllowed) onEnter(world.id);
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'Could not create world');
     } finally {
@@ -183,6 +191,13 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({ open, onClose, onEnter
           </div>
         )}
 
+        {!gameplayAllowed && (
+          <div className="px-4 py-2.5 text-[11px] leading-snug border-b border-amber-300/20 bg-amber-400/10 text-amber-100 flex items-start gap-2">
+            <Lock className="w-3.5 h-3.5 text-amber-300 shrink-0 mt-0.5" />
+            <span>{MOBILE_GAMEPLAY_MESSAGE}</span>
+          </div>
+        )}
+
         {tab === 'mine' && (
           <form onSubmit={create} className="px-4 py-2.5 border-b border-white/8 flex flex-wrap items-center gap-2">
             <input
@@ -270,7 +285,7 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({ open, onClose, onEnter
                 </div>
 
                 <div className="ml-auto flex items-center gap-1.5">
-                  {world.canEnter && (
+                  {gameplayAllowed && world.canEnter && (
                     <button
                       type="button"
                       onClick={() => onEnter(world.id)}

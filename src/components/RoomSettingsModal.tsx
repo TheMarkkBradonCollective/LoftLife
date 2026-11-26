@@ -3,6 +3,7 @@ import {
   Eye,
   Footprints,
   Keyboard,
+  Lock,
   Mic,
   MicOff,
   Move,
@@ -32,6 +33,9 @@ interface RoomSettingsModalProps {
   mode: GameMode;
   canEdit: boolean;
   touchDevice: boolean;
+  /** False on mobile browsers and unsupported runtimes: editor only. */
+  gameplayAllowed: boolean;
+  platformLabel: string;
   isPortrait: boolean;
   /** One shared snapshot drives desktop, mobile and this panel. */
   voice: VoiceSnapshot;
@@ -98,6 +102,8 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
   mode,
   canEdit,
   touchDevice,
+  gameplayAllowed,
+  platformLabel,
   isPortrait,
   voice,
   onEnableVoice,
@@ -196,17 +202,27 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
         {canEdit ? (
           <div className="px-5 pt-4">
             {editing ? (
-              <button
-                type="button"
-                onClick={() => {
-                  sfx.playClick();
-                  onExitEdit();
-                }}
-                className="w-full px-4 py-3 rounded-xl bg-white/10 text-slate-100 text-xs font-bold flex items-center justify-center gap-2 hover:bg-white/20 transition-colors"
-              >
-                <Footprints className="w-4 h-4" />
-                Back to walking
-              </button>
+              gameplayAllowed ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    sfx.playClick();
+                    onExitEdit();
+                  }}
+                  className="w-full px-4 py-3 rounded-xl bg-white/10 text-slate-100 text-xs font-bold flex items-center justify-center gap-2 hover:bg-white/20 transition-colors"
+                >
+                  <Footprints className="w-4 h-4" />
+                  Back to walking
+                </button>
+              ) : (
+                <div className="px-3 py-2.5 rounded-xl border border-amber-300/30 bg-amber-400/10 text-[11px] leading-snug text-amber-100 flex items-start gap-2">
+                  <Lock className="w-3.5 h-3.5 text-amber-300 shrink-0 mt-0.5" />
+                  <span>
+                    Loft manager only on {platformLabel}. Walking and world entry need the Android
+                    app or a supported desktop browser.
+                  </span>
+                </div>
+              )
             ) : (
               <button
                 type="button"
@@ -441,7 +457,7 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
             <p className="text-[11px] leading-relaxed text-slate-400">
               {touchDevice
                 ? 'The voice bubble on the right holds Range and the mic button. The gear opens this panel.'
-                : 'T is the microphone control, R cycles the range, C opens chat and Z zooms on your avatar.'}
+                : 'T is the microphone control, R cycles the range, C opens chat, Z toggles close/wide and F follows your avatar in Isometric.'}
             </p>
           </section>
 
@@ -453,16 +469,35 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
             <div className="rounded-xl border border-white/10 bg-[#101713] divide-y divide-white/8">
               <div className={rowClass}>
                 <RowLabel
+                  icon={<Lock className="w-3.5 h-3.5" />}
+                  label="Device access"
+                  detail={
+                    gameplayAllowed
+                      ? `${platformLabel} · gameplay, world entry and desktop/mobile controls loaded for this runtime`
+                      : `${platformLabel} · dashboard and loft management only; gameplay is refused by the app`
+                  }
+                />
+                <span
+                  className={`text-[11px] font-mono-tabular shrink-0 ${
+                    gameplayAllowed ? 'text-[#39ff14]' : 'text-amber-300'
+                  }`}
+                >
+                  {gameplayAllowed ? 'Play' : 'Limited'}
+                </span>
+              </div>
+
+              <div className={rowClass}>
+                <RowLabel
                   icon={<Move className="w-3.5 h-3.5" />}
                   label="Movement"
                   detail={
                     touchDevice
-                      ? 'On-screen stick, or tap the floor to walk there'
-                      : 'WASD or arrow keys, or click the floor to walk there'
+                      ? 'Tap the floor to walk · the stick pans the Isometric camera or moves in Play View'
+                      : 'Click the floor to walk · WASD pans in Isometric and moves in Play View'
                   }
                 />
                 <span className="text-[11px] font-mono-tabular text-slate-400 shrink-0">
-                  {touchDevice ? 'Stick' : 'WASD'}
+                  {touchDevice ? 'Tap · Stick' : 'Click · WASD'}
                 </span>
               </div>
 
@@ -472,12 +507,12 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
                   label="Camera"
                   detail={
                     touchDevice
-                      ? 'Follows your device: portrait is isometric, landscape is play view'
-                      : 'V switches view · Z zooms on your avatar without changing the angle'
+                      ? 'Portrait is Isometric, landscape is Play View · Follow and Close/Wide sit above the voice bubble'
+                      : 'V switches view · F toggles follow (Isometric) · Z switches Close/Wide distance without resetting the angle'
                   }
                 />
                 <span className="text-[11px] font-mono-tabular text-slate-400 shrink-0">
-                  {touchDevice ? (isPortrait ? 'Isometric' : 'Play') : 'V · Z'}
+                  {touchDevice ? 'Follow · Zoom' : 'V · F · Z'}
                 </span>
               </div>
 

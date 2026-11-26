@@ -5,13 +5,14 @@
  * browser. `mode === 'edit'` keeps the room builder's existing R = rotate.
  */
 
-/** @typedef {'microphone'|'voice-range'|'chat'|'avatar-zoom'|'rotate'} ShortcutAction */
+/** @typedef {'microphone'|'voice-range'|'chat'|'camera-zoom'|'follow-camera'|'rotate'} ShortcutAction */
 
 export const SHORTCUT_CODES = {
   microphone: 'KeyT',
   voiceRange: 'KeyR',
   chat: 'KeyC',
-  avatarZoom: 'KeyZ',
+  cameraZoom: 'KeyZ',
+  followCamera: 'KeyF',
 };
 
 /**
@@ -54,8 +55,11 @@ export function resolveShortcut(input) {
       return 'microphone';
     case SHORTCUT_CODES.chat:
       return 'chat';
-    case SHORTCUT_CODES.avatarZoom:
-      return 'avatar-zoom';
+    case SHORTCUT_CODES.cameraZoom:
+      return 'camera-zoom';
+    case SHORTCUT_CODES.followCamera:
+      // F is Isometric-only; the app ignores it in Play View.
+      return 'follow-camera';
     case SHORTCUT_CODES.voiceRange:
       // In the furniture builder R still rotates the selection.
       return input.mode === 'edit' ? 'rotate' : 'voice-range';

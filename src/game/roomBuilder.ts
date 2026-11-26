@@ -10,6 +10,8 @@ export interface RoomEnvironmentHandles {
   floorTopMesh: THREE.Mesh;
   floorRaycastPlane: THREE.Mesh;
   northWallRaycastPlane: THREE.Mesh;
+  southWallRaycastPlane: THREE.Mesh;
+  eastWallRaycastPlane: THREE.Mesh;
   westWallRaycastPlane: THREE.Mesh;
   gridOverlay: THREE.Group;
   exitDoorGroup: THREE.Group;
@@ -19,7 +21,12 @@ export interface RoomEnvironmentHandles {
   updateSurfaces: (floor: FloorStyleId, wall: WallStyleId, maxAnisotropy: number) => void;
   updateMoodBackdrop: (mood: LightingMood) => void;
   setGridVisible: (visible: boolean) => void;
-  setWallCutaway: (hideNorth: boolean, hideWest: boolean) => void;
+  setWallCutaway: (hidden: {
+    north: boolean;
+    south: boolean;
+    east: boolean;
+    west: boolean;
+  }) => void;
   setDoorUnlocked: (unlocked: boolean) => void;
   setRoomBadge: (suiteNumber: string, maxAnisotropy: number) => void;
 }
@@ -111,16 +118,18 @@ export function buildRoomArchitecture(
   const wallHeight = 3.45;
   const wallThick = 0.24;
 
-  // Cutaway buckets. The suite only builds north and west walls, and a 360°
-  // orbit has to hide whichever one sits between the camera and the room.
-  // Meshes are registered explicitly (rather than guessed from bounds) so the
-  // window skyline and the entry door never disappear with a wall.
+  // Cutaway buckets, one per wall. A 360° orbit hides whichever walls sit
+  // between the camera and the room; meshes are registered explicitly (rather
+  // than guessed from bounds) so window skylines, the entry door and the
+  // balcony view never disappear with a wall.
   const northOccluders: THREE.Object3D[] = [];
+  const southOccluders: THREE.Object3D[] = [];
+  const eastOccluders: THREE.Object3D[] = [];
   const westOccluders: THREE.Object3D[] = [];
 
   // --- North Wall (z = -7.12) ---
   const northWall = new THREE.Mesh(
-    new THREE.BoxGeometry(GRID_SIZE + wallThick, wallHeight, wallThick),
+    new THREE.BoxGeometry(GRID_SIZE + wallThick * 2, wallHeight, wallThick),
     wallMat
   );
   northWall.position.set(-wallThick / 2, wallHeight / 2, -half - wallThick / 2);
@@ -282,6 +291,9 @@ export function buildRoomArchitecture(
   sunDisc.rotation.y = Math.PI / 2;
   sunDisc.position.set(-half - 4.9, 3.1, -2.5);
   roomGroup.add(sunDisc);
+  // The skyline is part of the wall's dressing: it must cut away with the wall,
+  // otherwise it sits between an outside camera and the room.
+  const westExterior: THREE.Object3D[] = [skyPanel, sunDisc];
 
   const cityMat = new THREE.MeshStandardMaterial({
     color: 0x6f849c,
@@ -296,7 +308,9 @@ export function buildRoomArchitecture(
     const bldg = new THREE.Mesh(new THREE.BoxGeometry(bd, bh, bw), cityMat);
     bldg.position.set(-half - 2.1 - (b % 3) * 1.05, bh / 2 - 0.1, -4.4 + b * 0.98);
     roomGroup.add(bldg);
+    westExterior.push(bldg);
   }
+  westOccluders.push(...westExterior);
 
   const westWallRaycastPlane = new THREE.Mesh(
     new THREE.PlaneGeometry(GRID_SIZE, wallHeight),
@@ -305,6 +319,155 @@ export function buildRoomArchitecture(
   westWallRaycastPlane.rotation.y = Math.PI / 2;
   westWallRaycastPlane.position.set(-half + 0.01, wallHeight / 2, 0);
   roomGroup.add(westWallRaycastPlane);
+
+  // --- South Wall (z = +7.12) with a panoramic window (x: -4..+3) ---
+  // Mirrors the west glazing so the enclosed suite has daylight from two
+  // sides. Piers keep both corners closed; the window and its skyline are
+  // separate meshes so cutaways never leave a floating view.
+  const southPierWest = new THREE.Mesh(
+    new THREE.BoxGeometry(3.24, wallHeight, wallThick),
+    wallMat
+  );
+  southPierWest.position.set(-5.62, wallHeight / 2, half + wallThick / 2);
+  southPierWest.castShadow = true;
+  southPierWest.receiveShadow = true;
+  roomGroup.add(southPierWest);
+  southOccluders.push(southPierWest);
+
+  const southPierEast = new THREE.Mesh(
+    new THREE.BoxGeometry(4.24, wallHeight, wallThick),
+    wallMat
+  );
+  southPierEast.position.set(5.12, wallHeight / 2, half + wallThick / 2);
+  southPierEast.castShadow = true;
+  southPierEast.receiveShadow = true;
+  roomGroup.add(southPierEast);
+  southOccluders.push(southPierEast);
+
+  const southBottom = new THREE.Mesh(
+    new THREE.BoxGeometry(7.0, 0.7, wallThick),
+    wallMat
+  );
+  southBottom.position.set(-0.5, 0.35, half + wallThick / 2);
+  southBottom.castShadow = true;
+  southBottom.receiveShadow = true;
+  roomGroup.add(southBottom);
+  southOccluders.push(southBottom);
+
+  const southTop = new THREE.Mesh(
+    new THREE.BoxGeometry(7.0, 0.6, wallThick),
+    wallMat
+  );
+  southTop.position.set(-0.5, 3.15, half + wallThick / 2);
+  southTop.castShadow = true;
+  southTop.receiveShadow = true;
+  roomGroup.add(southTop);
+  southOccluders.push(southTop);
+
+  const southBaseboardWest = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.16, 0.03), trimMat);
+  southBaseboardWest.position.set(-5.5, 0.08, half - 0.015);
+  southBaseboardWest.receiveShadow = true;
+  roomGroup.add(southBaseboardWest);
+  southOccluders.push(southBaseboardWest);
+
+  const southBaseboardEast = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.16, 0.03), trimMat);
+  southBaseboardEast.position.set(5.0, 0.08, half - 0.015);
+  southBaseboardEast.receiveShadow = true;
+  roomGroup.add(southBaseboardEast);
+  southOccluders.push(southBaseboardEast);
+
+  const southSill = new THREE.Mesh(new THREE.BoxGeometry(7.08, 0.05, 0.32), trimMat);
+  southSill.position.set(-0.5, 0.71, half + 0.06);
+  southSill.receiveShadow = true;
+  roomGroup.add(southSill);
+  southOccluders.push(southSill);
+
+  for (const mx of [-4.0, -2.25, -0.5, 1.25, 3.0]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.06, 2.15, 0.08), windowFrameMat);
+    post.position.set(mx, 1.78, half + 0.1);
+    roomGroup.add(post);
+    southOccluders.push(post);
+  }
+  for (const my of [0.74, 2.83]) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(7.06, 0.06, 0.08), windowFrameMat);
+    rail.position.set(-0.5, my, half + 0.1);
+    roomGroup.add(rail);
+    southOccluders.push(rail);
+  }
+
+  const southGlassPane = new THREE.Mesh(
+    new THREE.PlaneGeometry(7.0, 2.1),
+    new THREE.MeshPhysicalMaterial({
+      color: 0xdff2ff,
+      roughness: 0.08,
+      metalness: 0.05,
+      transparent: true,
+      opacity: 0.18,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    })
+  );
+  southGlassPane.rotation.y = Math.PI;
+  southGlassPane.position.set(-0.5, 1.78, half + 0.1);
+  roomGroup.add(southGlassPane);
+  southOccluders.push(southGlassPane);
+
+  const southWallRaycastPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(GRID_SIZE, wallHeight),
+    new THREE.MeshBasicMaterial({ visible: false })
+  );
+  southWallRaycastPlane.rotation.y = Math.PI;
+  southWallRaycastPlane.position.set(0, wallHeight / 2, half - 0.01);
+  roomGroup.add(southWallRaycastPlane);
+
+  // South exterior skyline (shares the mood-driven sky/sun/city materials).
+  const southSkyPanel = new THREE.Mesh(new THREE.PlaneGeometry(14.0, 6.2), windowSkyMat);
+  southSkyPanel.rotation.y = Math.PI;
+  southSkyPanel.position.set(-0.5, 2.3, half + 5.2);
+  roomGroup.add(southSkyPanel);
+
+  const southSunDisc = new THREE.Mesh(new THREE.CircleGeometry(0.62, 24), windowSunMat);
+  southSunDisc.rotation.y = Math.PI;
+  southSunDisc.position.set(1.8, 3.1, half + 4.9);
+  roomGroup.add(southSunDisc);
+  const southExterior: THREE.Object3D[] = [southSkyPanel, southSunDisc];
+
+  for (let b = 0; b < 9; b++) {
+    const bh = 1.6 + ((b * 29) % 5) * 0.7;
+    const bw = 0.85 + (b % 3) * 0.25;
+    const bd = 0.9 + ((b * 11) % 3) * 0.35;
+    const bldg = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), cityMat);
+    bldg.position.set(-5.6 + b * 1.3, bh / 2 - 0.1, half + 2.1 + (b % 3) * 1.05);
+    roomGroup.add(bldg);
+    southExterior.push(bldg);
+  }
+  southOccluders.push(...southExterior);
+
+  // --- East Wall (x = +7.12), solid for furniture and artwork ---
+  const eastWall = new THREE.Mesh(
+    new THREE.BoxGeometry(wallThick, wallHeight, GRID_SIZE + wallThick * 2),
+    wallMat
+  );
+  eastWall.position.set(half + wallThick / 2, wallHeight / 2, -wallThick / 2);
+  eastWall.castShadow = true;
+  eastWall.receiveShadow = true;
+  roomGroup.add(eastWall);
+  eastOccluders.push(eastWall);
+
+  const eastBaseboard = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.16, GRID_SIZE), trimMat);
+  eastBaseboard.position.set(half - 0.015, 0.08, 0);
+  eastBaseboard.receiveShadow = true;
+  roomGroup.add(eastBaseboard);
+  eastOccluders.push(eastBaseboard);
+
+  const eastWallRaycastPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(GRID_SIZE, wallHeight),
+    new THREE.MeshBasicMaterial({ visible: false })
+  );
+  eastWallRaycastPlane.rotation.y = -Math.PI / 2;
+  eastWallRaycastPlane.position.set(half - 0.01, wallHeight / 2, 0);
+  roomGroup.add(eastWallRaycastPlane);
+
 
   // --- Hotel Suite Entry Door & Keycard Lock (West wall at z = 5.0) ---
   const exitDoorGroup = new THREE.Group();
@@ -430,6 +593,22 @@ export function buildRoomArchitecture(
   roomGroup.add(westCap);
   westOccluders.push(westCap);
 
+  const southCap = new THREE.Mesh(
+    new THREE.BoxGeometry(GRID_SIZE + wallThick + 0.04, 0.06, wallThick + 0.04),
+    capMat
+  );
+  southCap.position.set(-wallThick / 2, wallHeight + 0.03, half + wallThick / 2);
+  roomGroup.add(southCap);
+  southOccluders.push(southCap);
+
+  const eastCap = new THREE.Mesh(
+    new THREE.BoxGeometry(wallThick + 0.04, 0.06, GRID_SIZE + wallThick + 0.04),
+    capMat
+  );
+  eastCap.position.set(half + wallThick / 2, wallHeight + 0.03, -wallThick / 2);
+  roomGroup.add(eastCap);
+  eastOccluders.push(eastCap);
+
   // --- Edit Mode Architectural Floor Grid (1m primary + 0.5m sub-grid) ---
   const gridOverlay = new THREE.Group();
   gridOverlay.visible = false;
@@ -464,14 +643,25 @@ export function buildRoomArchitecture(
   // `setWallCutaway` toggles the buckets registered above. The invisible
   // raycast planes are never in them: edit-mode placement keeps working even
   // while a wall is hidden.
-  let cutawayNorth = false;
-  let cutawayWest = false;
-  function setWallCutaway(hideNorth: boolean, hideWest: boolean) {
-    if (hideNorth === cutawayNorth && hideWest === cutawayWest) return;
-    cutawayNorth = hideNorth;
-    cutawayWest = hideWest;
-    for (const object of northOccluders) object.visible = !hideNorth;
-    for (const object of westOccluders) object.visible = !hideWest;
+  const cutaway = { north: false, south: false, east: false, west: false };
+  const occluderBuckets: Record<keyof typeof cutaway, THREE.Object3D[]> = {
+    north: northOccluders,
+    south: southOccluders,
+    east: eastOccluders,
+    west: westOccluders,
+  };
+  function setWallCutaway(hidden: {
+    north: boolean;
+    south: boolean;
+    east: boolean;
+    west: boolean;
+  }) {
+    for (const side of Object.keys(cutaway) as (keyof typeof cutaway)[]) {
+      const hide = hidden[side] === true;
+      if (hide === cutaway[side]) continue;
+      cutaway[side] = hide;
+      for (const object of occluderBuckets[side]) object.visible = !hide;
+    }
   }
 
   let currentFloorTex: THREE.CanvasTexture | null = floorTopMat.map as THREE.CanvasTexture;
@@ -533,6 +723,8 @@ export function buildRoomArchitecture(
     floorTopMesh,
     floorRaycastPlane,
     northWallRaycastPlane,
+    southWallRaycastPlane,
+    eastWallRaycastPlane,
     westWallRaycastPlane,
     gridOverlay,
     exitDoorGroup,

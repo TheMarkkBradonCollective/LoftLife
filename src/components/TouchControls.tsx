@@ -1,8 +1,21 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUp, FastForward, MessageCircle, Mic, MicOff, Settings, Sparkles } from 'lucide-react';
+import {
+  ArrowUp,
+  FastForward,
+  Maximize2,
+  MessageCircle,
+  Mic,
+  MicOff,
+  Minimize2,
+  Settings,
+  Sparkles,
+  UserCheck,
+  UserX,
+} from 'lucide-react';
 import { touchInput } from '../game/touchInput';
 import { MIC_MODE_INFO, VOICE_RANGE_INFO } from '../../shared/voice-controls.mjs';
 import type { VoiceSnapshot } from '../session';
+import type { ViewMode } from '../game/types';
 
 interface TouchControlsProps {
   /** Hidden while a modal is open so taps reach the dialog. */
@@ -16,6 +29,14 @@ interface TouchControlsProps {
   onToggleChat: () => void;
   onOpenVoiceSettings: () => void;
   onEmote: () => void;
+  /** Isometric pans with the stick; Play View walks with it. */
+  viewMode: ViewMode;
+  /** Z state, shown on the touch zoom button. */
+  closeZoom: boolean;
+  /** F state (Isometric only); Play View always follows. */
+  followCharacter: boolean;
+  onToggleZoom: () => void;
+  onToggleFollow: () => void;
 }
 
 const STICK_RADIUS = 48;
@@ -62,6 +83,11 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
   onToggleChat,
   onOpenVoiceSettings,
   onEmote,
+  viewMode,
+  closeZoom,
+  followCharacter,
+  onToggleZoom,
+  onToggleFollow,
 }) => {
   const stickRef = useRef<HTMLDivElement>(null);
   const stickPointer = useRef<number | null>(null);
@@ -152,12 +178,14 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         onPointerUp={releaseStick}
         onPointerCancel={releaseStick}
         onLostPointerCapture={releaseStick}
-        aria-label="Movement stick"
+        aria-label={viewMode === 'play' ? 'Movement stick' : 'Camera pan stick'}
         role="slider"
-        aria-valuetext="Movement"
+        aria-valuetext={viewMode === 'play' ? 'Movement' : 'Camera pan'}
       >
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <span className="text-[9px] uppercase tracking-widest text-[#39ff14]/45">Move</span>
+          <span className="text-[9px] uppercase tracking-widest text-[#39ff14]/45">
+            {viewMode === 'play' ? 'Move' : 'Pan'}
+          </span>
         </div>
         <div
           className="absolute left-1/2 top-1/2 w-14 h-14 rounded-full bg-[#39ff14]/85 border border-[#8eff78] pointer-events-none"
@@ -238,6 +266,42 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         <span className="px-1 text-[9px] font-medium text-slate-400 bg-black/45 rounded">
           {micMode.label}
         </span>
+      </div>
+
+      {/* Camera controls: Follow (isometric only) and Close/Wide zoom. Both
+          are independent, mirror the F and Z keys, and stay out of the way of
+          the canvas gestures. */}
+      <div className="fixed right-4 bottom-[13.5rem] z-40 flex items-center gap-1.5">
+        {viewMode === 'isometric' && (
+          <button
+            type="button"
+            aria-label={followCharacter ? 'Stop following the avatar' : 'Follow the avatar'}
+            aria-pressed={followCharacter}
+            onClick={onToggleFollow}
+            className={`h-10 px-2.5 rounded-xl border flex items-center gap-1.5 text-[10px] font-bold active:scale-95 transition-colors ${
+              followCharacter
+                ? 'bg-[#39ff14] text-[#051205] border-[#8eff78]'
+                : 'bg-[#0b100d]/85 text-slate-200 border-[#39ff14]/40'
+            }`}
+          >
+            {followCharacter ? <UserCheck className="w-3.5 h-3.5" /> : <UserX className="w-3.5 h-3.5" />}
+            {followCharacter ? 'Follow' : 'Free'}
+          </button>
+        )}
+        <button
+          type="button"
+          aria-label={closeZoom ? 'Switch to the wide room view' : 'Switch to the close avatar view'}
+          aria-pressed={closeZoom}
+          onClick={onToggleZoom}
+          className={`h-10 px-2.5 rounded-xl border flex items-center gap-1.5 text-[10px] font-bold active:scale-95 transition-colors ${
+            closeZoom
+              ? 'bg-[#39ff14] text-[#051205] border-[#8eff78]'
+              : 'bg-[#0b100d]/85 text-slate-200 border-[#39ff14]/40'
+          }`}
+        >
+          {closeZoom ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+          {closeZoom ? 'Wide' : 'Close'}
+        </button>
       </div>
 
       {/* Contextual buttons */}
