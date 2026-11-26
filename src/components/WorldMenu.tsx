@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Building2,
@@ -42,6 +42,8 @@ type MenuTab = 'map' | 'world' | 'manage' | 'controls';
 interface WorldMenuProps {
   open: boolean;
   onClose: () => void;
+  /** Opened from the game menu directly on its controls section. */
+  initialTab?: MenuTab;
   location: WorldLocation;
   world: WorldSummary | null;
   suite: SuiteState | null;
@@ -111,7 +113,7 @@ const SmallBadge: React.FC<{ children: React.ReactNode; tone?: 'green' | 'amber'
 );
 
 /** Live room plan: boundary, placed furniture and the player's own marker. */
-const SuiteMiniMap: React.FC<{
+export const SuiteMiniMap: React.FC<{
   items: PlacedItem[];
   playerPoseRef: React.MutableRefObject<{ x: number; z: number; yaw: number }>;
 }> = ({ items, playerPoseRef }) => {
@@ -170,11 +172,11 @@ const SuiteMiniMap: React.FC<{
     frame = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frame);
   }, [items, playerPoseRef]);
-  return <canvas ref={ref} width={320} height={320} className="w-full max-w-[320px] rounded-xl border border-[#39ff14]/20" />;
+  return <canvas ref={ref} width={320} height={320} className="w-full rounded-xl border border-[#39ff14]/20" />;
 };
 
 /** Compact live city plan; the full interactive map is one tap away. */
-const CityMiniMap: React.FC<{
+export const CityMiniMap: React.FC<{
   playerPoseRef: React.MutableRefObject<{ x: number; z: number; yaw: number }>;
 }> = ({ playerPoseRef }) => {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -247,6 +249,7 @@ const CityMiniMap: React.FC<{
 export const WorldMenu: React.FC<WorldMenuProps> = ({
   open,
   onClose,
+  initialTab,
   location,
   world,
   suite,
@@ -276,7 +279,7 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
   onOpenCityMap,
   onEditRoom,
 }) => {
-  const [tab, setTab] = useState<MenuTab>('map');
+  const [tab, setTab] = useState<MenuTab>(initialTab ?? 'map');
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
@@ -346,6 +349,12 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
     // Only refresh when the menu opens for a different world.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, world?.id]);
+
+  useEffect(() => {
+    if (open && initialTab) setTab(initialTab);
+    // Opening the menu again returns to the requested section.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   useEffect(() => {
     if (!open) {

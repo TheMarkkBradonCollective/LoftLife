@@ -4,7 +4,7 @@ import { api, ApiError, type WorldAccess, type WorldKind, type WorldSummary } fr
 import { MOBILE_GAMEPLAY_MESSAGE } from '../../shared/device-platform.mjs';
 import { useSession } from '../session';
 
-const panel = 'bg-[#0b100d]/97 text-slate-100 border-[#39ff14]/30 neon-panel-glow';
+const panel = 'bg-[#15181c]/97 text-slate-100 border-white/20';
 
 const KINDS: WorldKind[] = [
   'hangout',
@@ -148,13 +148,13 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
 
   const list = tab === 'mine' ? mine : publicWorlds;
   const input =
-    'px-2.5 py-1.5 rounded-lg bg-black/40 border border-white/12 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-[#39ff14]/60';
+    'px-2.5 py-1.5 rounded-lg bg-black/40 border border-white/12 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-white/40';
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
       <div className={`w-[min(760px,96vw)] max-h-[86vh] rounded-2xl border overflow-hidden flex flex-col ${panel}`}>
-        <div className="px-4 py-3 border-b border-[#39ff14]/15 flex items-center gap-2">
-          <Globe2 className="w-4 h-4 text-[#39ff14]" />
+        <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
+          <Globe2 className="w-4 h-4 text-white" />
           <h2 className="font-display text-sm font-bold">Worlds</h2>
           <div className="ml-auto flex items-center gap-1">
             {(
@@ -168,7 +168,7 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
                 type="button"
                 onClick={() => setTab(entry.id)}
                 className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold ${
-                  tab === entry.id ? 'bg-[#39ff14] text-[#051205]' : 'text-slate-300 hover:bg-white/10'
+                  tab === entry.id ? 'bg-white text-[#15181b]' : 'text-slate-300 hover:bg-white/10'
                 }`}
               >
                 {entry.label}
@@ -235,7 +235,7 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
             <button
               type="submit"
               disabled={creating || !online}
-              className="px-3 py-1.5 rounded-lg bg-[#39ff14] text-[#051205] text-[11px] font-bold flex items-center gap-1 disabled:opacity-50"
+              className="px-3 py-1.5 rounded-lg bg-white text-[#15181b] text-[11px] font-bold flex items-center gap-1 disabled:opacity-50"
             >
               {creating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
               Create
@@ -258,7 +258,7 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
           )}
 
           {list.map((world) => (
-            <div key={world.id} className="rounded-xl border border-white/10 bg-[#101713] p-3">
+            <div key={world.id} className="rounded-xl border border-white/10 bg-white/[0.05] p-3">
               <div className="flex items-start gap-2 flex-wrap">
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -269,7 +269,7 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
                     <span
                       className={`px-1.5 py-0.5 rounded text-[10px] flex items-center gap-0.5 ${
                         world.published
-                          ? 'bg-[#39ff14]/15 text-[#8eff78]'
+                          ? 'bg-white text-[#15181b]/15 text-white/85'
                           : 'bg-white/10 text-slate-400'
                       }`}
                     >
@@ -289,7 +289,7 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
                     <button
                       type="button"
                       onClick={() => onEnter(world.id)}
-                      className="px-2.5 py-1.5 rounded-lg bg-[#39ff14] text-[#051205] text-[11px] font-bold flex items-center gap-1 hover:bg-[#5bff3b]"
+                      className="px-2.5 py-1.5 rounded-lg bg-white text-[#15181b] text-[11px] font-bold flex items-center gap-1 hover:bg-white/90"
                     >
                       <DoorOpen className="w-3.5 h-3.5" /> Enter
                     </button>
