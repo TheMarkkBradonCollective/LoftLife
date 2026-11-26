@@ -128,7 +128,8 @@ All browser runs used the dev server and Chromium with CDP device emulation
 (viewport, mobile flag, touch points and user agent) in this workspace.
 
 - **Typecheck / build / unit tests:** `npx tsc --noEmit` passes, `npm test`
-  passes 109/109 (including 8 HUD presentation tests), `npm run build`
+  passes 112/112 (including 8 HUD presentation tests and the Node + Worker
+  two-guest city tests), `npm run build`
   succeeds with only the pre-existing chunk-size warning, and
   `npx wrangler deploy --dry-run` bundles the Worker and assets.
 - **Desktop Chrome (1440×900):** `desktop-web`, keyboard/mouse HUD, no

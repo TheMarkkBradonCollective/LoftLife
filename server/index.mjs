@@ -30,7 +30,8 @@ import {
   purchase,
   transactionHistory,
 } from './economy.mjs';
-import { ApiError, forbidden, handler, notFound } from './errors.mjs';
+import { ApiError, forbidden, handler, notFound, unauthorized } from './errors.mjs';
+import { createGuestSession, guestForToken, revokeGuestSession } from './guests.mjs';
 import { attachRealtime, presenceSnapshot } from './realtime.mjs';
 import { partyFor, partyView, pendingInvitesFor } from './parties.mjs';
 import { transitLines } from './transit.mjs';
@@ -116,6 +117,26 @@ export function createApp() {
     authLimiter,
     handler((req, res) => {
       res.json(loginUser(req.body ?? {}));
+    })
+  );
+
+  /** Guest access matches the Worker: city-only, 12-hour opaque session. */
+  app.post(
+    '/api/guest/session',
+    authLimiter,
+    handler((req, res) => {
+      res.status(201).json(createGuestSession(req.body?.displayName));
+    })
+  );
+
+  app.delete(
+    '/api/guest/session',
+    handler((req, res) => {
+      const header = req.get('authorization') ?? '';
+      const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+      if (!guestForToken(token)) throw unauthorized('Guest session is invalid or expired.');
+      revokeGuestSession(token);
+      res.json({ ok: true });
     })
   );
 

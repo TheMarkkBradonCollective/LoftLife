@@ -17,6 +17,7 @@ import {
   verifyPassword,
 } from '../../shared/auth-core.mjs';
 import { normalizeVoicePreferences } from '../../shared/voice-controls.mjs';
+import { resolveInstance } from '../../shared/instance.mjs';
 import { normalizeControlsPayload } from '../../shared/keybindings.mjs';
 
 /**
@@ -816,7 +817,11 @@ export default {
           return fail('A WebSocket upgrade is required.', 426, 'upgrade_required');
         }
         if (!env.REALTIME) return fail('Realtime Durable Object binding is not configured.', 503, 'realtime_unconfigured');
-        const instance = url.searchParams.get('instance') ?? 'city:main';
+        // Clients ask for `city`; only the canonical city and explicit world
+        // ids are routed. Arbitrary city:* shards are rejected here so they
+        // cannot create ghost Durable Objects.
+        const instance = resolveInstance(url.searchParams.get('instance'));
+        if (!instance) return fail('Unknown realtime instance.', 400, 'invalid_instance');
         return env.REALTIME.get(env.REALTIME.idFromName(instance)).fetch(request);
       }
 

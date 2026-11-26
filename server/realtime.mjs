@@ -10,8 +10,11 @@
  * displacement) — this is movement sanity-checking, not full physics
  * re-simulation, which would require a deterministic shared simulation.
  */
+import crypto from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { userForToken } from './auth.mjs';
+import { guestForToken } from './guests.mjs';
+import { CITY_INSTANCE, resolveInstance } from '../shared/instance.mjs';
 import { db, now } from './db.mjs';
 import { canEnterWorld, canEditWorld } from './worlds.mjs';
 import { dmScopeId, isBlockedBetween, recordMessage } from './social.mjs';
@@ -36,6 +39,7 @@ import {
 } from './transit.mjs';
 
 const TICK_MS = 100;
+const DEFAULT_CITY_CAPACITY = 64;
 const MAX_CITY_COORD = 500;
 const MAX_STEP_PER_TICK = 40; // metres; sprint is far slower than this
 const MAX_POSE_PER_SECOND = 30;
@@ -54,12 +58,14 @@ const LOCAL_RANGES = { whisper: 4, say: 14, shout: 35 };
 
 /** @type {Map<string, Instance>} */
 const instances = new Map();
-let nextCityIndex = 1;
 
-export function instanceCapacity() {
-  const configured = Number(process.env.LOFTLIFE_INSTANCE_CAPACITY);
-  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 40;
+export function cityCapacity() {
+  const configured = Number(process.env.LOFTLIFE_CITY_CAPACITY ?? process.env.LOFTLIFE_INSTANCE_CAPACITY);
+  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : DEFAULT_CITY_CAPACITY;
 }
+
+// Kept for existing health/presence callers that used the old name.
+export const instanceCapacity = cityCapacity;
 
 function makeInstance({ id, kind, worldId = null, capacity }) {
   const instance = { id, kind, worldId, capacity, members: new Map() };
@@ -67,17 +73,12 @@ function makeInstance({ id, kind, worldId = null, capacity }) {
   return instance;
 }
 
-function cityInstanceWithSpace() {
-  const capacity = instanceCapacity();
-  for (const instance of instances.values()) {
-    if (instance.kind === 'city' && instance.members.size < instance.capacity) return instance;
-  }
-  const instance = makeInstance({
-    id: `city:${nextCityIndex++}`,
+function cityInstance() {
+  return instances.get(CITY_INSTANCE) ?? makeInstance({
+    id: CITY_INSTANCE,
     kind: 'city',
-    capacity,
+    capacity: cityCapacity(),
   });
-  return instance;
 }
 
 function worldInstance(instanceId, worldId, capacity) {
@@ -97,11 +98,14 @@ function publicInstance(instance) {
 }
 
 function playerView(player) {
+  const shownName = player.isGuest ? `Guest User - ${player.name}` : player.name;
   return {
     connId: player.connId,
     userId: player.userId,
     handle: player.handle,
-    name: player.name,
+    name: shownName,
+    displayName: player.name,
+    isGuest: Boolean(player.isGuest),
     avatar: player.avatar,
     x: round(player.x, 2),
     y: round(player.y, 2),
@@ -173,12 +177,17 @@ function broadcast(instance, payload, exceptConnId = null) {
 }
 
 function joinInstance(player, instance) {
+  if (instance.members.size >= instance.capacity) {
+    fail(player.ws, 'instance_full', instance.kind === 'city' ? 'TheCity is full' : 'That instance is full');
+    player.ws.close(1013, 'instance_full');
+    return false;
+  }
   player.instanceId = instance.id;
   instance.members.set(player.connId, player);
   send(player.ws, {
     t: 'ready',
     instance: publicInstance(instance),
-    you: { connId: player.connId, userId: player.userId, handle: player.handle, name: player.name },
+    you: playerView(player),
     players: [...instance.members.values()].map(playerView),
     vehicles: vehiclesFor(instance.id),
   });
@@ -187,6 +196,7 @@ function joinInstance(player, instance) {
     { t: 'join', player: playerView(player), instanceId: instance.id },
     player.connId
   );
+  return true;
 }
 
 function leaveInstance(player) {
@@ -228,10 +238,15 @@ function handleChat(player, instance, msg) {
     return fail(player.ws, 'rate_limited', 'Too many messages, try again shortly');
   }
 
+  if (player.isGuest && !['city', 'local'].includes(scope)) {
+    return fail(player.ws, 'forbidden', 'Guest visitors can only use public city and nearby chat');
+  }
+
   const from = {
     userId: player.userId,
     handle: player.handle,
-    displayName: player.name,
+    displayName: player.isGuest ? `Guest User - ${player.name}` : player.name,
+    isGuest: Boolean(player.isGuest),
   };
 
   if (scope === 'local') {
@@ -256,9 +271,12 @@ function handleChat(player, instance, msg) {
   }
 
   if (scope === 'city' || scope === 'world') {
-    const saved = recordMessage({
+    const scopeId = instance.kind === 'world' ? instance.worldId : 'main';
+    // Guest messages are ephemeral, matching the Worker: no account row exists
+    // to own persisted history.
+    const saved = player.isGuest ? { id: crypto.randomUUID(), createdAt: now(), scopeId } : recordMessage({
       scope,
-      scopeId: instance.kind === 'world' ? instance.worldId : instance.id,
+      scopeId,
       userId: player.userId,
       body,
     });
@@ -397,6 +415,7 @@ function movePlayerToUser(player, targetUserId) {
 }
 
 function handleJoinFriend(player, msg) {
+  if (player.isGuest) return fail(player.ws, 'forbidden', 'Guest visitors cannot join friends');
   const handle = String(msg.handle ?? '').toLowerCase();
   const row = db.prepare('SELECT id FROM users WHERE handle = ?').get(handle);
   if (!row) return fail(player.ws, 'not_found', 'No player with that handle');
@@ -404,6 +423,7 @@ function handleJoinFriend(player, msg) {
 }
 
 function handleParty(player, msg) {
+  if (player.isGuest) return fail(player.ws, 'forbidden', 'Guest visitors cannot use parties');
   const action = String(msg.action ?? '');
   if (action === 'create') {
     try {
@@ -471,6 +491,7 @@ function handleParty(player, msg) {
 }
 
 function handleVoice(player, instance, msg) {
+  if (player.isGuest) return fail(player.ws, 'forbidden', 'Guest visitors cannot use private voice signalling');
   if (!instance) return;
   if (!['offer', 'answer', 'ice'].includes(String(msg.kind))) {
     return fail(player.ws, 'bad_request', 'Unknown voice signal');
@@ -559,7 +580,19 @@ export function attachRealtime(httpServer) {
       transitLineId: null,
       transitSeat: null,
       ip: req.socket.remoteAddress,
+      isGuest: false,
+      requestedInstance: null,
     };
+
+    const requestUrl = new URL(req.url ?? '/ws', 'http://loftlife.local');
+    const rawInstance = requestUrl.searchParams.get('instance');
+    const requestedInstance = rawInstance === null ? null : resolveInstance(rawInstance);
+    if (rawInstance !== null && !requestedInstance) {
+      fail(ws, 'invalid_instance', 'Unknown realtime instance');
+      ws.close(1008, 'invalid_instance');
+      return;
+    }
+    player.requestedInstance = requestedInstance;
 
     ws.isAlive = true;
     ws.on('pong', () => {
@@ -583,31 +616,66 @@ export function attachRealtime(httpServer) {
 
       if (msg.t === 'hello') {
         if (player.userId) return;
-        let user;
+        const token = String(msg.token ?? '');
+        let user = null;
+        let guest = null;
         try {
-          user = userForToken(String(msg.token ?? ''));
+          user = userForToken(token);
         } catch (error) {
           return fail(ws, error.code ?? 'suspended', error.message ?? 'Account unavailable');
         }
-        if (!user) return fail(ws, 'unauthorized', 'Sign in to play online');
-        const profile = profileFor(user.id);
-        player.userId = user.id;
-        player.handle = user.handle;
-        player.name = profile.name;
-        player.avatar = profile.avatar;
-        clearTimeout(helloTimer);
+        if (!user) guest = guestForToken(token);
+        if (!user && !guest) return fail(ws, 'unauthorized', 'Sign in to play online');
 
         const place = msg.place && typeof msg.place === 'object' ? msg.place : { kind: 'city' };
-        if (place.kind === 'world') {
-          const world = db.prepare('SELECT * FROM worlds WHERE id = ?').get(String(place.worldId ?? ''));
+        const requested = player.requestedInstance;
+        if (guest) {
+          if ((requested && requested !== CITY_INSTANCE) || place.kind === 'world') {
+            fail(ws, 'forbidden', 'Guest sessions can only enter TheCity');
+            ws.close(1008, 'guest_city_only');
+            return;
+          }
+          player.isGuest = true;
+          player.userId = guest.id;
+          player.handle = 'guest';
+          player.name = guest.displayName;
+          player.avatar = null;
+        } else {
+          const profile = profileFor(user.id);
+          player.userId = user.id;
+          player.handle = user.handle;
+          player.name = profile.name;
+          player.avatar = profile.avatar;
+        }
+        clearTimeout(helloTimer);
+
+        if (requested && requested !== CITY_INSTANCE) {
+          const worldId = requested.slice('world:'.length);
+          if (place.kind !== 'world' || String(place.worldId ?? '') !== worldId) {
+            return fail(ws, 'forbidden', 'That instance does not match this place');
+          }
+          const world = db.prepare('SELECT * FROM worlds WHERE id = ?').get(worldId);
           if (!world) return fail(ws, 'not_found', 'That world no longer exists');
           if (!canEnterWorld(world, user.id)) {
             return fail(ws, 'forbidden', 'You do not have access to that world');
           }
           const instance = worldInstance(`world:${world.id}`, world.id, world.max_visitors);
           joinInstance(player, instance);
+        } else if (requested === CITY_INSTANCE) {
+          if (place.kind === 'world') {
+            return fail(ws, 'forbidden', 'That instance does not match this place');
+          }
+          joinInstance(player, cityInstance());
+        } else if (place.kind === 'world') {
+          // Legacy sockets without an instance query keep the old behaviour.
+          const world = db.prepare('SELECT * FROM worlds WHERE id = ?').get(String(place.worldId ?? ''));
+          if (!world) return fail(ws, 'not_found', 'That world no longer exists');
+          if (!canEnterWorld(world, user.id)) {
+            return fail(ws, 'forbidden', 'You do not have access to that world');
+          }
+          joinInstance(player, worldInstance(`world:${world.id}`, world.id, world.max_visitors));
         } else {
-          joinInstance(player, cityInstanceWithSpace());
+          joinInstance(player, cityInstance());
         }
         player.lastSeen = now();
         return;
@@ -709,7 +777,7 @@ export function presenceSnapshot() {
   return {
     online: perInstance.reduce((total, instance) => total + instance.count, 0),
     instances: perInstance,
-    cityCapacity: instanceCapacity(),
+    cityCapacity: cityCapacity(),
   };
 }
 

@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { sha256Hex, verifyAuthToken } from '../../shared/auth-core.mjs';
+import { CITY_INSTANCE, resolveInstance } from '../../shared/instance.mjs';
 import { settingsFor } from './platform';
 import { TRANSIT_LINES } from './transit';
 
@@ -177,10 +178,8 @@ export class LoftLifeRealtime {
       return new Response('Expected WebSocket upgrade', { status: 426 });
     }
     const url = new URL(request.url);
-    const instanceId = url.searchParams.get('instance') ?? 'city:main';
-    if (!/^city:[a-z0-9_-]{1,32}$/.test(instanceId) && !/^world:[a-zA-Z0-9_-]{1,80}$/.test(instanceId)) {
-      return new Response('Invalid instance', { status: 400 });
-    }
+    const instanceId = resolveInstance(url.searchParams.get('instance'));
+    if (!instanceId) return new Response('Invalid instance', { status: 400 });
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1] as HibernatableWebSocket;
@@ -285,7 +284,7 @@ export class LoftLifeRealtime {
     }
     const sql = this.database();
     if (payload.kind === 'guest') {
-      if (instanceId !== 'city:main' || (place && typeof place === 'object' && (place as {kind?:string}).kind === 'world')) {
+      if (instanceId !== CITY_INSTANCE || (place && typeof place === 'object' && (place as {kind?:string}).kind === 'world')) {
         error(ws, 'forbidden', 'Guest sessions can only enter TheCity');
         ws.close(1008, 'guest_city_only');
         return;

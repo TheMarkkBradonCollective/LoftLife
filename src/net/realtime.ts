@@ -179,9 +179,11 @@ export class RealtimeClient {
     this.options.onStatus?.(this.retry === 0 ? 'connecting' : 'reconnecting');
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    // Ask for the logical city; the server resolves it to city:main and
+    // rejects any other client-supplied city shard.
     const instance = this.options.place.kind === 'world'
       ? `world:${this.options.place.worldId}`
-      : 'city:main';
+      : 'city';
     const socket = new WebSocket(`${protocol}://${window.location.host}/ws?instance=${encodeURIComponent(instance)}`);
     this.socket = socket;
 

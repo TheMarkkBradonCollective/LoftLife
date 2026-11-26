@@ -68,8 +68,14 @@ async function newAccount(overrides = {}) {
   return { handle, token: res.json.token, user: res.json.user };
 }
 
-function makeClient(port) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+async function newGuest(displayName) {
+  const res = await api('POST', '/api/guest/session', { body: { displayName } });
+  assert.equal(res.status, 201, JSON.stringify(res.json));
+  return res.json;
+}
+
+function makeClient(port, query = '') {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws${query}`);
   const queue = [];
   const waiters = [];
 
@@ -457,6 +463,7 @@ test('realtime: two players see each other, chat and movement are relayed', asyn
   clientA.send({ t: 'hello', token: a.token, place: { kind: 'city' } });
   const readyA = await clientA.waitFor((m) => m.t === 'ready');
   assert.equal(readyA.instance.kind, 'city');
+  assert.equal(readyA.instance.id, 'city:main');
 
   clientB.send({ t: 'hello', token: b.token, place: { kind: 'city' } });
   const readyB = await clientB.waitFor((m) => m.t === 'ready');
@@ -485,13 +492,83 @@ test('realtime: two players see each other, chat and movement are relayed', asyn
   ).catch(() => null);
   assert.equal(whisper, null, 'a whisper must not reach a distant player');
 
-  const history = await api('GET', `/api/chat/history?scope=city&scopeId=${readyA.instance.id}`, {
+  const history = await api('GET', '/api/chat/history?scope=city&scopeId=main', {
     token: b.token,
   });
   assert.ok(history.json.some((message) => message.body === 'Hello LoftLife'));
 
   clientA.close();
   clientB.close();
+});
+
+test('guest sessions: dev guests share TheCity and keep the city-only contract', async () => {
+  const registered = await newAccount();
+  const guestA = await newGuest('Sky Visitor');
+  const guestB = await newGuest('River Guest');
+  assert.equal(guestA.guest.displayName, 'Sky Visitor');
+  assert.equal(typeof guestA.token, 'string');
+
+  const port = Number(new URL(base).port);
+  const clientA = makeClient(port, '?instance=city');
+  const clientB = makeClient(port, '?instance=city');
+  await Promise.all([clientA.opened, clientB.opened]);
+
+  clientA.send({ t: 'hello', token: guestA.token, place: { kind: 'city' } });
+  const readyA = await clientA.waitFor((m) => m.t === 'ready');
+  assert.equal(readyA.instance.id, 'city:main');
+  assert.equal(readyA.you.isGuest, true);
+  assert.equal(readyA.you.name, 'Guest User - Sky Visitor');
+
+  clientB.send({ t: 'hello', token: guestB.token, place: { kind: 'city' } });
+  const readyB = await clientB.waitFor((m) => m.t === 'ready');
+  assert.equal(readyB.instance.id, readyA.instance.id);
+  assert.ok(readyB.players.some((player) => player.userId === guestA.guest.id));
+
+  const joinNotice = await clientA.waitFor(
+    (m) => m.t === 'join' && m.player.userId === guestB.guest.id
+  );
+  assert.equal(joinNotice.player.name, 'Guest User - River Guest');
+
+  clientA.send({ t: 'pose', x: 8, y: 0, z: 3, yaw: 0.4, location: 'world' });
+  await clientB.waitFor(
+    (m) => m.t === 'snapshot' && m.players.some((p) => p.userId === guestA.guest.id && p.x === 8)
+  );
+
+  clientA.send({ t: 'chat', scope: 'city', body: 'Guest hello' });
+  const chat = await clientB.waitFor((m) => m.t === 'chat' && m.scope === 'city');
+  assert.equal(chat.body, 'Guest hello');
+  assert.equal(chat.from.isGuest, true);
+  assert.equal(chat.from.displayName, 'Guest User - Sky Visitor');
+
+  // Chat throttles before the guest scope guard, so let the city message age.
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  clientA.send({ t: 'chat', scope: 'dm', to: registered.handle, body: 'private' });
+  assert.equal((await clientA.waitFor((m) => m.t === 'error' && m.code === 'forbidden')).code, 'forbidden');
+  clientA.send({ t: 'party', action: 'create' });
+  await clientA.waitFor((m) => m.t === 'error' && m.code === 'forbidden');
+  clientA.send({ t: 'voice', kind: 'offer', to: 'someone', data: {} });
+  await clientA.waitFor((m) => m.t === 'error' && m.code === 'forbidden');
+
+  const invalid = makeClient(port, '?instance=city:foo');
+  await invalid.opened;
+  const invalidError = await invalid.waitFor((m) => m.t === 'error' && m.code === 'invalid_instance');
+  assert.equal(invalidError.code, 'invalid_instance');
+
+  const worldGuest = makeClient(port, '?instance=world:test-world');
+  await worldGuest.opened;
+  worldGuest.send({ t: 'hello', token: guestB.token, place: { kind: 'world', worldId: 'test-world' } });
+  const worldDenied = await worldGuest.waitFor((m) => m.t === 'error' && m.code === 'forbidden');
+  assert.equal(worldDenied.code, 'forbidden');
+
+  const revoked = await api('DELETE', '/api/guest/session', { token: guestA.token });
+  assert.equal(revoked.status, 200);
+  const afterRevoke = makeClient(port, '?instance=city');
+  await afterRevoke.opened;
+  afterRevoke.send({ t: 'hello', token: guestA.token, place: { kind: 'city' } });
+  const refused = await afterRevoke.waitFor((m) => m.t === 'error' && m.code === 'unauthorized');
+  assert.equal(refused.code, 'unauthorized');
+
+  for (const client of [clientA, clientB, invalid, worldGuest, afterRevoke]) client.close();
 });
 
 test('realtime: unauthenticated sockets are refused', async () => {
