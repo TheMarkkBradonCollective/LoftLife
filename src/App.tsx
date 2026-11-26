@@ -2554,8 +2554,6 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
         location={location}
-        guestMode={session.status === 'guest'}
-        onEnterGuestRoom={handleEnterGuestRoom}
         world={activeWorld}
         suite={session.suite}
         roomName={roomName}
