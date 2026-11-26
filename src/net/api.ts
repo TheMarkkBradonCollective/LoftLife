@@ -13,12 +13,28 @@ export interface SessionUser {
   createdAt: number;
 }
 
+export type VoiceRangeSetting = 'off' | 'whisper' | 'talk' | 'shout';
+export type MicrophoneMode =
+  | 'push-to-talk'
+  | 'toggle-to-talk'
+  | 'voice-activation'
+  | 'open-mic'
+  | 'push-to-mute';
+
+/** Account-synced voice preferences (range, microphone mode, sensitivity). */
+export interface VoicePreferences {
+  range: VoiceRangeSetting;
+  micMode: MicrophoneMode;
+  sensitivity: number;
+}
+
 export interface Profile {
   userId: string;
   handle: string;
   displayName: string;
   avatar: AvatarConfig;
   bio: string;
+  voice?: VoicePreferences;
   createdAt: number;
   updatedAt: number;
 }
@@ -221,8 +237,12 @@ export const api = {
       suite: SuiteState;
     }>('/auth/me'),
 
-  updateProfile: (body: { displayName?: string; bio?: string; avatar?: AvatarConfig }) =>
-    request<Profile>('/profile', { method: 'PATCH', body }),
+  updateProfile: (body: {
+    displayName?: string;
+    bio?: string;
+    avatar?: AvatarConfig;
+    voice?: VoicePreferences;
+  }) => request<Profile>('/profile', { method: 'PATCH', body }),
 
   shop: () => request<{ furniture: ShopEntry[]; clothing: ShopEntry[] }>('/shop', { auth: false }),
 

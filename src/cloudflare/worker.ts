@@ -15,6 +15,7 @@ import {
   verifyAuthToken,
   verifyPassword,
 } from '../../shared/auth-core.mjs';
+import { normalizeVoicePreferences } from '../../shared/voice-controls.mjs';
 
 /**
  * Cloudflare Worker: static assets, Neon-backed game APIs and Durable Object realtime.
@@ -417,6 +418,7 @@ function profileView(account: AccountRow, row?: Record<string, unknown>) {
     displayName: String(row?.display_name ?? account.display_name ?? account.handle),
     bio: String(row?.bio ?? ''),
     avatar: parseJsonField(row?.avatar_json, safeAvatar(undefined, account.display_name || account.handle)),
+    voice: normalizeVoicePreferences(parseJsonField(row?.voice_json, {})),
   };
 }
 function suiteView(row?: Record<string, unknown>) {
@@ -527,13 +529,18 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
     const body = await readJson(request);
     const displayName = validateDisplayName(body.displayName ?? account.display_name, account.handle);
     const bio = typeof body.bio === 'string' ? body.bio.replace(/[\\u0000-\\u001f\\u007f]/g,'').trim().slice(0,160) : undefined;
-    const rows = await sql.query('SELECT avatar_json,bio FROM ll_profiles WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
+    const rows = await sql.query('SELECT avatar_json,bio,voice_json FROM ll_profiles WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
     const avatar = body.avatar === undefined ? parseJsonField(rows[0]?.avatar_json,safeAvatar(undefined,displayName)) : safeAvatar(body.avatar,displayName);
+    // Voice preferences are only written when the client sends them, so an
+    // outfit save cannot reset the microphone mode.
+    const voice = body.voice === undefined
+      ? normalizeVoicePreferences(parseJsonField(rows[0]?.voice_json, {}))
+      : normalizeVoicePreferences(body.voice);
     await Promise.all([
       sql.query('UPDATE ll_accounts SET display_name=$1 WHERE id=$2',[displayName,account.id]),
-      sql.query('UPDATE ll_profiles SET display_name=$1,avatar_json=$2,bio=$3,updated_at=$4 WHERE user_id=$5',[displayName,JSON.stringify(avatar),bio ?? String(rows[0]?.bio ?? ''),Date.now(),account.id]),
+      sql.query('UPDATE ll_profiles SET display_name=$1,avatar_json=$2,bio=$3,voice_json=$4,updated_at=$5 WHERE user_id=$6',[displayName,JSON.stringify(avatar),bio ?? String(rows[0]?.bio ?? ''),JSON.stringify(voice),Date.now(),account.id]),
     ]);
-    return json({userId:account.id,handle:account.handle,displayName,bio:bio ?? String(rows[0]?.bio ?? ''),avatar});
+    return json({userId:account.id,handle:account.handle,displayName,bio:bio ?? String(rows[0]?.bio ?? ''),avatar,voice});
   }
   if (path === '/api/inventory' && request.method === 'GET' && sql && account) {
     const rows = await sql.query('SELECT kind,catalog_id,qty,acquired_at FROM ll_inventory WHERE user_id=$1 ORDER BY acquired_at DESC',[account.id]) as Array<Record<string,unknown>>;

@@ -93,12 +93,19 @@ split and the pieces that still need a live Neon sign-in test.
 - Live multiplayer: server-authoritative presence, 10 Hz movement broadcast, city instances that
   open automatically when full, and "join friend" travel between instances.
 - **Parties**: create, invite, accept, kick, leave, cross-instance party chat, and "join leader".
-- **Proximity voice**: opt-in WebRTC mesh, server-relayed SDP/ICE, push-to-talk (hold `T`), audible
-  only inside the whisper/say/shout distance bands, with volume following distance.
+- **Proximity voice**: opt-in WebRTC mesh, server-relayed SDP/ICE, audible only inside the
+  whisper/talk/shout distance bands, with volume following distance. Voice Range (`R` cycles
+  Off → Whisper → Talk → Shout) is separate from the microphone mode (`T`): push-to-talk,
+  toggle-to-talk, voice activation with a sensitivity slider, open mic and push-to-mute. Settings →
+  Audio & Voice holds the mode picker, sensitivity, permission status, input device and a live
+  mic test; preferences save on-device offline and to the account when signed in.
 - **Rideable transit**: two LoftLine routes with marked stops. Seats are assigned by the server,
   rider positions are server-authoritative, and passengers who board the same line share the tram.
-- **Mobile controls**: virtual stick, drag-look, sprint toggle, jump, interact and push-to-talk,
-  driven through the same movement code as the keyboard.
+- **Mobile controls**: virtual stick, drag-look, sprint toggle, jump, interact, a grouped voice
+  bubble (range + mode-aware mic + status indicator) and a chat button, driven through the same
+  shared state and movement code as the desktop keyboard (`T`, `R`, `C`, `Z`).
+- **Avatar zoom**: `Z` (or the camera button) eases the camera toward the avatar and back to the
+  exact previous distance and angle in both isometric and third-person views.
 - Wardrobe studio locks unowned clothing with its server price; the 3D viewport is lazy-loaded so
   the sign-in wall no longer ships Three.js.
 - Reports and admin moderation endpoints; audit log.

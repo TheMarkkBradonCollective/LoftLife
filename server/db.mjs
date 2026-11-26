@@ -57,6 +57,8 @@ CREATE TABLE IF NOT EXISTS profiles (
   display_name TEXT NOT NULL,
   avatar_json  TEXT NOT NULL,
   bio          TEXT NOT NULL DEFAULT '',
+  -- Voice range + microphone mode + sensitivity, synced to the account.
+  voice_json   TEXT NOT NULL DEFAULT '{}',
   updated_at   INTEGER NOT NULL
 );
 
@@ -185,6 +187,16 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS audit_created ON audit_log(created_at DESC);
 `);
+
+// Databases created before voice preferences existed keep their rows; the
+// column is added in place instead of requiring a rebuild.
+const profileColumns = db
+  .prepare('PRAGMA table_info(profiles)')
+  .all()
+  .map((row) => row.name);
+if (!profileColumns.includes('voice_json')) {
+  db.exec("ALTER TABLE profiles ADD COLUMN voice_json TEXT NOT NULL DEFAULT '{}'");
+}
 
 /** Run `fn` inside an IMMEDIATE transaction; rolls back on any throw. */
 export function tx(fn) {

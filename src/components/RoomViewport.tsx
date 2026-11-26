@@ -36,6 +36,7 @@ import {
 } from '../game/worldBuilder';
 import { createTransitBusMesh, createTransitStopMarker } from '../game/transitBuilder';
 import { touchInput } from '../game/touchInput';
+import { AVATAR_ZOOM_MIN_DISTANCE, dampValue, zoomTowardAvatar } from '../../shared/camera-zoom.mjs';
 import type {
   ActiveResident,
   AvatarConfig,
@@ -90,11 +91,6 @@ function createNameTag(text: string): THREE.Sprite {
   return sprite;
 }
 
-export interface CameraPresetRequest {
-  id: number;
-  type: 'overview' | 'closeup' | 'isometric';
-}
-
 interface RoomViewportProps {
   location: WorldLocation;
   hallwayFloor: number;
@@ -115,7 +111,7 @@ interface RoomViewportProps {
   placingRotation: 0 | 1 | 2 | 3;
   placingColor: string;
   movingUid: string | null;
-  cameraPreset: CameraPresetRequest | null;
+  avatarZoom?: boolean;
   modalOpen?: boolean;
   isTouch?: boolean;
   remotePlayers?: RemotePlayer[];
@@ -223,7 +219,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   placingRotation,
   placingColor,
   movingUid,
-  cameraPreset,
+  avatarZoom = false,
   modalOpen = false,
   isTouch = false,
   remotePlayers = [],
@@ -253,6 +249,15 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [webglError, setWebglError] = useState(false);
+  // Camera distance/position captured the first time Z zoomed in, so the second
+  // press returns to the exact previous view instead of a default.
+  const zoomStateRef = useRef<{
+    isometric?: {
+      position: { x: number; y: number; z: number };
+      target: { x: number; y: number; z: number };
+    };
+    playDist?: number;
+  }>({});
 
   const activeItems =
     location === 'resident_room' && activeResident ? activeResident.items : items;
@@ -280,6 +285,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     placingRotation,
     placingColor,
     movingUid,
+    avatarZoom,
     modalOpen,
     isTouch,
     remotePlayers,
@@ -326,6 +332,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     placingRotation,
     placingColor,
     movingUid,
+    avatarZoom,
     modalOpen,
     isTouch,
     remotePlayers,
@@ -402,6 +409,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       yaw: number;
       pitch: number;
       dist: number;
+      /** Where the distance is easing to; Z changes only this. */
+      targetDist: number;
       currentScale: number;
       lastManualLookTime: number;
     };
@@ -671,6 +680,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         yaw: 0,
         pitch: 0.26,
         dist: 3.7,
+        targetDist: 3.7,
         currentScale: 1.0,
         lastManualLookTime: 0,
       },
@@ -2042,8 +2052,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     const onWheel = (e: WheelEvent) => {
       if (propsRef.current.viewMode === 'play') {
         handles.playCam.lastManualLookTime = performance.now();
-        handles.playCam.dist = THREE.MathUtils.clamp(
-          handles.playCam.dist + e.deltaY * 0.0025,
+        handles.playCam.targetDist = THREE.MathUtils.clamp(
+          handles.playCam.targetDist + e.deltaY * 0.0025,
           2.1,
           6.5
         );
@@ -2569,6 +2579,13 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         const targetY = av.y + 1.32 + av.jumpY * 0.45;
         const targetZ = av.z + rightZ * 0.34;
 
+        // The distance eases so Z is a smooth zoom, never a cut.
+        handles.playCam.dist = dampValue(
+          handles.playCam.dist,
+          handles.playCam.targetDist,
+          10,
+          delta
+        );
         const horizDist = handles.playCam.dist * Math.cos(handles.playCam.pitch);
         const vertOffset = handles.playCam.dist * Math.sin(handles.playCam.pitch);
 
@@ -2682,6 +2699,11 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           ) {
             handles.cameraAnim.active = false;
           }
+        }
+        // The zoom lets the orbit come closer than its normal limit; once the
+        // camera is back home, restore the regular range.
+        if (!handles.cameraAnim.active && !propsRef.current.avatarZoom && controls.minDistance !== 5.0) {
+          controls.minDistance = 5.0;
         }
         controls.update();
 
@@ -3364,38 +3386,63 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     }
   }, [location, mode, selectedUid, movingUid, items]);
 
-  // Sync Camera Presets
+  // Avatar zoom (Z): shorten the camera distance toward the avatar while
+  // keeping the exact viewing direction. Nothing else about the camera changes.
   useEffect(() => {
     const h = sceneHandlesRef.current;
-    if (!h || !cameraPreset || viewMode === 'play') return;
+    if (!h) return;
+    const zoom = zoomStateRef.current;
 
-    if (cameraPreset.type === 'overview') {
-      const av = h.avatarState;
-      if (location === 'world') {
-        h.cameraAnim.pos.set(av.x + 12.5, 11.5, av.z + 14.5);
-        h.cameraAnim.target.set(av.x, 0.8, av.z);
-      } else if (location === 'lobby') {
-        h.cameraAnim.pos.set(11.0, 11.2, 13.8);
-        h.cameraAnim.target.set(0, 0.8, 0);
-      } else if (location === 'hallway') {
-        h.cameraAnim.pos.set(av.x + 2.5, 9.6, 12.5);
-        h.cameraAnim.target.set(av.x, 0.9, -0.6);
-      } else {
-        h.cameraAnim.pos.set(14.5, 12.0, 14.5);
-        h.cameraAnim.target.set(0, 0.85, 0);
+    if (viewMode === 'play') {
+      // A stale isometric capture must never be reused after a view switch.
+      zoom.isometric = undefined;
+      if (avatarZoom) {
+        if (zoom.playDist === undefined) zoom.playDist = h.playCam.targetDist;
+        h.playCam.targetDist = Math.max(1.5, zoom.playDist * 0.45);
+      } else if (zoom.playDist !== undefined) {
+        h.playCam.targetDist = zoom.playDist;
+        zoom.playDist = undefined;
       }
-      h.cameraAnim.active = true;
-    } else if (cameraPreset.type === 'isometric') {
-      h.cameraAnim.pos.set(0.2, 14.5, 13.2);
-      h.cameraAnim.target.set(0, 0.5, 0);
-      h.cameraAnim.active = true;
-    } else if (cameraPreset.type === 'closeup') {
-      const av = h.avatarState;
-      h.cameraAnim.pos.set(av.x + 4.4, 3.6, av.z + 4.4);
-      h.cameraAnim.target.set(av.x, 1.0, av.z);
-      h.cameraAnim.active = true;
+      return;
     }
-  }, [cameraPreset, location, viewMode]);
+
+    if (avatarZoom) {
+      if (!zoom.isometric) {
+        zoom.isometric = {
+          position: {
+            x: h.camera.position.x,
+            y: h.camera.position.y,
+            z: h.camera.position.z,
+          },
+          target: { x: h.controls.target.x, y: h.controls.target.y, z: h.controls.target.z },
+        };
+      }
+      // OrbitControls would clamp the close-up back to its normal minimum.
+      h.controls.minDistance = Math.min(h.controls.minDistance, AVATAR_ZOOM_MIN_DISTANCE);
+      const result = zoomTowardAvatar({
+        position: zoom.isometric.position,
+        target: zoom.isometric.target,
+        avatar: { x: h.avatarState.x, y: 1.0, z: h.avatarState.z },
+        minDistance: AVATAR_ZOOM_MIN_DISTANCE,
+      });
+      h.cameraAnim.pos.set(result.position.x, result.position.y, result.position.z);
+      h.cameraAnim.target.set(result.target.x, result.target.y, result.target.z);
+      h.cameraAnim.active = true;
+    } else if (zoom.isometric) {
+      h.cameraAnim.pos.set(
+        zoom.isometric.position.x,
+        zoom.isometric.position.y,
+        zoom.isometric.position.z
+      );
+      h.cameraAnim.target.set(
+        zoom.isometric.target.x,
+        zoom.isometric.target.y,
+        zoom.isometric.target.z
+      );
+      h.cameraAnim.active = true;
+      zoom.isometric = undefined;
+    }
+  }, [avatarZoom, viewMode]);
 
   if (webglError) {
     return (

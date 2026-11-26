@@ -1,8 +1,29 @@
 import React, { useEffect, useState } from 'react';
-import { Eye, Footprints, Keyboard, Mic, Move, PencilRuler, Radio, Smartphone, X } from 'lucide-react';
+import {
+  Eye,
+  Footprints,
+  Keyboard,
+  Mic,
+  MicOff,
+  Move,
+  PencilRuler,
+  Radio,
+  Smartphone,
+  SlidersHorizontal,
+  Volume2,
+  X,
+} from 'lucide-react';
 import { sfx } from '../game/audio';
 import type { GameMode } from '../game/types';
-import type { VoiceInputMode, VoiceMode } from '../net/voice';
+import type { MicrophoneMode, VoiceRangeSetting } from '../net/api';
+import {
+  MIC_MODES,
+  MIC_MODE_INFO,
+  VOICE_RANGES,
+  VOICE_RANGE_INFO,
+} from '../../shared/voice-controls.mjs';
+import type { VoiceSnapshot } from '../session';
+import type { VoiceStatus } from '../net/voice';
 
 interface RoomSettingsModalProps {
   open: boolean;
@@ -12,13 +33,17 @@ interface RoomSettingsModalProps {
   canEdit: boolean;
   touchDevice: boolean;
   isPortrait: boolean;
-  voiceInputMode: VoiceInputMode;
-  voiceMode: VoiceMode;
-  voiceReady: boolean;
-  pushToTalkKeyLabel: string;
-  onVoiceInputModeChange: (mode: VoiceInputMode) => void;
-  onVoiceModeChange: (mode: VoiceMode) => void;
-  onPushToTalkKeyChange: (code: string) => void;
+  /** One shared snapshot drives desktop, mobile and this panel. */
+  voice: VoiceSnapshot;
+  onEnableVoice: () => Promise<VoiceStatus>;
+  onDisableVoice: () => void;
+  onCycleVoiceRange: () => void;
+  onVoiceRangeChange: (range: VoiceRangeSetting) => void;
+  onMicModeChange: (mode: MicrophoneMode) => void;
+  onVoiceSensitivityChange: (value: number) => void;
+  onVoiceInputDeviceChange: (deviceId: string) => Promise<boolean>;
+  getVoiceLevel: () => number;
+  onVoicePermissionHint: (text: string | null) => void;
   onEnterEdit: () => void;
   onExitEdit: () => void;
   onClose: () => void;
@@ -42,6 +67,30 @@ const RowLabel: React.FC<{ icon: React.ReactNode; label: string; detail: string 
   </div>
 );
 
+const STATUS_TEXT: Record<VoiceSnapshot['indicator'], string> = {
+  off: 'Microphone off',
+  unavailable: 'Microphone unavailable',
+  denied: 'Permission denied',
+  requesting: 'Waiting for permission…',
+  'range-off': 'Range Off',
+  idle: 'Mic ready · not transmitting',
+  transmitting: 'Transmitting',
+  muted: 'Temporarily muted',
+  suspended: 'Paused after reconnect',
+};
+
+const STATUS_TONE: Record<VoiceSnapshot['indicator'], string> = {
+  off: 'text-slate-400',
+  unavailable: 'text-slate-400',
+  denied: 'text-red-300',
+  requesting: 'text-amber-300',
+  'range-off': 'text-slate-400',
+  idle: 'text-sky-300',
+  transmitting: 'text-[#39ff14]',
+  muted: 'text-amber-300',
+  suspended: 'text-amber-300',
+};
+
 export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
   open,
   roomName,
@@ -50,55 +99,67 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
   canEdit,
   touchDevice,
   isPortrait,
-  voiceInputMode,
-  voiceMode,
-  voiceReady,
-  pushToTalkKeyLabel,
-  onVoiceInputModeChange,
-  onVoiceModeChange,
-  onPushToTalkKeyChange,
+  voice,
+  onEnableVoice,
+  onDisableVoice,
+  onCycleVoiceRange,
+  onVoiceRangeChange,
+  onMicModeChange,
+  onVoiceSensitivityChange,
+  onVoiceInputDeviceChange,
+  getVoiceLevel,
+  onVoicePermissionHint,
   onEnterEdit,
   onExitEdit,
   onClose,
 }) => {
-  const [capturingKey, setCapturingKey] = useState(false);
+  const [level, setLevel] = useState(0);
+  const [requesting, setRequesting] = useState(false);
 
+  // Live input meter: the same analyser voice activation uses, so "Test
+  // microphone" shows exactly what the game hears.
   useEffect(() => {
-    if (!open) setCapturingKey(false);
-  }, [open]);
-
-  // Rebind the desktop talk key by pressing it. Capture phase so the game's
-  // movement and shortcut handlers never see the chosen key.
-  useEffect(() => {
-    if (!capturingKey) return;
-    const onKey = (event: KeyboardEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (event.code === 'Escape') {
-        setCapturingKey(false);
-        return;
-      }
-      onPushToTalkKeyChange(event.code);
-      setCapturingKey(false);
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [capturingKey, onPushToTalkKeyChange]);
+    if (!open) {
+      setLevel(0);
+      return;
+    }
+    if (voice.status !== 'ready') return;
+    const timer = window.setInterval(() => setLevel(getVoiceLevel()), 120);
+    return () => window.clearInterval(timer);
+  }, [open, voice.status, getVoiceLevel]);
 
   if (!open) return null;
 
   const editing = mode === 'edit';
+  const rangeInfo = VOICE_RANGE_INFO[voice.range];
+  const micInfo = MIC_MODE_INFO[voice.micMode];
+  const statusText = STATUS_TEXT[voice.indicator];
+
   const segment = (active: boolean) =>
     `px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${
       active ? 'bg-[#39ff14] text-[#051205]' : 'text-slate-300 hover:bg-white/10'
     }`;
+
+  const enable = async () => {
+    sfx.playClick();
+    setRequesting(true);
+    const status = await onEnableVoice();
+    setRequesting(false);
+    if (status === 'denied') {
+      onVoicePermissionHint('Microphone permission denied — allow it in the browser settings');
+    } else if (status === 'unsupported') {
+      onVoicePermissionHint('No microphone is available on this device');
+    } else if (status === 'ready') {
+      onVoicePermissionHint('Microphone ready — select a microphone mode below');
+    }
+  };
 
   return (
     <div
       className="fixed inset-0 z-40 flex items-center justify-center p-4 sm:p-6"
       role="dialog"
       aria-modal="true"
-      aria-label="Room settings"
+      aria-label="Room and audio settings"
     >
       <button
         type="button"
@@ -110,12 +171,10 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
         className="absolute inset-0 bg-black/60 backdrop-blur-sm cursor-default"
       />
 
-      <div className="relative pointer-events-auto w-full max-w-[420px] max-h-[86vh] flex flex-col bg-[#0b100d] text-slate-100 rounded-2xl border border-[#39ff14]/40 neon-panel-glow overflow-hidden">
+      <div className="relative pointer-events-auto w-full max-w-[440px] max-h-[88vh] flex flex-col bg-[#0b100d] text-slate-100 rounded-2xl border border-[#39ff14]/40 neon-panel-glow overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#39ff14]/15 bg-[#0f1612]">
           <div>
-            <h2 className="font-display text-lg font-semibold tracking-tight text-white">
-              Room Settings
-            </h2>
+            <h2 className="font-display text-lg font-semibold tracking-tight text-white">Settings</h2>
             <p className="text-xs text-slate-400">
               {roomName} · {itemCount} {itemCount === 1 ? 'item' : 'items'}
             </p>
@@ -126,7 +185,7 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
               sfx.playClick();
               onClose();
             }}
-            aria-label="Close room settings"
+            aria-label="Close settings"
             className="w-10 h-10 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
           >
             <X className="w-4 h-4" />
@@ -169,7 +228,223 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
           </div>
         )}
 
-        <div className="px-5 py-4 space-y-4 overflow-y-auto">
+        <div className="px-5 py-4 space-y-5 overflow-y-auto">
+          <section className="space-y-2">
+            <h3 className="text-[11px] font-bold uppercase tracking-widest text-[#39ff14]/70">
+              Audio &amp; Voice
+            </h3>
+
+            <div className="rounded-xl border border-white/10 bg-[#101713] divide-y divide-white/8">
+              {/* Microphone transmission mode */}
+              <div className="px-3.5 py-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <RowLabel
+                    icon={<Mic className="w-3.5 h-3.5" />}
+                    label="Microphone mode"
+                    detail={micInfo.summary}
+                  />
+                  <span className={`text-[10px] font-bold whitespace-nowrap ${STATUS_TONE[voice.indicator]}`}>
+                    {statusText}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {MIC_MODES.map((entry) => {
+                    const active = voice.micMode === entry;
+                    return (
+                      <button
+                        key={entry}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => {
+                          sfx.playClick();
+                          onMicModeChange(entry);
+                        }}
+                        className={`px-2.5 py-2 rounded-lg border text-[11px] font-semibold text-left transition-colors ${
+                          active
+                            ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]'
+                            : 'bg-black/25 border-white/10 text-slate-200 hover:border-[#39ff14]/45'
+                        }`}
+                      >
+                        {MIC_MODE_INFO[entry].label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] leading-snug text-slate-400">
+                  {touchDevice ? micInfo.mobile : micInfo.desktop}
+                </p>
+              </div>
+
+              {/* Voice activation sensitivity */}
+              <div className="px-3.5 py-3 space-y-2">
+                <RowLabel
+                  icon={<SlidersHorizontal className="w-3.5 h-3.5" />}
+                  label="Voice activation sensitivity"
+                  detail="Higher opens the mic for quieter speech."
+                />
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={5}
+                    value={Math.round(voice.sensitivity * 100)}
+                    onChange={(event) => onVoiceSensitivityChange(Number(event.target.value) / 100)}
+                    aria-label="Voice activation sensitivity"
+                    disabled={voice.micMode !== 'voice-activation'}
+                    className="flex-1 accent-[#39ff14] disabled:opacity-40"
+                  />
+                  <span className="w-9 text-right text-[11px] font-mono-tabular text-slate-300">
+                    {Math.round(voice.sensitivity * 100)}%
+                  </span>
+                </div>
+                {voice.micMode !== 'voice-activation' && (
+                  <p className="text-[10px] text-slate-500">
+                    Used when Microphone mode is Voice Activation.
+                  </p>
+                )}
+              </div>
+
+              {/* Voice range: how far the voice carries */}
+              <div className="px-3.5 py-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <RowLabel
+                    icon={<Radio className="w-3.5 h-3.5" />}
+                    label="Voice range"
+                    detail={rangeInfo.detail}
+                  />
+                  <button
+                    type="button"
+                    onClick={onCycleVoiceRange}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-white/10 text-slate-100 border border-white/15 hover:bg-white/20 whitespace-nowrap"
+                    aria-label="Cycle voice range"
+                  >
+                    Cycle (R)
+                  </button>
+                </div>
+                <div className="grid grid-cols-4 rounded-lg border border-white/12 overflow-hidden">
+                  {VOICE_RANGES.map((entry) => {
+                    const active = voice.range === entry;
+                    return (
+                      <button
+                        key={entry}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => {
+                          sfx.playClick();
+                          onVoiceRangeChange(entry);
+                        }}
+                        className={`py-2 text-[11px] font-semibold transition-colors ${
+                          active
+                            ? 'bg-[#39ff14] text-[#051205]'
+                            : 'text-slate-300 hover:bg-white/10'
+                        }`}
+                      >
+                        {VOICE_RANGE_INFO[entry].label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] text-slate-500">
+                  Whisper 4 m · Talk 14 m · Shout 35 m · Off blocks the microphone in every mode.
+                </p>
+              </div>
+
+              {/* Permission, input device and microphone test */}
+              <div className="px-3.5 py-3 space-y-2.5">
+                <RowLabel
+                  icon={<Volume2 className="w-3.5 h-3.5" />}
+                  label="Microphone"
+                  detail={
+                    voice.status === 'ready'
+                      ? 'Device live. Release voice when you are done.'
+                      : voice.status === 'denied'
+                      ? 'Blocked. Allow the microphone in your browser, then try again.'
+                      : voice.status === 'unsupported'
+                      ? 'This browser or device has no microphone support.'
+                      : 'Turn voice on to talk to nearby players.'
+                  }
+                />
+                <div className="flex items-center gap-2">
+                  {voice.status === 'ready' ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sfx.playClick();
+                        onDisableVoice();
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-white/10 text-slate-100 border border-white/15 hover:bg-white/20 flex items-center gap-1.5"
+                    >
+                      <MicOff className="w-3.5 h-3.5" /> Turn voice off
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={enable}
+                      disabled={requesting || voice.status === 'requesting'}
+                      className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-[#39ff14] text-[#051205] hover:bg-[#5bff3b] disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      <Mic className="w-3.5 h-3.5" />
+                      {requesting || voice.status === 'requesting' ? 'Asking…' : 'Turn voice on'}
+                    </button>
+                  )}
+                  <span className={`text-[10px] font-semibold ${STATUS_TONE[voice.indicator]}`}>
+                    {statusText}
+                  </span>
+                </div>
+
+                {voice.status === 'ready' && (
+                  <div className="space-y-1">
+                    <span className="block text-[10px] uppercase tracking-widest text-slate-500">
+                      Microphone test
+                    </span>
+                    <div className="h-2 w-full rounded-full bg-black/50 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-sky-500 via-[#39ff14] to-amber-300 transition-[width] duration-100"
+                        style={{ width: `${Math.min(100, Math.round(level * 160))}%` }}
+                        role="meter"
+                        aria-label="Microphone input level"
+                        aria-valuenow={Math.round(level * 100)}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                      />
+                    </div>
+                    <span className="block text-[10px] text-slate-500">
+                      Speak to check the level. Nothing is sent unless a mode above is transmitting.
+                    </span>
+                  </div>
+                )}
+
+                {voice.devices.length > 1 && (
+                  <label className="block space-y-1">
+                    <span className="block text-[10px] uppercase tracking-widest text-slate-500">
+                      Microphone input
+                    </span>
+                    <select
+                      value={voice.deviceId}
+                      onChange={(event) => {
+                        void onVoiceInputDeviceChange(event.target.value);
+                      }}
+                      className="w-full px-2 py-1.5 rounded-lg bg-black/40 border border-white/12 text-[11px] text-slate-100"
+                    >
+                      {voice.devices.map((device) => (
+                        <option key={device.deviceId} value={device.deviceId}>
+                          {device.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+            </div>
+
+            <p className="text-[11px] leading-relaxed text-slate-400">
+              {touchDevice
+                ? 'The voice bubble on the right holds Range and the mic button. The gear opens this panel.'
+                : 'T is the microphone control, R cycles the range, C opens chat and Z zooms on your avatar.'}
+            </p>
+          </section>
+
           <section className="space-y-2">
             <h3 className="text-[11px] font-bold uppercase tracking-widest text-[#39ff14]/70">
               Controls
@@ -198,11 +473,22 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
                   detail={
                     touchDevice
                       ? 'Follows your device: portrait is isometric, landscape is play view'
-                      : 'Switch between isometric and play view with V'
+                      : 'V switches view · Z zooms on your avatar without changing the angle'
                   }
                 />
                 <span className="text-[11px] font-mono-tabular text-slate-400 shrink-0">
-                  {touchDevice ? (isPortrait ? 'Isometric' : 'Play') : 'V'}
+                  {touchDevice ? (isPortrait ? 'Isometric' : 'Play') : 'V · Z'}
+                </span>
+              </div>
+
+              <div className={rowClass}>
+                <RowLabel
+                  icon={<Keyboard className="w-3.5 h-3.5" />}
+                  label="Chat"
+                  detail={touchDevice ? 'Chat button beside the movement buttons' : 'C opens and closes chat'}
+                />
+                <span className="text-[11px] font-mono-tabular text-slate-400 shrink-0">
+                  {touchDevice ? 'Button' : 'C'}
                 </span>
               </div>
 
@@ -218,7 +504,6 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
                       : 'Furnish and decorate this room'
                   }
                 />
-
                 <span
                   className={`text-[11px] font-semibold shrink-0 ${
                     canEdit ? 'text-[#39ff14]' : 'text-slate-500'
@@ -226,114 +511,6 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
                 >
                   {canEdit ? (editing ? 'Editing' : 'Owner') : 'Visiting'}
                 </span>
-              </div>
-            </div>
-          </section>
-
-          <section className="space-y-2">
-            <h3 className="text-[11px] font-bold uppercase tracking-widest text-[#39ff14]/70">
-              Voice
-            </h3>
-
-            <div className="rounded-xl border border-white/10 bg-[#101713] divide-y divide-white/8">
-              <div className={rowClass}>
-                <RowLabel
-                  icon={<Mic className="w-3.5 h-3.5" />}
-                  label="Microphone"
-                  detail={
-                    !voiceReady
-                      ? 'Turn voice on from the mic button in the top bar'
-                      : voiceInputMode === 'open'
-                      ? touchDevice
-                        ? 'Mic stays live · hold the mic button to talk'
-                        : 'Mic stays live while voice is on'
-                      : touchDevice
-                      ? 'Hold the mic button to talk'
-                      : `Hold ${pushToTalkKeyLabel} to talk`
-                  }
-                />
-                <div className="flex items-center rounded-lg border border-white/12 overflow-hidden shrink-0">
-                  <button
-                    type="button"
-                    aria-pressed={voiceInputMode === 'open'}
-                    onClick={() => {
-                      sfx.playClick();
-                      onVoiceInputModeChange('open');
-                    }}
-                    className={segment(voiceInputMode === 'open')}
-                  >
-                    Open
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={voiceInputMode === 'push'}
-                    onClick={() => {
-                      sfx.playClick();
-                      onVoiceInputModeChange('push');
-                    }}
-                    className={segment(voiceInputMode === 'push')}
-                  >
-                    {touchDevice ? 'Hold' : 'Push'}
-                  </button>
-                </div>
-              </div>
-
-              {!touchDevice && voiceInputMode === 'push' && (
-                <div className={rowClass}>
-                  <RowLabel
-                    icon={<Keyboard className="w-3.5 h-3.5" />}
-                    label="Talk key"
-                    detail="Click the key, then press the one you want"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      sfx.playClick();
-                      setCapturingKey(true);
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border shrink-0 transition-colors ${
-                      capturingKey
-                        ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]'
-                        : 'bg-white/10 text-slate-100 border-white/15 hover:bg-white/20'
-                    }`}
-                  >
-                    {capturingKey ? 'Press a key…' : pushToTalkKeyLabel}
-                  </button>
-                </div>
-              )}
-
-              <div className="px-3.5 py-3 space-y-2">
-                <RowLabel
-                  icon={<Radio className="w-3.5 h-3.5" />}
-                  label="Range"
-                  detail="Whisper 4 m · Talk 14 m · Shout 35 m"
-                />
-                <div className="grid grid-cols-3 rounded-lg border border-white/12 overflow-hidden">
-                  {(
-                    [
-                      { id: 'whisper' as VoiceMode, label: 'Whisper' },
-                      { id: 'say' as VoiceMode, label: 'Talk' },
-                      { id: 'shout' as VoiceMode, label: 'Shout' },
-                    ] as const
-                  ).map((entry) => (
-                    <button
-                      key={entry.id}
-                      type="button"
-                      aria-pressed={voiceMode === entry.id}
-                      onClick={() => {
-                        sfx.playClick();
-                        onVoiceModeChange(entry.id);
-                      }}
-                      className={`py-2 text-[11px] font-semibold transition-colors ${
-                        voiceMode === entry.id
-                          ? 'bg-[#39ff14] text-[#051205]'
-                          : 'text-slate-300 hover:bg-white/10'
-                      }`}
-                    >
-                      {entry.label}
-                    </button>
-                  ))}
-                </div>
               </div>
             </div>
           </section>

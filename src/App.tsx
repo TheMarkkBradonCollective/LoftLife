@@ -50,8 +50,6 @@ import {
   Volume2,
   VolumeX,
   Footprints,
-  Mic,
-  MicOff,
   X,
 } from 'lucide-react';
 import { AuthGate } from './components/AuthGate';
@@ -61,7 +59,6 @@ import { ElevatorPanelModal } from './components/ElevatorPanelModal';
 import { HotelDoorTerminalModal } from './components/HotelDoorTerminalModal';
 import { RoomSettingsModal } from './components/RoomSettingsModal';
 import { SyncConflictModal } from './components/SyncConflictModal';
-import type { CameraPresetRequest } from './components/RoomViewport';
 import { SocialHud } from './components/SocialHud';
 import { TouchControls } from './components/TouchControls';
 import { isTouchDevice } from './game/touchInput';
@@ -72,7 +69,8 @@ const RoomViewport = lazy(() =>
   import('./components/RoomViewport').then((module) => ({ default: module.RoomViewport }))
 );
 import { api } from './net/api';
-import type { VoiceInputMode, VoiceMode } from './net/voice';
+import { MIC_MODE_INFO, VOICE_RANGE_INFO } from '../shared/voice-controls.mjs';
+import { isEditableElement, resolveShortcut } from '../shared/desktop-shortcuts.mjs';
 import { useSession } from './session';
 import { sfx } from './game/audio';
 import {
@@ -109,21 +107,9 @@ const LEGACY_STORAGE_KEY = 'loftline_room_state_v1';
 // never destroyed. Local only; never uploaded.
 const ACCOUNT_BACKUP_KEY = 'loftlife_account_suite_backup_v1';
 const DEVICE_BACKUP_KEY = 'loftlife_device_suite_backup_v1';
-// Voice input is a device preference, not an account setting: phones default
-// to an open mic, desktops to a rebindable push-to-talk key.
-const VOICE_INPUT_KEY = 'loftlife_voice_input_mode_v1';
-const VOICE_PTT_KEY = 'loftlife_voice_ptt_key_v1';
-const VOICE_MODE_ORDER: VoiceMode[] = ['whisper', 'say', 'shout'];
-const VOICE_MODE_LABELS: Record<VoiceMode, string> = {
-  whisper: 'Whisper',
-  say: 'Talk',
-  shout: 'Shout',
-};
-const VOICE_MODE_RANGES: Record<VoiceMode, string> = {
-  whisper: '4 m',
-  say: '14 m',
-  shout: '35 m',
-};
+// Voice range and microphone mode both live in the session (see
+// shared/voice-controls.mjs), so desktop keys and phone controls share one
+// state. These are only presentation labels.
 
 interface SavedState {
   items: PlacedItem[];
@@ -229,66 +215,10 @@ function hasDeviceProgress(saved: SavedState): boolean {
   }
 }
 
-function keyLabel(code: string): string {
-  if (!code) return '—';
-  if (code.startsWith('Key')) return code.slice(3);
-  if (code.startsWith('Digit')) return code.slice(5);
-  if (code.startsWith('Numpad')) return `Num ${code.slice(6)}`;
-  const named: Record<string, string> = {
-    Space: 'Space',
-    ShiftLeft: 'Left Shift',
-    ShiftRight: 'Right Shift',
-    ControlLeft: 'Left Ctrl',
-    ControlRight: 'Right Ctrl',
-    AltLeft: 'Left Alt',
-    AltRight: 'Right Alt',
-    ArrowUp: '↑',
-    ArrowDown: '↓',
-    ArrowLeft: '←',
-    ArrowRight: '→',
-    Backquote: '`',
-    Minus: '-',
-    Equal: '=',
-    BracketLeft: '[',
-    BracketRight: ']',
-    Backslash: '\\',
-    Semicolon: ';',
-    Quote: "'",
-    Comma: ',',
-    Period: '.',
-    Slash: '/',
-    Enter: 'Enter',
-  };
-  return named[code] ?? code;
-}
-
-function loadVoiceInputMode(fallback: VoiceInputMode): VoiceInputMode {
-  try {
-    const saved = localStorage.getItem(VOICE_INPUT_KEY);
-    if (saved === 'open' || saved === 'push') return saved;
-  } catch {
-    // Storage may be unavailable; the platform default still applies.
-  }
-  return fallback;
-}
-
-function loadPushToTalkKey(): string {
-  try {
-    return localStorage.getItem(VOICE_PTT_KEY) || 'KeyT';
-  } catch {
-    return 'KeyT';
-  }
-}
-
 function isTypingTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   if (!el) return false;
-  return (
-    el.tagName === 'INPUT' ||
-    el.tagName === 'TEXTAREA' ||
-    el.tagName === 'SELECT' ||
-    el.isContentEditable === true
-  );
+  return isEditableElement(el);
 }
 
 function keepBackup(key: string, payload: Record<string, unknown>) {
@@ -450,14 +380,8 @@ export default function App() {
   const [cityMapOpen, setCityMapOpen] = useState(false);
   const [cityStreet, setCityStreet] = useState('M St & 15th St');
   const [muted, setMuted] = useState(false);
-  // Phones are voice-activity by default (the mic stays live); desktops keep
-  // push-to-talk with a key the player can rebind in Settings.
-  const [voiceInputMode, setVoiceInputMode] = useState<VoiceInputMode>(() =>
-    loadVoiceInputMode(isTouchDevice() ? 'open' : 'push')
-  );
-  const [pushToTalkKey, setPushToTalkKey] = useState<string>(() => loadPushToTalkKey());
-  const [cameraPreset, setCameraPreset] = useState<CameraPresetRequest | null>(null);
-  const [cameraToggle, setCameraToggle] = useState<'overview' | 'closeup'>('overview');
+  // Z toggles between the current camera distance and an avatar close-up.
+  const [avatarZoom, setAvatarZoom] = useState(false);
   const playerPoseRef = useRef({ x: 0, z: 0, yaw: 0 });
 
   useEffect(() => {
@@ -613,44 +537,6 @@ export default function App() {
     }, 100);
     return () => window.clearInterval(timer);
   }, [session.status, session.setPose, session.setVoiceAnchor, location, activeEmote]);
-
-  // Voice settings are device-local and applied to the manager before it opens
-  // the microphone.
-  useEffect(() => {
-    session.setVoiceInputMode(voiceInputMode);
-  }, [session.setVoiceInputMode, voiceInputMode]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(VOICE_INPUT_KEY, voiceInputMode);
-      localStorage.setItem(VOICE_PTT_KEY, pushToTalkKey);
-    } catch {
-      // A missing preference just falls back to the platform default.
-    }
-  }, [voiceInputMode, pushToTalkKey]);
-
-  // Push-to-talk key: only listens in push mode, with the key chosen in Settings.
-  useEffect(() => {
-    if (session.voiceStatus !== 'ready' || voiceInputMode !== 'push') {
-      session.setPushToTalk(false);
-      return;
-    }
-    const onDown = (event: KeyboardEvent) => {
-      if (event.code !== pushToTalkKey || event.repeat) return;
-      if (isTypingTarget(document.activeElement)) return;
-      session.setPushToTalk(true);
-    };
-    const onUp = (event: KeyboardEvent) => {
-      if (event.code === pushToTalkKey) session.setPushToTalk(false);
-    };
-    window.addEventListener('keydown', onDown);
-    window.addEventListener('keyup', onUp);
-    return () => {
-      window.removeEventListener('keydown', onDown);
-      window.removeEventListener('keyup', onUp);
-      session.setPushToTalk(false);
-    };
-  }, [session.voiceStatus, session.setPushToTalk, voiceInputMode, pushToTalkKey]);
 
   const showHint = useCallback((text: string | null) => {
     setWalkHint(text);
@@ -1171,36 +1057,21 @@ export default function App() {
     session.exitTransit();
   }, [session]);
 
-  const toggleVoice = useCallback(async () => {
-    if (session.voiceStatus === 'ready') {
-      session.disableVoice();
-      showHint('Voice off');
-      return;
-    }
-    const next = await session.enableVoice();
-    if (next === 'denied') {
-      showHint('Microphone permission denied — text chat still works');
-    } else if (next === 'unsupported') {
-      showHint('This browser does not support voice chat');
-    } else if (next === 'ready') {
-      showHint(
-        voiceInputMode === 'open'
-          ? touchDevice
-            ? 'Voice on · mic is live · hold the mic button to talk'
-            : 'Voice on · open mic'
-          : touchDevice
-          ? 'Voice on · hold the mic button to talk'
-          : `Voice on · hold ${keyLabel(pushToTalkKey)} to talk`
-      );
-    }
-  }, [session, showHint, voiceInputMode, touchDevice, pushToTalkKey]);
-
-  const cycleVoiceMode = useCallback(() => {
-    const index = VOICE_MODE_ORDER.indexOf(session.voiceMode);
-    const next = VOICE_MODE_ORDER[(index + 1) % VOICE_MODE_ORDER.length];
-    session.setVoiceMode(next);
-    showHint(`Voice range · ${VOICE_MODE_LABELS[next]} (${VOICE_MODE_RANGES[next]})`);
+  /** R (and the mobile range button) cycle Off → Whisper → Talk → Shout → Off. */
+  const cycleRange = useCallback(() => {
+    const next = session.cycleVoiceRange();
+    sfx.playClick();
+    const info = VOICE_RANGE_INFO[next];
+    showHint(`Voice range · ${info.label}${info.meters ? ` (${info.meters} m)` : ''}`);
   }, [session, showHint]);
+
+  /** Z toggles a distance change only; the camera angle is never reset. */
+  const toggleAvatarZoom = useCallback(() => {
+    sfx.playClick();
+    const next = !avatarZoom;
+    setAvatarZoom(next);
+    showHint(next ? 'Avatar zoom · press Z to restore the camera' : 'Camera distance restored');
+  }, [avatarZoom, showHint]);
 
   const filteredCatalog = useMemo(() => {
     if (categoryFilter === 'all') return FURNITURE_CATALOG;
@@ -1225,6 +1096,70 @@ export default function App() {
     roomSettingsOpen ||
     authOpen ||
     conflictOpen;
+
+  // Desktop shortcuts. T drives whichever microphone mode is selected, R
+  // cycles the voice range, C toggles the shared chat panel and Z toggles the
+  // avatar zoom. Shared resolver: nothing fires while typing or in a dialog,
+  // and the furniture builder keeps R for rotating.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) return;
+      const action = resolveShortcut({
+        code: event.code,
+        key: event.key,
+        typing: isTypingTarget(document.activeElement),
+        modalOpen: anyModalOpen,
+        mode,
+      });
+      if (!action || action === 'rotate') return;
+      if (action === 'microphone') {
+        event.preventDefault();
+        sfx.playClick();
+        if (session.voice.range === 'off') {
+          showHint('Voice range is Off — press R to pick Whisper, Talk or Shout');
+          return;
+        }
+        void session.pressMicrophone();
+      } else if (action === 'voice-range') {
+        event.preventDefault();
+        cycleRange();
+      } else if (action === 'chat') {
+        event.preventDefault();
+        sfx.playClick();
+        session.toggleChat();
+      } else if (action === 'avatar-zoom') {
+        event.preventDefault();
+        toggleAvatarZoom();
+      }
+    };
+    // Key-up is deliberately not gated by focus or dialogs, so a held talk key
+    // can never stay latched after the composer steals focus.
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'KeyT') session.releaseMicrophone();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      session.releaseMicrophone();
+    };
+  }, [
+    anyModalOpen,
+    mode,
+    cycleRange,
+    toggleAvatarZoom,
+    showHint,
+    session.voice.range,
+    session.pressMicrophone,
+    session.releaseMicrophone,
+    session.toggleChat,
+  ]);
+
+  // Switching camera mode or leaving the scene never carries a zoom across.
+  useEffect(() => {
+    setAvatarZoom(false);
+  }, [viewMode, location]);
 
   const locationTitle = activeWorld
     ? `${activeWorld.name}${activeWorld.canEdit ? ' · Building' : ' · Visiting'}`
@@ -1298,7 +1233,7 @@ export default function App() {
         placingRotation={placingRotation}
         placingColor={placingColor}
         movingUid={movingUid}
-        cameraPreset={cameraPreset}
+        avatarZoom={avatarZoom}
         modalOpen={anyModalOpen}
         remotePlayers={remoteInThisScene}
         playerPoseRef={playerPoseRef}
@@ -1587,71 +1522,6 @@ export default function App() {
           >
             <Settings className="w-3.5 h-3.5" />
           </button>
-          {session.voiceStatus === 'ready' ? (
-            /* Live voice splits into on/off and the Whisper/Talk/Shout range. */
-            <div className="flex items-stretch rounded-lg overflow-hidden bg-sky-500 text-white shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  sfx.playClick();
-                  void toggleVoice();
-                }}
-                title={
-                  voiceInputMode === 'open'
-                    ? 'Voice on · open mic · click to turn off'
-                    : `Voice on · hold ${keyLabel(pushToTalkKey)}${
-                        touchDevice ? ' or the mic button' : ''
-                      } to talk · click to turn off`
-                }
-                aria-label="Turn voice off"
-                className="px-2.5 py-1.5 flex items-center gap-1.5 text-xs font-semibold hover:bg-sky-400 transition-colors"
-              >
-                <Mic className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">
-                  {session.voicePushToTalk
-                    ? 'Talking'
-                    : voiceInputMode === 'open'
-                    ? 'Live'
-                    : 'Voice'}
-                </span>
-              </button>
-              <span className="w-px my-1 bg-white/30" aria-hidden="true" />
-              <button
-                type="button"
-                onClick={cycleVoiceMode}
-                aria-label={`Voice range ${VOICE_MODE_LABELS[session.voiceMode]} (${VOICE_MODE_RANGES[session.voiceMode]}). Click to change.`}
-                title="Cycle voice range · Whisper 4 m → Talk 14 m → Shout 35 m"
-                className="px-2 py-1.5 text-[11px] font-bold hover:bg-sky-400 transition-colors"
-              >
-                {VOICE_MODE_LABELS[session.voiceMode]}
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              title={
-                session.voiceStatus === 'denied'
-                  ? 'Microphone blocked in this browser'
-                  : 'Turn on proximity voice'
-              }
-              aria-label="Turn voice on"
-              onClick={() => {
-                sfx.playClick();
-                void toggleVoice();
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-                session.voiceStatus === 'denied'
-                  ? 'bg-red-500/20 text-red-200'
-                  : 'text-slate-200 hover:bg-white/10'
-              }`}
-            >
-              <MicOff className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">
-                {session.voiceStatus === 'requesting' ? 'Mic…' : 'Voice'}
-              </span>
-            </button>
-          )}
-
           <button
             type="button"
             onClick={() => {
@@ -1670,15 +1540,15 @@ export default function App() {
 
           <button
             type="button"
-            title={cameraToggle === 'overview' ? 'Zoom to Avatar' : 'Room Overview'}
-            aria-label="Toggle camera zoom"
-            onClick={() => {
-              sfx.playClick();
-              const next = cameraToggle === 'overview' ? 'closeup' : 'overview';
-              setCameraToggle(next);
-              setCameraPreset({ id: Date.now(), type: next });
-            }}
-            className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-slate-300 hover:bg-white/10 hover:text-[#39ff14]"
+            title={avatarZoom ? 'Restore camera distance (Z)' : 'Zoom to your avatar (Z)'}
+            aria-label={avatarZoom ? 'Restore camera distance' : 'Zoom to your avatar'}
+            aria-pressed={avatarZoom}
+            onClick={toggleAvatarZoom}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+              avatarZoom
+                ? 'bg-[#39ff14] text-[#051205]'
+                : 'text-slate-300 hover:bg-white/10 hover:text-[#39ff14]'
+            }`}
           >
             <Camera className="w-3.5 h-3.5" />
           </button>
@@ -2319,10 +2189,22 @@ export default function App() {
       {/* Mobile virtual stick, drag-look and contextual buttons */}
       <TouchControls
         active={touchDevice && !anyModalOpen && session.status !== 'loading'}
-        voiceEnabled={session.voiceStatus === 'ready'}
+        voice={session.voice}
+        chatOpen={session.chatOpen}
+        onCycleRange={cycleRange}
+        onMicPress={() => {
+          void session.pressMicrophone();
+        }}
+        onMicRelease={session.releaseMicrophone}
+        onToggleChat={() => {
+          sfx.playClick();
+          session.toggleChat();
+        }}
+        onOpenVoiceSettings={() => {
+          sfx.playClick();
+          setRoomSettingsOpen(true);
+        }}
         onEmote={() => triggerEmote(activeEmote === 'dance' ? 'wave' : 'dance')}
-        onTalkStart={() => session.setPushToTalk(true)}
-        onTalkEnd={() => session.setPushToTalk(false)}
       />
 
       {/* Community: chat, presence, friends, shop and worlds */}
@@ -2362,13 +2244,16 @@ export default function App() {
         canEdit={canEditRoom}
         touchDevice={touchDevice}
         isPortrait={isPortrait}
-        voiceInputMode={voiceInputMode}
-        voiceMode={session.voiceMode}
-        voiceReady={session.voiceStatus === 'ready'}
-        pushToTalkKeyLabel={keyLabel(pushToTalkKey)}
-        onVoiceInputModeChange={setVoiceInputMode}
-        onVoiceModeChange={session.setVoiceMode}
-        onPushToTalkKeyChange={setPushToTalkKey}
+        voice={session.voice}
+        onEnableVoice={session.enableVoice}
+        onDisableVoice={session.disableVoice}
+        onCycleVoiceRange={cycleRange}
+        onVoiceRangeChange={session.setVoiceRange}
+        onMicModeChange={session.setMicMode}
+        onVoiceSensitivityChange={session.setVoiceSensitivity}
+        onVoiceInputDeviceChange={session.setVoiceInputDevice}
+        getVoiceLevel={session.getVoiceLevel}
+        onVoicePermissionHint={showHint}
         onEnterEdit={() => {
           setRoomSettingsOpen(false);
           handleModeSwitch('edit');

@@ -5,6 +5,7 @@ import { db, newId, now, audit } from './db.mjs';
 import { badRequest, conflict, forbidden, notFound } from './errors.mjs';
 import { DEFAULT_OWNED_CLOTHING, ownsItem } from './economy.mjs';
 import { sanitizeAvatar, sanitizeText, pickOne } from './validate.mjs';
+import { normalizeVoicePreferences } from '../shared/voice-controls.mjs';
 
 export const CHAT_SCOPES = ['city', 'world', 'dm', 'party'];
 const MAX_MESSAGE = 240;
@@ -20,10 +21,20 @@ export function areFriends(a, b) {
   );
 }
 
+const parseJsonObject = (value) => {
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
 export function readProfile(userId) {
   const row = db
     .prepare(
-      `SELECT p.user_id, p.display_name, p.avatar_json, p.bio, p.updated_at,
+      `SELECT p.user_id, p.display_name, p.avatar_json, p.bio, p.voice_json, p.updated_at,
               u.handle, u.created_at, u.role
        FROM profiles p JOIN users u ON u.id = p.user_id WHERE p.user_id = ?`
     )
@@ -35,6 +46,7 @@ export function readProfile(userId) {
     displayName: row.display_name,
     avatar: JSON.parse(row.avatar_json),
     bio: row.bio,
+    voice: normalizeVoicePreferences(parseJsonObject(row.voice_json)),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -61,10 +73,14 @@ export function updateProfile(userId, body = {}) {
       : current.displayName;
   const bio =
     body.bio !== undefined ? String(body.bio).replace(/[\u0000-\u001f]/g, '').slice(0, 280) : current.bio;
+  // Voice preferences sync with the account, but only when the client sends
+  // them: an outfit save must never reset the microphone mode.
+  const voice =
+    body.voice === undefined ? current.voice : normalizeVoicePreferences(body.voice);
 
   db.prepare(
-    'UPDATE profiles SET display_name = ?, avatar_json = ?, bio = ?, updated_at = ? WHERE user_id = ?'
-  ).run(displayName, JSON.stringify(avatar), bio, now(), userId);
+    'UPDATE profiles SET display_name = ?, avatar_json = ?, bio = ?, voice_json = ?, updated_at = ? WHERE user_id = ?'
+  ).run(displayName, JSON.stringify(avatar), bio, JSON.stringify(voice), now(), userId);
   return readProfile(userId);
 }
 

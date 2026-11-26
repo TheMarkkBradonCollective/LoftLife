@@ -24,9 +24,12 @@ import {
   getToken,
   setToken,
   type InventoryEntry,
+  type MicrophoneMode,
   type Profile,
   type SessionUser,
   type SuiteState,
+  type VoicePreferences,
+  type VoiceRangeSetting,
   type Wallet,
 } from './net/api';
 import {
@@ -40,12 +43,15 @@ import {
   type TransitLine,
   type TransitVehicle,
 } from './net/realtime';
+import { VoiceManager, type VoiceDevice, type VoiceStatus } from './net/voice';
 import {
-  VoiceManager,
-  type VoiceInputMode,
-  type VoiceMode,
-  type VoiceStatus,
-} from './net/voice';
+  VoiceControlState,
+  microphoneIndicator,
+  normalizeVoicePreferences,
+  rangeToAudibleMode,
+  sensitivityToThreshold,
+} from '../shared/voice-controls.mjs';
+import { isTouchDevice } from './game/touchInput';
 
 export type SessionStatus = 'loading' | 'anonymous' | 'online' | 'offline';
 
@@ -57,6 +63,29 @@ export interface RidingState {
   lineId: string;
   seat: number;
   label?: string;
+}
+
+/** Snapshot of the shared voice state every control surface renders. */
+export interface VoiceSnapshot {
+  status: VoiceStatus;
+  range: VoiceRangeSetting;
+  micMode: MicrophoneMode;
+  sensitivity: number;
+  transmitting: boolean;
+  muted: boolean;
+  suspended: boolean;
+  indicator:
+    | 'off'
+    | 'unavailable'
+    | 'denied'
+    | 'requesting'
+    | 'range-off'
+    | 'idle'
+    | 'transmitting'
+    | 'muted'
+    | 'suspended';
+  devices: VoiceDevice[];
+  deviceId: string;
 }
 
 export interface RoomStatePayload {
@@ -91,10 +120,9 @@ interface SessionValue {
   transitLines: TransitLine[];
   transitVehicles: TransitVehicle[];
   riding: RidingState | null;
-  voiceStatus: VoiceStatus;
-  voiceMode: VoiceMode;
-  voicePushToTalk: boolean;
-  voiceInputMode: VoiceInputMode;
+  voice: VoiceSnapshot;
+  /** Shared chat panel visibility (C key and the mobile chat button). */
+  chatOpen: boolean;
   login: (identifier: string, password: string) => Promise<void>;
   register: (payload: {
     handle: string;
@@ -133,12 +161,33 @@ interface SessionValue {
   setVoiceAnchor: (anchor: { x: number; z: number; location: string }) => void;
   enableVoice: () => Promise<VoiceStatus>;
   disableVoice: () => void;
-  setVoiceMode: (mode: VoiceMode) => void;
-  setPushToTalk: (on: boolean) => void;
-  setVoiceInputMode: (mode: VoiceInputMode) => void;
+  cycleVoiceRange: () => VoiceRangeSetting;
+  setVoiceRange: (range: VoiceRangeSetting) => void;
+  setVoiceSensitivity: (value: number) => void;
+  setMicMode: (mode: MicrophoneMode) => void;
+  pressMicrophone: () => Promise<void>;
+  releaseMicrophone: () => void;
+  setVoiceInputDevice: (deviceId: string) => Promise<boolean>;
+  getVoiceLevel: () => number;
+  setChatOpen: (open: boolean) => void;
+  toggleChat: () => void;
 }
 
 const EMPTY_WALLET: Wallet = { yuanzi: 0, tongbao: 0 };
+// Voice preferences live on the device offline and mirror to the account online.
+const VOICE_PREFS_KEY = 'loftlife_voice_prefs_v1';
+
+function loadDeviceVoicePreferences(): VoicePreferences {
+  const micMode: MicrophoneMode = isTouchDevice() ? 'open-mic' : 'push-to-talk';
+  const fallback = normalizeVoicePreferences({ range: 'off', micMode, sensitivity: 0.55 });
+  try {
+    const raw = localStorage.getItem(VOICE_PREFS_KEY);
+    if (raw) return normalizeVoicePreferences(JSON.parse(raw));
+  } catch {
+    // A private-mode browser simply uses the platform default.
+  }
+  return fallback;
+}
 const SessionContext = createContext<SessionValue | null>(null);
 
 const messageOf = (error: unknown): string =>
@@ -170,10 +219,34 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [transitLines, setTransitLines] = useState<TransitLine[]>([]);
   const [transitVehicles, setTransitVehicles] = useState<TransitVehicle[]>([]);
   const [riding, setRiding] = useState<RidingState | null>(null);
-  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('off');
-  const [voiceMode, setVoiceModeState] = useState<VoiceMode>('say');
-  const [voicePushToTalk, setVoicePushToTalkState] = useState(false);
-  const [voiceInputMode, setVoiceInputModeState] = useState<VoiceInputMode>('push');
+  const [chatOpen, setChatOpenState] = useState(false);
+
+  const voiceControlsRef = useRef<VoiceControlState | null>(null);
+  if (!voiceControlsRef.current) {
+    voiceControlsRef.current = new VoiceControlState(loadDeviceVoicePreferences());
+  }
+  const [voice, setVoice] = useState<VoiceSnapshot>(() => {
+    const controls = voiceControlsRef.current!;
+    const snapshot = controls.snapshot();
+    return {
+      status: 'off',
+      range: snapshot.range,
+      micMode: snapshot.micMode,
+      sensitivity: snapshot.sensitivity,
+      transmitting: false,
+      muted: false,
+      suspended: false,
+      indicator: 'off',
+      devices: [],
+      deviceId: '',
+    };
+  });
+  const publishVoiceRef = useRef<() => void>(() => {});
+  const voiceSaveTimer = useRef<number | null>(null);
+  const voicePrefsMirrored = useRef<string>('');
+  /** Set when preferences changed while offline, so sign-in uploads them. */
+  const voiceLocalDirty = useRef(false);
+  const statusRef = useRef<SessionStatus>('loading');
 
   const realtimeRef = useRef<RealtimeClient | null>(null);
   const selfConnRef = useRef<string | null>(null);
@@ -184,9 +257,77 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     voiceRef.current = new VoiceManager({
       sendSignal: (to, kind, data) =>
         realtimeRef.current?.sendVoiceSignal(to, kind, data) ?? false,
-      onChange: () => setVoiceStatus(voiceRef.current?.status ?? 'off'),
+      onChange: () => publishVoiceRef.current(),
     });
   }
+
+  /** Mirror the one shared voice state into React for every control surface. */
+  const publishVoice = useCallback(() => {
+    const controls = voiceControlsRef.current!;
+    const manager = voiceRef.current;
+    const snapshot = controls.snapshot();
+    const status = manager?.status ?? 'off';
+    setVoice({
+      status,
+      range: snapshot.range,
+      micMode: snapshot.micMode,
+      sensitivity: snapshot.sensitivity,
+      transmitting: snapshot.transmitting,
+      muted: snapshot.muted,
+      suspended: snapshot.suspended,
+      indicator: microphoneIndicator(status, {
+        range: snapshot.range,
+        transmitting: snapshot.transmitting,
+        muted: snapshot.muted,
+        suspended: snapshot.suspended,
+      }),
+      devices: manager?.inputDevices ?? [],
+      deviceId: manager?.activeDeviceId ?? '',
+    });
+  }, []);
+  publishVoiceRef.current = publishVoice;
+
+  /** Push the shared policy into the media layer, then republish to React. */
+  const applyVoice = useCallback(() => {
+    const controls = voiceControlsRef.current!;
+    const manager = voiceRef.current;
+    controls.setMicReady(manager?.status === 'ready');
+    const snapshot = controls.snapshot();
+    manager?.setRange(snapshot.range);
+    manager?.setTransmitting(snapshot.transmitting);
+    publishVoice();
+  }, [publishVoice]);
+  const applyVoiceRef = useRef(applyVoice);
+  applyVoiceRef.current = applyVoice;
+
+  /** Device always, account when signed in. Reconnects re-read the account copy. */
+  const persistVoicePreferences = useCallback(() => {
+    const preferences = voiceControlsRef.current!.preferences() as VoicePreferences;
+    const serialized = JSON.stringify(preferences);
+    try {
+      localStorage.setItem(VOICE_PREFS_KEY, serialized);
+    } catch {
+      // Storage can be full or blocked; the session still uses the values.
+    }
+    if (serialized === voicePrefsMirrored.current) return;
+    voicePrefsMirrored.current = serialized;
+    if (statusRef.current !== 'online') {
+      // Kept on the device until the next successful sign-in uploads it.
+      voiceLocalDirty.current = true;
+      return;
+    }
+    if (voiceSaveTimer.current) window.clearTimeout(voiceSaveTimer.current);
+    voiceSaveTimer.current = window.setTimeout(() => {
+      api
+        .updateProfile({ voice: preferences })
+        .then(() => {
+          voiceLocalDirty.current = false;
+        })
+        .catch(() => {
+          voiceLocalDirty.current = true;
+        });
+    }, 600);
+  }, []);
   const saveTimers = useRef<Record<string, number>>({});
   const pendingSaves = useRef<Record<string, () => void>>({});
   const avatarTimer = useRef<number | null>(null);
@@ -198,6 +339,37 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setWallet(payload.wallet);
     setInventory(payload.inventory);
     setSuite(payload.suite);
+    // Voice preferences: changes made offline win (they sync up), otherwise the
+    // account copy wins. Restoring prefs never enables the microphone and never
+    // clears a post-reconnect pause; transmission still waits for the player.
+    const controls = voiceControlsRef.current!;
+    if (payload.profile.voice && !voiceLocalDirty.current) {
+      const prefs = normalizeVoicePreferences(payload.profile.voice);
+      const wasSuspended = controls.suspended;
+      controls.setRange(prefs.range);
+      controls.setMicMode(prefs.micMode);
+      controls.setSensitivity(prefs.sensitivity);
+      if (wasSuspended) controls.suspended = true;
+      voicePrefsMirrored.current = JSON.stringify(prefs);
+      try {
+        localStorage.setItem(VOICE_PREFS_KEY, voicePrefsMirrored.current);
+      } catch {
+        // Device storage is a convenience copy, not the source of truth online.
+      }
+      applyVoiceRef.current();
+    } else if (payload.profile.voice && voiceLocalDirty.current) {
+      const prefs = controls.preferences() as VoicePreferences;
+      voicePrefsMirrored.current = '';
+      api
+        .updateProfile({ voice: prefs })
+        .then(() => {
+          voiceLocalDirty.current = false;
+          voicePrefsMirrored.current = JSON.stringify(prefs);
+        })
+        .catch(() => {
+          // Still dirty; the next change or sign-in retries.
+        });
+    }
     // Nothing is pending right after a fetch: the account and the screen agree.
     syncSeq.current += 1;
     setSyncState('synced');
@@ -247,6 +419,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       realtimeRef.current = null;
       setRemotePlayers([]);
       setConnection('idle');
+      // No server, no voice: stop capturing and pause transmission. Preferences
+      // stay on the device and sync on the next sign-in.
+      voiceRef.current?.disable();
+      voiceControlsRef.current?.suspend();
+      applyVoiceRef.current();
       return;
     }
     const token = getToken();
@@ -335,6 +512,57 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     remoteRef.current = remotePlayers;
   }, [remotePlayers]);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  // A dropped socket stops transmission without changing the selected range or
+  // microphone mode. Reconnecting never resumes voice by itself: the next mic
+  // action does.
+  const connectionRef = useRef<ConnectionStatus>('idle');
+  useEffect(() => {
+    const previous = connectionRef.current;
+    connectionRef.current = connection;
+    if (connection === 'reconnecting' || connection === 'offline') {
+      if (previous === 'connected') {
+        voiceControlsRef.current?.suspend();
+        applyVoice();
+      }
+    }
+  }, [connection, applyVoice]);
+
+  // Held microphone states never survive the window losing focus.
+  useEffect(() => {
+    const release = () => {
+      voiceControlsRef.current?.releaseMicrophone();
+      applyVoice();
+    };
+    window.addEventListener('blur', release);
+    return () => window.removeEventListener('blur', release);
+  }, [applyVoice]);
+
+  // Voice activation: the shared sensitivity threshold decides when speech
+  // opens the microphone, for phones and desktops alike.
+  useEffect(() => {
+    if (voice.status !== 'ready' || voice.micMode !== 'voice-activation') {
+      voiceControlsRef.current?.setSpeaking(false);
+      applyVoice();
+      return;
+    }
+    const threshold = sensitivityToThreshold(voice.sensitivity);
+    const timer = window.setInterval(() => {
+      const controls = voiceControlsRef.current!;
+      const manager = voiceRef.current;
+      if (!manager) return;
+      const before = controls.transmission.transmitting;
+      controls.setSpeaking(manager.getLevel() >= threshold);
+      const after = controls.transmission.transmitting;
+      manager.setTransmitting(after);
+      if (before !== after) publishVoice();
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, [voice.status, voice.micMode, voice.sensitivity, applyVoice, publishVoice]);
 
   // Reconcile voice peers with nearby players a few times per second.
   useEffect(() => {
@@ -452,7 +680,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setPartyInvites([]);
     setTransitVehicles([]);
     setRiding(null);
+    setChatOpenState(false);
     voiceRef.current?.disable();
+    voiceControlsRef.current?.suspend();
+    applyVoice();
     syncSeq.current += 1;
     setSyncState('local');
     setSyncError(null);
@@ -580,10 +811,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setPose = useCallback<SessionValue['setPose']>((pose) => {
+    const audible = rangeToAudibleMode(voiceControlsRef.current?.range ?? 'off');
     realtimeRef.current?.setPose({
       ...pose,
-      voice: voiceRef.current?.enabled ?? false,
-      voiceMode: voiceRef.current?.voiceMode ?? 'say',
+      // Range Off stops advertising voice, so nearby players drop the peer.
+      voice: (voiceRef.current?.enabled ?? false) && audible !== 'off',
+      voiceMode: audible === 'off' ? 'say' : audible,
     });
   }, []);
 
@@ -617,31 +850,90 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const enableVoice = useCallback<SessionValue['enableVoice']>(async () => {
+    // Turning the microphone on is an explicit action, so it also clears a
+    // post-reconnect pause. Voice Range Off still blocks transmission.
+    voiceControlsRef.current!.suspended = false;
     await voiceRef.current?.enable();
-    const next = voiceRef.current?.status ?? 'off';
-    setVoiceStatus(next);
-    return next;
-  }, []);
+    applyVoice();
+    return voiceRef.current?.status ?? 'off';
+  }, [applyVoice]);
 
   const disableVoice = useCallback(() => {
     voiceRef.current?.disable();
-    setVoiceStatus('off');
-  }, []);
+    applyVoice();
+  }, [applyVoice]);
 
-  const setVoiceMode = useCallback((mode: VoiceMode) => {
-    setVoiceModeState(mode);
-    voiceRef.current?.setVoiceMode(mode);
-  }, []);
+  const cycleVoiceRange = useCallback<SessionValue['cycleVoiceRange']>(() => {
+    const next = voiceControlsRef.current!.cycleRange();
+    applyVoice();
+    persistVoicePreferences();
+    return next;
+  }, [applyVoice, persistVoicePreferences]);
 
-  const setPushToTalk = useCallback((on: boolean) => {
-    setVoicePushToTalkState(on);
-    voiceRef.current?.setPushToTalk(on);
-  }, []);
+  const setVoiceRange = useCallback(
+    (range: VoiceRangeSetting) => {
+      voiceControlsRef.current!.setRange(range);
+      applyVoice();
+      persistVoicePreferences();
+    },
+    [applyVoice, persistVoicePreferences]
+  );
 
-  const setVoiceInputMode = useCallback((mode: VoiceInputMode) => {
-    setVoiceInputModeState(mode);
-    voiceRef.current?.setOpenMic(mode === 'open');
-  }, []);
+  const setVoiceSensitivity = useCallback(
+    (value: number) => {
+      voiceControlsRef.current!.setSensitivity(value);
+      applyVoice();
+      persistVoicePreferences();
+    },
+    [applyVoice, persistVoicePreferences]
+  );
+
+  const setMicMode = useCallback(
+    (mode: MicrophoneMode) => {
+      voiceControlsRef.current!.setMicMode(mode);
+      applyVoice();
+      persistVoicePreferences();
+    },
+    [applyVoice, persistVoicePreferences]
+  );
+
+  /**
+   * One microphone control press. Requests permission on first use (an explicit
+   * player action), then applies the selected mode's semantics.
+   */
+  const pressMicrophone = useCallback<SessionValue['pressMicrophone']>(async () => {
+    const controls = voiceControlsRef.current!;
+    // Range Off blocks voice in every mode, so do not even ask for the mic.
+    if (controls.range === 'off') {
+      publishVoice();
+      return;
+    }
+    controls.pressMicrophone();
+    applyVoice();
+    if (voiceRef.current?.status !== 'ready') {
+      await voiceRef.current?.enable();
+      applyVoice();
+    }
+  }, [applyVoice, publishVoice]);
+
+  const releaseMicrophone = useCallback(() => {
+    voiceControlsRef.current?.releaseMicrophone();
+    applyVoice();
+  }, [applyVoice]);
+
+  const setVoiceInputDevice = useCallback<SessionValue['setVoiceInputDevice']>(
+    async (deviceId: string) => {
+      const ok = (await voiceRef.current?.setInputDevice(deviceId)) ?? false;
+      publishVoice();
+      return ok;
+    },
+    [publishVoice]
+  );
+
+  const getVoiceLevel = useCallback(() => voiceRef.current?.getLevel() ?? 0, []);
+
+  const setChatOpen = useCallback((open: boolean) => setChatOpenState(open), []);
+  const toggleChat = useCallback(() => setChatOpenState((open) => !open), []);
 
   const value = useMemo<SessionValue>(
     () => ({
@@ -667,10 +959,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       transitLines,
       transitVehicles,
       riding,
-      voiceStatus,
-      voiceMode,
-      voicePushToTalk,
-      voiceInputMode,
+      voice,
+      chatOpen,
       login,
       register,
       continueOffline,
@@ -693,9 +983,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setVoiceAnchor,
       enableVoice,
       disableVoice,
-      setVoiceMode,
-      setPushToTalk,
-      setVoiceInputMode,
+      cycleVoiceRange,
+      setVoiceRange,
+      setVoiceSensitivity,
+      setMicMode,
+      pressMicrophone,
+      releaseMicrophone,
+      setVoiceInputDevice,
+      getVoiceLevel,
+      setChatOpen,
+      toggleChat,
     }),
     [
       status,
@@ -720,10 +1017,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       transitLines,
       transitVehicles,
       riding,
-      voiceStatus,
-      voiceMode,
-      voicePushToTalk,
-      voiceInputMode,
+      voice,
+      chatOpen,
       login,
       register,
       continueOffline,
@@ -746,9 +1041,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setVoiceAnchor,
       enableVoice,
       disableVoice,
-      setVoiceMode,
-      setPushToTalk,
-      setVoiceInputMode,
+      cycleVoiceRange,
+      setVoiceRange,
+      setVoiceSensitivity,
+      setMicMode,
+      pressMicrophone,
+      releaseMicrophone,
+      setVoiceInputDevice,
+      getVoiceLevel,
+      setChatOpen,
+      toggleChat,
     ]
   );
 
