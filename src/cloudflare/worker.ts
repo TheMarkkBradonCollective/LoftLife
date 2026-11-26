@@ -2,6 +2,7 @@ import { neon } from '@neondatabase/serverless';
 import { handleWorldRoute } from './worlds';
 import { handleSocialRoute } from './social';
 import { handleEconomyRoute } from './economy';
+import { handleTransitRoute } from './transit';
 export { LoftLifeRealtime } from './realtime';
 import {
   hashPassword,
@@ -591,6 +592,16 @@ export default {
         if (url.pathname === '/api/auth/register') return await handleRegister(request, env);
         if (url.pathname === '/api/auth/login') return await handleLogin(request, env);
         return await handleLogout(request, env);
+      }
+
+      if (url.pathname === '/api/transit') {
+        const transitResponse = handleTransitRoute(request);
+        if (transitResponse) return transitResponse;
+      }
+      if (url.pathname === '/api/presence' && request.method === 'GET') {
+        if (!env.REALTIME) return fail('Realtime Durable Object binding is not configured.',503,'realtime_unconfigured');
+        const id = env.REALTIME.idFromName('city:main');
+        return env.REALTIME.get(id).fetch(new Request('https://loftlife-internal/internal/presence'));
       }
 
       if (url.pathname.startsWith('/api/')) {
