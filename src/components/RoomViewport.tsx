@@ -301,6 +301,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
   const propsRef = useRef({
     location,
+    guestMode,
     hallwayFloor,
     playerSuiteNumber,
     playerSuiteFloor,
@@ -353,6 +354,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   });
   propsRef.current = {
     location,
+    guestMode,
     hallwayFloor,
     playerSuiteNumber,
     playerSuiteFloor,
