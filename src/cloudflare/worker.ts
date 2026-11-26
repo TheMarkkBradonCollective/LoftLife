@@ -47,6 +47,83 @@ interface AccountRow {
 }
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
+const STARTER_SUITE = {
+  name: 'Grand Suite 402',
+  surfaces: { floor: 'oak_parquet', wall: 'warm_chalk' },
+  mood: 'morning',
+  items: [
+    { uid: 'p1', catalogId: 'woven_rug', gx: 4, gz: 5, rot: 0, color: '#e7dfd1' },
+    { uid: 'p2', catalogId: 'plush_sofa', gx: 5, gz: 3, rot: 0, color: '#7c9a82' },
+    { uid: 'p3', catalogId: 'coffee_table', gx: 5, gz: 5, rot: 0, color: '#c89e6d' },
+    { uid: 'p4', catalogId: 'lounge_chair', gx: 3, gz: 5, rot: 1, color: '#d49a45' },
+    { uid: 'p5', catalogId: 'arc_lamp', gx: 7, gz: 3, rot: 0, color: '#d4af5a', active: true },
+    { uid: 'p6', catalogId: 'record_console', gx: 5, gz: 0, rot: 0, color: '#9e6238', active: true },
+    { uid: 'p7', catalogId: 'monstera_plant', gx: 1, gz: 1, rot: 0, color: '#c46c4e' },
+    { uid: 'p8', catalogId: 'bookshelf', gx: 12, gz: 0, rot: 0, color: '#c2925e' },
+    { uid: 'p9', catalogId: 'cozy_bed', gx: 10, gz: 10, rot: 3, color: '#8aa8c7' },
+    { uid: 'p10', catalogId: 'media_tv', gx: 9, gz: 0, rot: 0, color: '#353942', active: true },
+    { uid: 'p11', catalogId: 'side_desk', gx: 10, gz: 5, rot: 3, color: '#d8be98' },
+    { uid: 'p12', catalogId: 'bar_stool', gx: 9, gz: 5, rot: 1, color: '#a66238' },
+    { uid: 'p13', catalogId: 'wall_art', gx: 5, gz: 0, rot: 0, wall: 'north', color: '#d87a56' },
+    { uid: 'p14', catalogId: 'wall_shelf', gx: 2, gz: 0, rot: 0, wall: 'north', color: '#c59867' },
+  ],
+};
+const DEFAULT_AVATAR = {
+  name: 'Newcomer', skinTone: '#e8b48f', hairStyle: 'bob', hairColor: '#2f2119',
+  topStyle: 'tee', topColor: '#e6dfd3', bottomColor: '#2b3a2a',
+  shoeColor: '#1b1b1b', accessory: 'none',
+};
+const DEFAULT_CLOTHING = ['tee', 'none'];
+const AVATAR_ENUMS = {
+  hairStyle: ['bob', 'afro', 'ponytail', 'sidepart', 'buns', 'spiky'],
+  topStyle: ['hoodie', 'blazer', 'tee', 'turtleneck'],
+  accessory: ['none', 'glasses', 'headphones', 'beanie'],
+};
+function safeAvatar(input: unknown, name: string) {
+  const raw = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
+  const hex = (value: unknown, fallback: string) => typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value) ? value.toLowerCase() : fallback;
+  const pick = (key: keyof typeof AVATAR_ENUMS, fallback: string) => typeof raw[key] === 'string' && AVATAR_ENUMS[key].includes(raw[key] as string) ? raw[key] as string : fallback;
+  return {
+    name: typeof raw.name === 'string' && raw.name.trim().length >= 2 ? raw.name.trim().slice(0, 24) : name,
+    skinTone: hex(raw.skinTone, DEFAULT_AVATAR.skinTone),
+    hairStyle: pick('hairStyle', DEFAULT_AVATAR.hairStyle),
+    hairColor: hex(raw.hairColor, DEFAULT_AVATAR.hairColor),
+    topStyle: pick('topStyle', DEFAULT_AVATAR.topStyle),
+    topColor: hex(raw.topColor, DEFAULT_AVATAR.topColor),
+    bottomColor: hex(raw.bottomColor, DEFAULT_AVATAR.bottomColor),
+    shoeColor: hex(raw.shoeColor, DEFAULT_AVATAR.shoeColor),
+    accessory: pick('accessory', DEFAULT_AVATAR.accessory),
+  };
+}
+async function provisionGameAccount(sql: Sql, account: AccountRow, avatarInput?: unknown) {
+  const at = Number(account.created_at) || Date.now();
+  const avatar = safeAvatar(avatarInput, account.display_name || account.handle);
+  await sql.query(
+    'INSERT INTO ll_profiles (user_id, display_name, avatar_json, bio, updated_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id) DO NOTHING',
+    [account.id, account.display_name || account.handle, JSON.stringify(avatar), '', at]
+  );
+  const createdWallet = await sql.query(
+    'INSERT INTO ll_wallets (user_id, yuanzi, tongbao) VALUES ($1,500,25) ON CONFLICT (user_id) DO NOTHING RETURNING user_id',
+    [account.id]
+  ) as Array<{ user_id: string }>;
+  if (createdWallet.length) {
+    await sql.query(
+      'INSERT INTO ll_ledger (id,user_id,currency,delta,balance_after,reason,ref,idempotency_key,created_at) VALUES ($1,$2,$3,$4,$5,$6,NULL,$7,$8),($9,$2,$10,$11,$12,$6,NULL,$13,$8) ON CONFLICT (idempotency_key) DO NOTHING',
+      [crypto.randomUUID(), account.id, 'yuanzi', 500, 500, 'welcome_grant', `welcome:${account.id}:yuanzi`, at, crypto.randomUUID(), 'tongbao', 25, 25, `welcome:${account.id}:tongbao`]
+    );
+  }
+  await sql.query(
+    'INSERT INTO ll_suites (id,owner_id,number,floor,name,items_json,surfaces_json,mood,is_public,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9) ON CONFLICT (owner_id) DO NOTHING',
+    [crypto.randomUUID(), account.id, '402', 4, STARTER_SUITE.name, JSON.stringify(STARTER_SUITE.items), JSON.stringify(STARTER_SUITE.surfaces), STARTER_SUITE.mood, at]
+  );
+  for (const item of DEFAULT_CLOTHING) {
+    await sql.query(
+      "INSERT INTO ll_inventory (id,user_id,kind,catalog_id,qty,acquired_at) VALUES ($1,$2,'clothing',$3,1,$4) ON CONFLICT (user_id,kind,catalog_id) DO NOTHING",
+      [crypto.randomUUID(), account.id, item, at]
+    );
+  }
+}
+
 const COOKIE_NAME = 'loftlife_edge';
 const ATTEMPT_WINDOW_MS = 60_000;
 const ATTEMPT_MAX = 12;
@@ -242,6 +319,7 @@ async function handleRegister(request: Request, env: CloudflareEnv): Promise<Res
     [account.id, account.handle, account.email, account.password_hash, account.role, account.created_at, account.display_name]
   );
 
+  await provisionGameAccount(sql, account, body.avatar);
   const session = await issueSession(sql, account, secret);
   return new Response(
     JSON.stringify({
@@ -281,6 +359,7 @@ async function handleLogin(request: Request, env: CloudflareEnv): Promise<Respon
     return fail('Incorrect handle/email or password.', 401, 'invalid_credentials');
   }
 
+  await provisionGameAccount(sql, account);
   const session = await issueSession(sql, account, secret);
   return authResponse(account, session);
 }
