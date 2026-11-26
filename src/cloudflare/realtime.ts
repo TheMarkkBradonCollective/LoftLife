@@ -358,6 +358,7 @@ export class LoftLifeRealtime {
     send(ws, { t: 'ready', instance: { id: instanceId, kind: instanceId.startsWith('world:') ? 'world' : 'city', worldId: instanceId.startsWith('world:') ? instanceId.slice(6) : null, capacity, count: existingPlayers.length + 1 }, you: publicPlayer(player), players: existingPlayers });
     this.broadcast(instanceId, { t: 'join', player: publicPlayer(player) }, ws);
     this.broadcastSnapshot(instanceId, true);
+    if (instanceId.startsWith('world:')) await this.syncWorldStatus(instanceId.slice(6));
   }
 
   private players(instanceId: string): Player[] {
