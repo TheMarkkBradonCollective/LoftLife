@@ -1,6 +1,6 @@
 name = "loftlife"
 main = "src/cloudflare/worker.ts"
-compatibility_date = "2026-03-01"
+compatibility_date = "2026-11-25"
 compatibility_flags = ["nodejs_compat"]
 
 # Static client build served by the edge.
@@ -8,11 +8,21 @@ compatibility_flags = ["nodejs_compat"]
 directory = "./dist"
 binding = "ASSETS"
 
-[vars]
-# Where the Node game/realtime server lives (rooms, economy, presence, transit).
-# The Worker proxies /api/* and /ws there after handling identity itself.
-GAME_ORIGIN = "http://127.0.0.1:8787"
+# Multiplayer coordination: one durable object per city shard or world.
+[[durable_objects.bindings]]
+name = "REALTIME"
+class_name = "LoftLifeRealtime"
 
-# Secrets (never commit values):
-#   wrangler secret put DATABASE_URL                 # Neon pooled connection string
-#   wrangler secret put LOFTLIFE_SESSION_SECRET      # same value the Node server uses
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LoftLifeRealtime"]
+
+[observability]
+enabled = true
+
+[observability.traces]
+enabled = true
+
+# Required Worker secrets (set outside source control):
+#   DATABASE_URL
+#   LOFTLIFE_SESSION_SECRET
