@@ -181,7 +181,7 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld, gameplayAllo
             {/* Header */}
             <div className="px-3 py-2 border-b border-[#39ff14]/15 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-[#39ff14] shadow-[0_0_8px_#39ff14]" />
-              <span className="text-xs font-semibold">LoftLife Online</span>
+              <span className="text-xs font-semibold">{isGuest ? `Guest Visit · ${session.guestName ?? 'Guest'}` : 'LoftLife Online'}</span>
               <span className="text-[11px] text-slate-400 font-mono-tabular">
                 {presenceOnline} online
               </span>
@@ -236,7 +236,7 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld, gameplayAllo
                   ? 'reconnecting…'
                   : connection}
               </span>
-            </div>
+            </div>}
 
             {/* Panel tabs */}
             <div className="flex gap-1 px-2 pt-1.5">

@@ -60,5 +60,14 @@ This document breaks issue #8 into implementation gates. It is deliberately a pl
 - Existing account auth, world permissions, camera/movement, four-wall rooms, voice, offline-first behavior, and all supported runtimes remain intact, including mobile-browser gameplay.
 - Full test, lint, typecheck (if configured), build, and Cloudflare validation pass; document which checks were run.
 
-## PR boundary
-This PR is a planning/scaffolding change only. It does not implement guest authentication, guest gameplay, the landing page, airport interactions, or hotel relocation. Those changes must be delivered in code with tests in follow-up implementation commits/PRs.
+## Implemented in this PR
+- A simple signed-out landing page with Sign In and Visit as Guest.
+- A guest-selected display name and a separate 12-hour, revocable, server-issued guest token stored independently from account credentials.
+- Durable Object validation of guest tokens before entry; guests can join only the shared TheCity instance.
+- Guest identity is server-labelled as `Guest · [display name]` in player and chat payloads.
+- Guest city and nearby chat is live-broadcast to the shared city without inserting guest messages into account-owned chat history.
+- Server-side rejection of guest DMs, party actions, private voice signalling, and world entry; guest-only UI hides account social tabs and account tools.
+- Guest token restoration across refresh and explicit guest-session revocation when leaving.
+
+## Remaining work in this PR's requested scope
+Airport arrival/departure interactions, moving the hotel, deterministic room allocation, airport clothing shop, local-only guest suite entry/fixtures, and closet/bathroom interaction remain unimplemented. They must be completed before this PR can be considered a full implementation of issue #8.
