@@ -336,15 +336,11 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
                       onClick={() => onEnter(world.id)}
                       className="px-2.5 py-1.5 rounded-lg bg-[#39ff14] text-[#051205] text-[11px] font-bold flex items-center gap-1 hover:bg-[#5bff3b]"
                     >
-                      <DoorOpen className="w-3.5 h-3.5" /> {world.status === 'build_mode' ? 'Build' : 'Enter'}
+                      <DoorOpen className="w-3.5 h-3.5" /> {world.status === 'build_mode' ? 'Build' : world.canManageStatus && world.status !== 'live' ? 'Enter to Go Live' : 'Enter'}
                     </button>
                   )}
                   {world.canManageStatus && (
                     <>
-                      {world.status !== 'live' && (
-                        <button type="button" onClick={() => setStatus(world, 'live')} disabled={busyId === world.id}
-                          className="px-2 py-1 rounded-lg border border-[#39ff14]/30 text-[11px] text-[#8eff78] disabled:opacity-50">Go Live</button>
-                      )}
                       {world.status !== 'available' && (
                         <button type="button" onClick={() => setStatus(world, 'available')} disabled={busyId === world.id}
                           className="px-2 py-1 rounded-lg border border-white/12 text-[11px] text-slate-200 disabled:opacity-50">Set Available</button>
