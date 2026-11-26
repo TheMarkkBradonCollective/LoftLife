@@ -384,6 +384,161 @@ async function handleLogout(request: Request, env: CloudflareEnv): Promise<Respo
   );
 }
 
+
+async function currentAccount(request: Request, env: CloudflareEnv) {
+  const header = request.headers.get('authorization') ?? '';
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  const secret = secretFor(env);
+  if (!token || !secret) return null;
+  const payload = await verifyAuthToken(token, secret);
+  if (!payload || typeof payload.sid !== 'string' || typeof payload.sub !== 'string') return null;
+  const sql = await database(env);
+  if (!sql) return null;
+  const rows = await sql.query(
+    'SELECT a.id,a.handle,a.email,a.password_hash,a.role,a.created_at,a.display_name FROM ll_sessions s JOIN ll_accounts a ON a.id=s.account_id WHERE s.jti_hash=$1 AND s.account_id=$2 AND s.expires_at>$3 LIMIT 1',
+    [await sha256Hex(payload.sid), payload.sub, Date.now()]
+  ) as AccountRow[];
+  return rows[0] ? { sql, account: rows[0] } : null;
+}
+function parseJsonField(value: unknown, fallback: unknown) {
+  if (typeof value !== 'string') return fallback;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+function profileView(account: AccountRow, row?: Record<string, unknown>) {
+  return {
+    userId: account.id,
+    handle: account.handle,
+    displayName: String(row?.display_name ?? account.display_name ?? account.handle),
+    bio: String(row?.bio ?? ''),
+    avatar: parseJsonField(row?.avatar_json, safeAvatar(undefined, account.display_name || account.handle)),
+  };
+}
+function suiteView(row?: Record<string, unknown>) {
+  if (!row) return null;
+  return {
+    id: row.id, number: row.number, floor: Number(row.floor), name: row.name,
+    items: parseJsonField(row.items_json, []), surfaces: parseJsonField(row.surfaces_json, {}),
+    mood: row.mood, isPublic: Boolean(row.is_public), updatedAt: Number(row.updated_at),
+  };
+}
+const FURNITURE_PRICES: Record<string, number> = {
+  plush_sofa:120, sectional_sofa:210, lounge_chair:85, bar_stool:45, cozy_bed:260,
+  dining_set:240, espresso_bar:320, dual_desk:190, coffee_table:95, side_desk:70,
+  record_console:150, media_tv:300, fireplace:340, bookshelf:130, arc_lamp:60,
+  table_lamp:35, monstera_plant:40, olive_tree:75, woven_rug:55, wall_art:65,
+  wall_shelf:50, floor_mirror:110, neon_sign:90,
+};
+const CLOTHING_DEFS: Record<string, { label: string; price: number; currency: string }> = {
+  hoodie:{label:'Everyday Hoodie',price:80,currency:'yuanzi'},
+  blazer:{label:'Tailored Blazer',price:6,currency:'tongbao'},
+  turtleneck:{label:'Merino Turtleneck',price:120,currency:'yuanzi'},
+  glasses:{label:'Wire Glasses',price:60,currency:'yuanzi'},
+  headphones:{label:'Studio Headphones',price:5,currency:'tongbao'},
+  beanie:{label:'Ribbed Beanie',price:45,currency:'yuanzi'},
+};
+const FLOOR_STYLES = ['oak_parquet','walnut_herringbone','terrazzo','concrete','boucle_carpet'];
+const WALL_STYLES = ['warm_chalk','sage_plaster','terracotta','slate_blue','charcoal_loft','soft_blush'];
+const MOODS = ['morning','golden','night'];
+
+
+async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): Promise<Response | null> {
+  const path = url.pathname;
+  const isPublic = path === '/api/shop';
+  const auth = isPublic ? null : await currentAccount(request, env);
+  if (!isPublic && !auth) return fail('Sign in to continue.', 401, 'unauthorized');
+  const sql = auth?.sql;
+  const account = auth?.account;
+  if (path === '/api/shop' && request.method === 'GET') {
+    return json({
+      furniture: Object.entries(FURNITURE_PRICES).map(([id, price]) => ({ id, kind:'furniture', price, currency:'yuanzi' })),
+      clothing: Object.entries(CLOTHING_DEFS).map(([id, item]) => ({ id, kind:'clothing', ...item })),
+    });
+  }
+  if (path === '/api/auth/me' && request.method === 'GET' && sql && account) {
+    const [profiles,wallets,inventory,suites] = await Promise.all([
+      sql.query('SELECT * FROM ll_profiles WHERE user_id=$1 LIMIT 1',[account.id]),
+      sql.query('SELECT yuanzi,tongbao FROM ll_wallets WHERE user_id=$1 LIMIT 1',[account.id]),
+      sql.query('SELECT kind,catalog_id,qty,acquired_at FROM ll_inventory WHERE user_id=$1 ORDER BY acquired_at DESC',[account.id]),
+      sql.query('SELECT * FROM ll_suites WHERE owner_id=$1 LIMIT 1',[account.id]),
+    ]) as [Array<Record<string,unknown>>,Array<Record<string,unknown>>,Array<Record<string,unknown>>,Array<Record<string,unknown>>];
+    return json({
+      user: publicAccount(account), profile: profileView(account,profiles[0]),
+      wallet: wallets[0] ?? {yuanzi:0,tongbao:0},
+      inventory: inventory.map(row=>({kind:row.kind,catalogId:row.catalog_id,qty:Number(row.qty),acquiredAt:Number(row.acquired_at)})),
+      suite: suiteView(suites[0]),
+    });
+  }
+  if (path === '/api/profile' && request.method === 'GET' && sql && account) {
+    const rows = await sql.query('SELECT * FROM ll_profiles WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
+    return json(profileView(account,rows[0]));
+  }
+  if (path === '/api/profile' && request.method === 'PATCH' && sql && account) {
+    const body = await readJson(request);
+    const displayName = validateDisplayName(body.displayName ?? account.display_name, account.handle);
+    const bio = typeof body.bio === 'string' ? body.bio.replace(/[\\u0000-\\u001f\\u007f]/g,'').trim().slice(0,160) : undefined;
+    const rows = await sql.query('SELECT avatar_json,bio FROM ll_profiles WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
+    const avatar = body.avatar === undefined ? parseJsonField(rows[0]?.avatar_json,safeAvatar(undefined,displayName)) : safeAvatar(body.avatar,displayName);
+    await Promise.all([
+      sql.query('UPDATE ll_accounts SET display_name=$1 WHERE id=$2',[displayName,account.id]),
+      sql.query('UPDATE ll_profiles SET display_name=$1,avatar_json=$2,bio=$3,updated_at=$4 WHERE user_id=$5',[displayName,JSON.stringify(avatar),bio ?? String(rows[0]?.bio ?? ''),Date.now(),account.id]),
+    ]);
+    return json({userId:account.id,handle:account.handle,displayName,bio:bio ?? String(rows[0]?.bio ?? ''),avatar});
+  }
+  if (path === '/api/inventory' && request.method === 'GET' && sql && account) {
+    const rows = await sql.query('SELECT kind,catalog_id,qty,acquired_at FROM ll_inventory WHERE user_id=$1 ORDER BY acquired_at DESC',[account.id]) as Array<Record<string,unknown>>;
+    return json(rows.map(row=>({kind:row.kind,catalogId:row.catalog_id,qty:Number(row.qty),acquiredAt:Number(row.acquired_at)})));
+  }
+  if (path === '/api/economy/wallet' && request.method === 'GET' && sql && account) {
+    const rows = await sql.query('SELECT yuanzi,tongbao FROM ll_wallets WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
+    return json(rows[0] ?? {yuanzi:0,tongbao:0});
+  }
+  if (path === '/api/economy/history' && request.method === 'GET' && sql && account) {
+    const limit = Math.max(1,Math.min(200,Number(url.searchParams.get('limit'))||50));
+    const rows = await sql.query('SELECT id,currency,delta,balance_after,reason,ref,created_at FROM ll_ledger WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2',[account.id,limit]) as Array<Record<string,unknown>>;
+    return json(rows.map(row=>({id:row.id,currency:row.currency,delta:Number(row.delta),balanceAfter:Number(row.balance_after),reason:row.reason,ref:row.ref,createdAt:Number(row.created_at)})));
+  }
+  if (path === '/api/suite' && request.method === 'GET' && sql && account) {
+    const rows = await sql.query('SELECT * FROM ll_suites WHERE owner_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
+    return json(suiteView(rows[0]));
+  }
+  if (path === '/api/suite' && request.method === 'PUT' && sql && account) {
+    const body = await readJson(request);
+    if (!Array.isArray(body.items) || body.items.length>200) return fail('Room items must be an array with at most 200 entries.',400,'invalid_input');
+    const seen = new Set<string>();
+    const items = [];
+    for (let i=0;i<body.items.length;i++) {
+      const raw = body.items[i] as Record<string,unknown>;
+      if (!raw || typeof raw!=='object' || typeof raw.catalogId!=='string' || !(raw.catalogId in FURNITURE_PRICES)) return fail(`Invalid furniture item at index ${i}.`,400,'invalid_input');
+      const uid = typeof raw.uid==='string' ? raw.uid.slice(0,64) : `it_${i}`;
+      if (seen.has(uid)) return fail('Duplicate item uid.',400,'invalid_input');
+      seen.add(uid);
+      if (![raw.gx,raw.gz,raw.rot].every(Number.isInteger) || Number(raw.gx)<0 || Number(raw.gx)>14 || Number(raw.gz)<0 || Number(raw.gz)>14 || Number(raw.rot)<0 || Number(raw.rot)>3) return fail(`Invalid placement at index ${i}.`,400,'invalid_input');
+      const color = typeof raw.color==='string' && /^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color.toLowerCase() : '#e6dfd3';
+      const item: Record<string,unknown> = {uid,catalogId:raw.catalogId,gx:raw.gx,gz:raw.gz,rot:raw.rot,color};
+      if (raw.wall==='north'||raw.wall==='west') item.wall=raw.wall;
+      if (typeof raw.active==='boolean') item.active=raw.active;
+      items.push(item);
+    }
+    const surfaces = body.surfaces && typeof body.surfaces==='object' ? body.surfaces as Record<string,unknown> : {};
+    if (!FLOOR_STYLES.includes(String(surfaces.floor)) || !WALL_STYLES.includes(String(surfaces.wall)) || !MOODS.includes(String(body.mood ?? 'morning'))) return fail('Invalid room surface or lighting mood.',400,'invalid_input');
+    const name = typeof body.name==='string' ? body.name.trim().slice(0,48) : 'Grand Suite 402';
+    const at=Date.now();
+    const rows = await sql.query('UPDATE ll_suites SET name=$1,items_json=$2,surfaces_json=$3,mood=$4,updated_at=$5 WHERE owner_id=$6 RETURNING *',[name,JSON.stringify(items),JSON.stringify({floor:surfaces.floor,wall:surfaces.wall}),body.mood??'morning',at,account.id]) as Array<Record<string,unknown>>;
+    let row=rows[0];
+    if (!row) {
+      const created=await sql.query('INSERT INTO ll_suites (id,owner_id,number,floor,name,items_json,surfaces_json,mood,is_public,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9) RETURNING *',[crypto.randomUUID(),account.id,'402',4,name,JSON.stringify(items),JSON.stringify({floor:surfaces.floor,wall:surfaces.wall}),body.mood??'morning',at]) as Array<Record<string,unknown>>;
+      row=created[0];
+    }
+    return json(suiteView(row));
+  }
+  if (path === '/api/suite/visibility' && request.method === 'POST' && sql && account) {
+    const body=await readJson(request);
+    const rows=await sql.query('UPDATE ll_suites SET is_public=$1,updated_at=$2 WHERE owner_id=$3 RETURNING *',[Boolean(body.isPublic),Date.now(),account.id]) as Array<Record<string,unknown>>;
+    return rows[0] ? json(suiteView(rows[0])) : fail('Suite not found.',404,'not_found');
+  }
+  return null;
+}
+
 async function handleHealth(env: CloudflareEnv): Promise<Response> {
   let storageEngine = 'unconfigured';
   if (env.DATABASE_URL) {
@@ -428,6 +583,11 @@ export default {
         if (url.pathname === '/api/auth/register') return await handleRegister(request, env);
         if (url.pathname === '/api/auth/login') return await handleLogin(request, env);
         return await handleLogout(request, env);
+      }
+
+      if (url.pathname.startsWith('/api/')) {
+        const gameResponse = await handleGameRead(request, env, url);
+        if (gameResponse) return gameResponse;
       }
 
       if (url.pathname === '/ws') {
