@@ -451,12 +451,31 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
     '/api/shop','/api/auth/me','/api/profile','/api/inventory',
     '/api/economy/wallet','/api/economy/history','/api/suite','/api/suite/visibility',
   ]);
-  if (!handled.has(path)) return null;
+  const suiteMatch = path.match(/^\/api\/suites\/([^/]+)$/);
+  if (!handled.has(path) && !suiteMatch) return null;
   const isPublic = path === '/api/shop';
   const auth = isPublic ? null : await currentAccount(request, env);
   if (!isPublic && !auth) return fail('Sign in to continue.', 401, 'unauthorized');
   const sql = auth?.sql;
   const account = auth?.account;
+  if (suiteMatch && request.method === 'GET' && sql && account) {
+    const targetRows = await sql.query('SELECT id,handle,display_name FROM ll_accounts WHERE handle=$1 LIMIT 1',[decodeURIComponent(suiteMatch[1]).toLowerCase()]) as Array<{id:string;handle:string;display_name:string}>;
+    if (!targetRows[0]) return fail('No player with that handle.',404,'not_found');
+    const target = targetRows[0];
+    const suites = await sql.query('SELECT * FROM ll_suites WHERE owner_id=$1 LIMIT 1',[target.id]) as Array<Record<string,unknown>>;
+    const suite = suites[0];
+    if (!suite) return fail('Suite not found.',404,'not_found');
+    let allowed = target.id===account.id || Boolean(suite.is_public);
+    if (!allowed) {
+      const [friends,invite] = await Promise.all([
+        sql.query("SELECT 1 FROM ll_friendships WHERE status='accepted' AND ((a=$1 AND b=$2) OR (a=$2 AND b=$1)) LIMIT 1",[account.id,target.id]),
+        sql.query('SELECT 1 FROM ll_world_invites WHERE world_id=$1 AND user_id=$2 LIMIT 1',[suite.id,account.id]),
+      ]);
+      allowed = friends.length>0 || invite.length>0;
+    }
+    if (!allowed) return fail('This suite is private.',403,'forbidden');
+    return json({...suiteView(suite),ownerId:target.id,ownerHandle:target.handle,ownerName:target.display_name,isOwner:target.id===account.id});
+  }
   if (path === '/api/shop' && request.method === 'GET') {
     return json({
       furniture: Object.entries(FURNITURE_PRICES).map(([id, price]) => ({ id, kind:'furniture', price, currency:'yuanzi' })),
