@@ -84,6 +84,23 @@ function sanitizeState(body: Record<string, unknown>) {
 export async function handleWorldRoute(request: Request, sql: Sql, user: User | null): Promise<Response | null> {
   const url = new URL(request.url);
   const path = url.pathname;
+  if (path === '/api/worlds' && request.method === 'POST') {
+    if (!user) return fail('Sign in to create a world.',401,'unauthorized');
+    const body = await request.json().catch(()=>({})) as World;
+    const name = typeof body.name==='string' ? body.name.trim().slice(0,48) : '';
+    const kind = String(body.kind ?? 'hangout');
+    const access = String(body.access ?? 'private');
+    if (name.length<2 || !KINDS.includes(kind) || !ACCESS.includes(access)) return fail('Invalid world name, kind, or access.',400,'invalid_input');
+    const count = await sql.query('SELECT COUNT(*) AS total FROM ll_worlds WHERE owner_id=$1',[user.id]) as Array<{total:string|number}>;
+    if (Number(count[0]?.total ?? 0)>=20) return fail('Each account may own at most 20 worlds.',400,'world_limit');
+    const id = `wld_${crypto.randomUUID()}`;
+    const at = Date.now();
+    const created = await sql.query(
+      "INSERT INTO ll_worlds (id,owner_id,name,kind,description,access,published,items_json,surfaces_json,mood,max_visitors,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,FALSE,'[]',$7,'morning',30,$8,$8) RETURNING *",
+      [id,user.id,name,kind,typeof body.description==='string'?body.description.slice(0,280):'',access,JSON.stringify({floor:'oak_parquet',wall:'warm_chalk'}),at]
+    ) as World[];
+    return json(await view(sql,created[0],user,true),201);
+  }
   if (path === '/api/worlds' && request.method === 'GET') {
     const mine = url.searchParams.get('mine') === '1';
     if (mine && !user) return fail('Sign in to view your worlds.', 401, 'unauthorized');
