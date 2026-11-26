@@ -268,6 +268,7 @@ export class LoftLifeRealtime {
       lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
     };
     ws.serializeAttachment(player);
+    await this.updatePartyPresence(account.id, instanceId);
     const players = this.players(instanceId);
     const existingPlayers = players.filter((entry) => entry.connId !== player.connId);
     send(ws, { t: 'ready', instance: { id: instanceId, kind: instanceId.startsWith('world:') ? 'world' : 'city', worldId: instanceId.startsWith('world:') ? instanceId.slice(6) : null, capacity, count: existingPlayers.length + 1 }, you: publicPlayer(player), players: existingPlayers });
@@ -378,7 +379,14 @@ export class LoftLifeRealtime {
     }
     error(ws,'bad_request','Unknown transit action');
   }
-  private async partyData(): Promise<{ parties: Record<string,{id:string;leaderId:string;members:string[];invites:string[];createdAt:number}>; memberParty: Record<string,string>; userInstances: Record<string,string> }> {
+  private async updatePartyPresence(userId:string,instanceId:string|null) {
+    const namespace=this.env.REALTIME;
+    if(!namespace)return;
+    await namespace.get(namespace.idFromName('party:global')).fetch(new Request('https://loftlife-internal/internal/party/presence',{
+      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({userId,instanceId}),
+    }));
+  }
+    private async partyData(): Promise<{ parties: Record<string,{id:string;leaderId:string;members:string[];invites:string[];createdAt:number}>; memberParty: Record<string,string>; userInstances: Record<string,string> }> {
     return await this.ctx.storage.get('party_state') ?? { parties: {}, memberParty: {}, userInstances: {} };
   }
   private async partyView(party: {id:string;leaderId:string;members:string[];invites:string[];createdAt:number} | null) {
@@ -470,11 +478,6 @@ export class LoftLifeRealtime {
     }));
     const result=await response.json() as {error?:string;code?:string;party?:unknown;invites?:unknown[];notifyUserIds?:string[]};
     if(!response.ok){error(ws,result.code??'party_error',result.error??'Party action failed');return;}
-    const notify=new Set(result.notifyUserIds??[player.userId]);
-    for(const peer of this.ctx.getWebSockets()){
-      const state=peer.deserializeAttachment() as Player|undefined;
-      if(state?.userId&&notify.has(state.userId))send(peer,{t:'party',party:result.party??null,invites:result.invites??[]});
-    }
   }
 
   private async chat(ws: HibernatableWebSocket, player: Player, message: Record<string, unknown>) {
@@ -532,12 +535,16 @@ export class LoftLifeRealtime {
     else ws.close();
     const player = ws.deserializeAttachment() as Player | undefined;
     if (player?.userId) {
+      await this.updatePartyPresence(player.userId, null);
       this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
       this.broadcastSnapshot(player.instanceId, true);
     }
   }
   async webSocketError(ws: HibernatableWebSocket) {
     const player = ws.deserializeAttachment() as Player | undefined;
-    if (player?.userId) this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
+    if (player?.userId) {
+      await this.updatePartyPresence(player.userId, null);
+      this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
+    }
   }
 }
