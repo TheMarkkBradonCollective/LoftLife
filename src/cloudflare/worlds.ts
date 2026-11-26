@@ -133,6 +133,37 @@ export async function handleWorldRoute(request: Request, sql: Sql, user: User | 
     if (!access.canEnter) return fail('You do not have access to this world.',403,'forbidden');
     return json({instanceId:`world:${id}`,capacity:Number(world.max_visitors),name:world.name});
   }
+  if (action === 'collaborators' && request.method === 'POST') {
+    if (world.owner_id !== user?.id) return fail('Only the owner can add collaborators.',403,'forbidden');
+    const body = await request.json().catch(()=>({})) as World;
+    const targets = await sql.query('SELECT id FROM ll_accounts WHERE handle=$1 LIMIT 1',[String(body.handle??'').toLowerCase()]) as Array<{id:string}>;
+    if (!targets[0]) return fail('No player with that handle.',404,'not_found');
+    if (targets[0].id === user!.id) return fail('You already own this world.',400,'bad_request');
+    await sql.query("INSERT INTO ll_world_collaborators(world_id,user_id,role,created_at) VALUES($1,$2,'editor',$3) ON CONFLICT DO NOTHING",[id,targets[0].id,Date.now()]);
+    const updated = await sql.query('SELECT * FROM ll_worlds WHERE id=$1 LIMIT 1',[id]) as World[];
+    return json(await view(sql,updated[0],user,true));
+  }
+  if (action.startsWith('collaborators/') && request.method === 'DELETE') {
+    if (world.owner_id !== user?.id) return fail('Only the owner can remove collaborators.',403,'forbidden');
+    const targetId = decodeURIComponent(action.slice('collaborators/'.length));
+    await sql.query('DELETE FROM ll_world_collaborators WHERE world_id=$1 AND user_id=$2',[id,targetId]);
+    const updated = await sql.query('SELECT * FROM ll_worlds WHERE id=$1 LIMIT 1',[id]) as World[];
+    return json(await view(sql,updated[0],user,true));
+  }
+  if (action === 'invite' && request.method === 'POST') {
+    const access = await permission(sql,world,user);
+    if (!access.canEdit) return fail('Only the owner or a collaborator can invite players.',403,'forbidden');
+    const body = await request.json().catch(()=>({})) as World;
+    const targets = await sql.query('SELECT id FROM ll_accounts WHERE handle=$1 LIMIT 1',[String(body.handle??'').toLowerCase()]) as Array<{id:string}>;
+    if (!targets[0]) return fail('No player with that handle.',404,'not_found');
+    await sql.query('INSERT INTO ll_world_invites(world_id,user_id,created_at) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[id,targets[0].id,Date.now()]);
+    return json({invited:targets[0].id});
+  }
+  if (action === '' && request.method === 'DELETE') {
+    if (world.owner_id !== user?.id) return fail('Only the owner can delete this world.',403,'forbidden');
+    await sql.query('DELETE FROM ll_worlds WHERE id=$1',[id]);
+    return json({deleted:true});
+  }
   if (action === 'state' && request.method === 'PUT') {
     const access = await permission(sql,world,user);
     if (!access.canEdit) return fail('You do not have build permission for this world.',403,'forbidden');
