@@ -20,14 +20,15 @@ import {
   LampDesk,
   LampFloor,
   Layers,
+  LogIn,
   Map as MapIcon,
   MessageCircle,
   Monitor,
   Move,
   Music,
   Paintbrush,
-  PencilRuler,
   RotateCw,
+  Settings,
   Sofa,
   Sparkles,
   Sprout,
@@ -47,10 +48,12 @@ import {
   MicOff,
   X,
 } from 'lucide-react';
+import { AuthGate } from './components/AuthGate';
 import { AvatarModal } from './components/AvatarModal';
 import { CityMapModal } from './components/CityMapModal';
 import { ElevatorPanelModal } from './components/ElevatorPanelModal';
 import { HotelDoorTerminalModal } from './components/HotelDoorTerminalModal';
+import { RoomSettingsModal } from './components/RoomSettingsModal';
 import type { CameraPresetRequest } from './components/RoomViewport';
 import { SocialHud } from './components/SocialHud';
 import { TouchControls } from './components/TouchControls';
@@ -190,6 +193,13 @@ const CATEGORY_TABS: { id: 'all' | FurnitureCategory; label: string }[] = [
   { id: 'wall', label: 'Wall' },
 ];
 
+function readPortraitOrientation(): boolean {
+  if (typeof window === 'undefined') return true;
+  const query = window.matchMedia?.('(orientation: portrait)');
+  if (query) return query.matches;
+  return window.innerHeight >= window.innerWidth;
+}
+
 export default function App() {
   const session = useSession();
 
@@ -220,7 +230,12 @@ export default function App() {
   const [elevatorModalOpen, setElevatorModalOpen] = useState(false);
 
   const touchDevice = useMemo(() => isTouchDevice(), []);
-  const [viewMode, setViewMode] = useState<ViewMode>(() => (isTouchDevice() ? 'play' : 'isometric'));
+  // Phones have no camera switcher: portrait renders isometric, landscape renders
+  // play view, and the view follows device rotation.
+  const [isPortrait, setIsPortrait] = useState<boolean>(() => readPortraitOrientation());
+  const [viewMode, setViewMode] = useState<ViewMode>(() =>
+    isTouchDevice() ? (readPortraitOrientation() ? 'isometric' : 'play') : 'isometric'
+  );
   const [mode, setMode] = useState<GameMode>('walk');
   const [items, setItems] = useState<PlacedItem[]>(initial.items);
   const [history, setHistory] = useState<PlacedItem[][]>([]);
@@ -256,12 +271,35 @@ export default function App() {
   // UI Chrome state
   const [dockCollapsed, setDockCollapsed] = useState(() => isTouchDevice());
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
+  const [roomSettingsOpen, setRoomSettingsOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
   const [cityMapOpen, setCityMapOpen] = useState(false);
   const [cityStreet, setCityStreet] = useState('M St & 15th St');
   const [muted, setMuted] = useState(false);
   const [cameraPreset, setCameraPreset] = useState<CameraPresetRequest | null>(null);
   const [cameraToggle, setCameraToggle] = useState<'overview' | 'closeup'>('overview');
   const playerPoseRef = useRef({ x: 0, z: 0, yaw: 0 });
+
+  useEffect(() => {
+    const update = () => setIsPortrait(readPortraitOrientation());
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    const query = window.matchMedia?.('(orientation: portrait)');
+    query?.addEventListener?.('change', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+      query?.removeEventListener?.('change', update);
+    };
+  }, []);
+
+  // Touch devices derive the camera from orientation. Editing pins isometric so
+  // taps land on the grid, and rotating back restores the orientation view.
+  useEffect(() => {
+    if (!touchDevice || mode === 'edit') return;
+    setViewMode(isPortrait ? 'isometric' : 'play');
+  }, [touchDevice, isPortrait, mode]);
 
   // Persist locally always; mirror to the account when signed in.
   useEffect(() => {
@@ -296,6 +334,43 @@ export default function App() {
     if (JSON.stringify(session.profile.avatar) === JSON.stringify(avatarConfig)) return;
     session.saveAvatar(avatarConfig);
   }, [avatarConfig, session.status, session.profile]);
+
+  // The character lives on this device until the player chooses to go online.
+  // Signing up adopts that local character; signing in keeps the account one.
+  const previousStatusRef = useRef(session.status);
+  useEffect(() => {
+    const previous = previousStatusRef.current;
+    previousStatusRef.current = session.status;
+    if (session.status !== 'online' || previous === 'online') return;
+
+    if (session.justRegistered) {
+      const saved = loadSavedState();
+      setAvatarConfig(saved.avatar);
+      setItems(saved.items);
+      setSurfaces(saved.surfaces);
+      setMood(saved.mood);
+      setRoomName(saved.roomName);
+      session.clearJustRegistered();
+      showHint('Offline character brought online');
+      return;
+    }
+
+    if (session.suite && session.profile) {
+      setItems(session.suite.items);
+      setSurfaces(session.suite.surfaces);
+      setMood(session.suite.mood);
+      setRoomName(session.suite.name);
+      setAvatarConfig(session.profile.avatar);
+      showHint('Signed in · online character loaded');
+    }
+  }, [
+    session.status,
+    session.justRegistered,
+    session.suite,
+    session.profile,
+    session.clearJustRegistered,
+    // showHint only touches timer refs, so it is stable enough to leave out here.
+  ]);
 
   // Stream position/emote to the realtime gateway while online.
   useEffect(() => {
@@ -365,7 +440,11 @@ export default function App() {
         setCityMapOpen(false);
       }
       if (next === 'world') {
-        showHint('Main City · Walk to Hotel Main Entrance & press E for Keycard / Guest Intercom');
+        showHint(
+          touchDevice
+            ? 'Main City · Tap the street to walk · Tap the Hotel doors for Keycard / Intercom'
+            : 'Main City · Walk to Hotel Main Entrance & press E for Keycard / Guest Intercom'
+        );
       } else if (next === 'lobby') {
         showHint('Main Lobby · Walk into the North brass elevator to ride to Floors 2–4');
       } else if (next === 'hallway') {
@@ -374,10 +453,14 @@ export default function App() {
       } else if (next === 'room') {
         setActiveResident(null);
         setHallwayFloor(PLAYER_SUITE_FLOOR);
-        showHint(`${roomName} (Suite ${PLAYER_SUITE_NUMBER}) · Walk to West door & press E for Keycard`);
+        showHint(
+          touchDevice
+            ? `${roomName} (Suite ${PLAYER_SUITE_NUMBER}) · Tap the West door for your Keycard`
+            : `${roomName} (Suite ${PLAYER_SUITE_NUMBER}) · Walk to West door & press E for Keycard`
+        );
       }
     },
-    [hallwayFloor, roomName, showHint]
+    [hallwayFloor, roomName, showHint, touchDevice]
   );
 
   const handleUnlockRoomDoor = useCallback(() => {
@@ -407,11 +490,15 @@ export default function App() {
         setTargetVisitResident(null);
         setLocation('resident_room');
         setMode('walk');
-        showHint(`Entered ${res.name}'s Suite ${res.roomNumber} · Press E near ${res.name} to chat`);
+        showHint(
+          touchDevice
+            ? `Entered ${res.name}'s Suite ${res.roomNumber} · Tap ${res.name} to chat`
+            : `Entered ${res.name}'s Suite ${res.roomNumber} · Press E near ${res.name} to chat`
+        );
         showNpcChat(res.name, res.greeting);
       }
     },
-    [handleChangeLocation, showHint, showNpcChat]
+    [handleChangeLocation, showHint, showNpcChat, touchDevice]
   );
 
   const handleUnlockMainWithKeycard = useCallback(() => {
@@ -792,12 +879,13 @@ export default function App() {
 
   const handleBoardTransit = useCallback(
     (lineId: string, stopId: string) => {
-      setViewMode('play');
+      // Riding needs the chase camera, except in portrait where isometric is pinned.
+      if (!(touchDevice && isPortrait)) setViewMode('play');
       setMode('walk');
       const sent = session.boardTransit(lineId, stopId);
       if (!sent) showHint('Connecting… try boarding again in a moment');
     },
-    [session, showHint]
+    [session, showHint, touchDevice, isPortrait]
   );
 
   const handleExitTransit = useCallback(() => {
@@ -833,7 +921,13 @@ export default function App() {
   const hudPanelClass =
     'bg-[#0b100d]/95 text-slate-100 border-[#39ff14]/30 neon-panel-glow';
 
-  const anyModalOpen = avatarModalOpen || cityMapOpen || doorTerminalOpen || elevatorModalOpen;
+  const anyModalOpen =
+    avatarModalOpen ||
+    cityMapOpen ||
+    doorTerminalOpen ||
+    elevatorModalOpen ||
+    roomSettingsOpen ||
+    authOpen;
 
   const locationTitle = activeWorld
     ? `${activeWorld.name}${activeWorld.canEdit ? ' · Building' : ' · Visiting'}`
@@ -895,6 +989,7 @@ export default function App() {
         activeResident={activeResident}
         viewMode={viewMode}
         mode={mode}
+        isTouch={touchDevice}
         items={items}
         surfaces={surfaces}
         mood={mood}
@@ -962,7 +1057,22 @@ export default function App() {
       </div>
 
       {/* Top-Right Compact Mode & Utility Bar */}
-      <div className="fixed top-4 right-4 z-20 max-w-[calc(100vw-27rem)] flex flex-wrap items-center justify-end gap-2 pointer-events-auto">
+      <div className="fixed top-4 right-4 z-20 max-w-[calc(100vw-1.5rem)] sm:max-w-[calc(100vw-27rem)] flex flex-wrap items-center justify-end gap-2 pointer-events-auto">
+        {/* Offline is the default; this is the door to the shared world. */}
+        {session.status !== 'online' && (
+          <button
+            type="button"
+            onClick={() => {
+              sfx.playClick();
+              setAuthOpen(true);
+            }}
+            className="px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-[#111914] text-[#39ff14] border-[#39ff14]/45 hover:bg-[#19261d]"
+          >
+            <LogIn className="w-3.5 h-3.5" />
+            Play online
+          </button>
+        )}
+
         {/* Leave a player-created world and restore the hotel suite */}
         {activeWorld && (
           <button
@@ -1024,64 +1134,36 @@ export default function App() {
           </button>
         )}
 
-        {/* Isometric vs Third-Person GTA Play View Switcher */}
-        <div className={`p-1 rounded-xl border flex items-center gap-1 ${hudPanelClass}`}>
-          <button
-            type="button"
-            onClick={() => {
-              if (viewMode !== 'isometric') handleTogglePlayView();
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-              viewMode === 'isometric'
-                ? 'bg-[#39ff14] text-[#051205]'
-                : 'text-slate-300 hover:bg-white/10'
-            }`}
-          >
-            <Eye className="w-3.5 h-3.5" />
-            Isometric
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              if (viewMode !== 'play') handleTogglePlayView();
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-              viewMode === 'play'
-                ? 'bg-[#39ff14] text-[#051205]'
-                : 'text-slate-300 hover:bg-white/10'
-            }`}
-          >
-            <Gamepad2 className="w-3.5 h-3.5" />
-            Play View
-          </button>
-        </div>
-
-        {/* Walk / Edit Room Mode Segmented Switch (only inside My Suite) */}
-        {location === 'room' && (!activeWorld || activeWorld.canEdit) && (
+        {/* Camera switcher is desktop-only: phones derive the view from orientation. */}
+        {!touchDevice && (
           <div className={`p-1 rounded-xl border flex items-center gap-1 ${hudPanelClass}`}>
             <button
               type="button"
-              onClick={() => handleModeSwitch('walk')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-                mode === 'walk'
+              onClick={() => {
+                if (viewMode !== 'isometric') handleTogglePlayView();
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
+                viewMode === 'isometric'
                   ? 'bg-[#39ff14] text-[#051205]'
                   : 'text-slate-300 hover:bg-white/10'
               }`}
             >
-              <Footprints className="w-3.5 h-3.5" />
-              Walk
+              <Eye className="w-3.5 h-3.5" />
+              Isometric
             </button>
             <button
               type="button"
-              onClick={() => handleModeSwitch('edit')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-                mode === 'edit'
+              onClick={() => {
+                if (viewMode !== 'play') handleTogglePlayView();
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
+                viewMode === 'play'
                   ? 'bg-[#39ff14] text-[#051205]'
                   : 'text-slate-300 hover:bg-white/10'
               }`}
             >
-              <PencilRuler className="w-3.5 h-3.5" />
-              Edit Room
+              <Gamepad2 className="w-3.5 h-3.5" />
+              Play View
             </button>
           </div>
         )}
@@ -1117,6 +1199,23 @@ export default function App() {
 
         {/* Camera & Avatar & Sound */}
         <div className={`p-1 rounded-xl border flex items-center gap-1 ${hudPanelClass}`}>
+          <button
+            type="button"
+            title="Room settings · Walk, Edit and controls"
+            aria-label="Room settings"
+            aria-expanded={roomSettingsOpen}
+            onClick={() => {
+              sfx.playClick();
+              setRoomSettingsOpen((v) => !v);
+            }}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+              roomSettingsOpen
+                ? 'bg-[#39ff14] text-[#051205]'
+                : 'text-slate-300 hover:bg-white/10 hover:text-[#39ff14]'
+            }`}
+          >
+            <Settings className="w-3.5 h-3.5" />
+          </button>
           <button
             type="button"
             title={
@@ -1478,7 +1577,19 @@ export default function App() {
               </div>
 
               <div className="text-xs opacity-70 flex items-center gap-2 whitespace-nowrap">
-                {viewMode === 'play' ? (
+                {touchDevice ? (
+                  <span>
+                    {location === 'world'
+                      ? 'Tap street to walk · Tap a LoftLine stop to board · Tap Hotel doors for Keycard'
+                      : location === 'lobby'
+                      ? 'Tap floor to walk · Tap the brass elevator'
+                      : location === 'hallway'
+                      ? 'Tap a numbered door for Keycard / Ring · Tap the elevator'
+                      : location === 'resident_room'
+                      ? `Visiting Suite ${activeResident?.roomNumber} · Tap ${activeResident?.name} to chat`
+                      : 'Tap floor to walk · Tap furniture to use it · Tap the West door for Keycard'}
+                  </span>
+                ) : viewMode === 'play' ? (
                   <>
                     <span>WASD move (camera auto-follows) · Shift sprint · Space jump</span>
                     <span aria-hidden="true">·</span>
@@ -1606,6 +1717,14 @@ export default function App() {
                   >
                     <Eraser className="w-3.5 h-3.5" />
                     Clear Floor
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleModeSwitch('walk')}
+                    className="px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors whitespace-nowrap bg-[#39ff14] text-[#051205] hover:bg-[#5bff3b] neon-btn-glow"
+                  >
+                    <Footprints className="w-3.5 h-3.5" />
+                    Done
                   </button>
                 </div>
               </div>
@@ -1799,7 +1918,7 @@ export default function App() {
 
       {/* Mobile virtual stick, drag-look and contextual buttons */}
       <TouchControls
-        active={touchDevice && !anyModalOpen && session.status === 'online'}
+        active={touchDevice && !anyModalOpen && session.status !== 'loading'}
         lookEnabled={viewMode === 'play'}
         voiceEnabled={session.voiceStatus === 'ready'}
         onEmote={() => triggerEmote(activeEmote === 'dance' ? 'wave' : 'dance')}
@@ -1809,6 +1928,29 @@ export default function App() {
 
       {/* Community: chat, presence, friends, shop and worlds */}
       <SocialHud onEnterWorld={handleEnterWorld} />
+
+      {/* Sign in / create the account that turns the local character online */}
+      {authOpen && <AuthGate onClose={() => setAuthOpen(false)} />}
+
+      {/* Room Settings: Walk / Edit live in its Controls section */}
+      <RoomSettingsModal
+        open={roomSettingsOpen}
+        roomName={roomName}
+        itemCount={items.length}
+        mode={mode}
+        canEdit={location === 'room' && (!activeWorld || activeWorld.canEdit)}
+        touchDevice={touchDevice}
+        isPortrait={isPortrait}
+        onEnterEdit={() => {
+          setRoomSettingsOpen(false);
+          handleModeSwitch('edit');
+        }}
+        onExitEdit={() => {
+          setRoomSettingsOpen(false);
+          handleModeSwitch('walk');
+        }}
+        onClose={() => setRoomSettingsOpen(false)}
+      />
 
       {/* Avatar Character Studio Modal */}
       <AvatarModal

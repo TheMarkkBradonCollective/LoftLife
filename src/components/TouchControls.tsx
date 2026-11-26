@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { ArrowUp, FastForward, Hand, Mic, Sparkles } from 'lucide-react';
+import { ArrowUp, FastForward, Mic, Sparkles } from 'lucide-react';
 import { touchInput } from '../game/touchInput';
 
 interface TouchControlsProps {
@@ -137,16 +137,6 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             <Mic className="w-6 h-6" />
           </button>
         )}
-        <button
-          type="button"
-          aria-label="Interact"
-          className="w-16 h-16 rounded-full bg-[#39ff14] text-[#051205] border border-[#8eff78] shadow-lg flex items-center justify-center active:scale-95"
-          onClick={() => {
-            touchInput.interact = true;
-          }}
-        >
-          <Hand className="w-7 h-7" />
-        </button>
         <div className="flex items-center gap-2">
           <button
             type="button"

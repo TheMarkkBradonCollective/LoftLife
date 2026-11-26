@@ -67,6 +67,8 @@ interface SessionValue {
   suite: SuiteState | null;
   authError: string | null;
   authBusy: boolean;
+  /** True right after a brand-new account was created, so the local character can be adopted. */
+  justRegistered: boolean;
   connection: ConnectionStatus;
   instance: InstanceInfo | null;
   remotePlayers: RemotePlayer[];
@@ -90,6 +92,7 @@ interface SessionValue {
     avatar?: AvatarConfig;
   }) => Promise<void>;
   continueOffline: () => void;
+  clearJustRegistered: () => void;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   buy: (catalogId: string) => Promise<void>;
@@ -137,6 +140,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [suite, setSuite] = useState<SuiteState | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
+  const [justRegistered, setJustRegistered] = useState(false);
 
   const [connection, setConnection] = useState<ConnectionStatus>('idle');
   const [instance, setInstance] = useState<InstanceInfo | null>(null);
@@ -184,7 +188,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       if (!getToken()) {
-        if (!cancelled) setStatus('anonymous');
+        // No account needed to play: the local character is the default.
+        if (!cancelled) setStatus('offline');
         return;
       }
       try {
@@ -194,7 +199,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         if (error instanceof ApiError && error.status === 401) {
           setToken(null);
-          setStatus('anonymous');
+          setStatus('offline');
         } else {
           setAuthError('Cannot reach the LoftLife server. You can play offline.');
           setStatus('offline');
@@ -380,6 +385,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         const result = await api.register({ ...payload, avatar: payload.avatar ?? DEFAULT_AVATAR });
         setToken(result.token);
         await loadSession();
+        setJustRegistered(true);
         setStatus('online');
       } catch (error) {
         setAuthError(messageOf(error));
@@ -394,6 +400,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setAuthError(null);
     setStatus('offline');
   }, []);
+
+  const clearJustRegistered = useCallback(() => setJustRegistered(false), []);
 
   const logout = useCallback(async () => {
     try {
@@ -416,7 +424,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setTransitVehicles([]);
     setRiding(null);
     voiceRef.current?.disable();
-    setStatus('anonymous');
+    // Signing out returns to the on-device character instead of a wall.
+    setStatus('offline');
   }, []);
 
   const refresh = useCallback(async () => {
@@ -569,6 +578,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       suite,
       authError,
       authBusy,
+      justRegistered,
       connection,
       instance,
       remotePlayers,
@@ -586,6 +596,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       login,
       register,
       continueOffline,
+      clearJustRegistered,
       logout,
       refresh,
       buy,
@@ -616,6 +627,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       suite,
       authError,
       authBusy,
+      justRegistered,
       connection,
       instance,
       remotePlayers,
@@ -633,6 +645,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       login,
       register,
       continueOffline,
+      clearJustRegistered,
       logout,
       refresh,
       buy,

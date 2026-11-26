@@ -117,6 +117,7 @@ interface RoomViewportProps {
   movingUid: string | null;
   cameraPreset: CameraPresetRequest | null;
   modalOpen?: boolean;
+  isTouch?: boolean;
   remotePlayers?: RemotePlayer[];
   playerPoseRef?: React.MutableRefObject<{ x: number; z: number; yaw: number }>;
   transitLines?: TransitLine[];
@@ -224,6 +225,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   movingUid,
   cameraPreset,
   modalOpen = false,
+  isTouch = false,
   remotePlayers = [],
   playerPoseRef,
   transitLines = [],
@@ -279,6 +281,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     placingColor,
     movingUid,
     modalOpen,
+    isTouch,
     remotePlayers,
     playerPoseRef,
     transitLines,
@@ -324,6 +327,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     placingColor,
     movingUid,
     modalOpen,
+    isTouch,
     remotePlayers,
     playerPoseRef,
     transitLines,
@@ -388,6 +392,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       gz: number;
       wall?: 'north' | 'west';
     };
+    wallCut: { north: boolean; west: boolean };
     cameraAnim: {
       active: boolean;
       pos: THREE.Vector3;
@@ -511,8 +516,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     controls.maxDistance = 30;
     controls.minPolarAngle = 0.25;
     controls.maxPolarAngle = Math.PI / 2 - 0.1;
-    controls.minAzimuthAngle = -0.18;
-    controls.maxAzimuthAngle = Math.PI / 2 + 0.18;
+    controls.minAzimuthAngle = -Infinity;
+    controls.maxAzimuthAngle = Infinity;
     controls.update();
 
     const hemiLight = new THREE.HemisphereLight(0xdceeff, 0x9c826b, 0.78);
@@ -653,6 +658,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       ghostGroup: null as THREE.Group | null,
       ghostKey: '',
       ghostState: { valid: false, gx: 0, gz: 0, wall: undefined as 'north' | 'west' | undefined },
+      wallCut: { north: false, west: false },
       cameraAnim: {
         active: false,
         pos: new THREE.Vector3(),
@@ -819,6 +825,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     // Unified proximity action evaluation (runs in Isometric Walk & Play View!)
     let lastPrompt: string | null = null;
+    // Phones have no E key, so contextual actions are tapped and the prompt says so.
+    const actionLabel = (text: string) =>
+      propsRef.current.isTouch ? `Tap · ${text}` : `Press E · ${text}`;
     function getNearbyAction(): { label: string; execute: () => void } | null {
       const {
         location: loc,
@@ -837,7 +846,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       // Riding: the only contextual action is stepping off at the next stop.
       if (propsRef.current.ridingVehicle) {
         return {
-          label: `Press E · Step off ${propsRef.current.ridingLabel ?? 'the LoftLine'}`,
+          label: actionLabel(`Step off ${propsRef.current.ridingLabel ?? 'the LoftLine'}`),
           execute: () => {
             sfx.playClick();
             propsRef.current.onExitTransit?.();
@@ -847,7 +856,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
       if (av.seatedUid) {
         return {
-          label: 'Press E · Stand Up',
+          label: actionLabel('Stand Up'),
           execute: () => {
             standUpFromSeat();
             propsRef.current.onEmoteChange('idle');
@@ -861,7 +870,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         if (Math.hypot(av.x - -6.4, av.z - SUITE_DOOR_Z) < 1.75) {
           if (loc === 'room' && !suiteUnlocked) {
             return {
-              label: `Press E · Enter Keycard (Suite ${PLAYER_SUITE_NUMBER})`,
+              label: actionLabel(`Enter Keycard (Suite ${PLAYER_SUITE_NUMBER})`),
               execute: () => {
                 sfx.playKeycardBeep();
                 av.doorSwingTimer = 2.0;
@@ -873,7 +882,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             };
           }
           return {
-            label: `Walk Through or Press E · Exit to Floor Hallway`,
+            label: actionLabel('Exit to Floor Hallway'),
             execute: () => {
               sfx.playToggle(true);
               propsRef.current.onChangeLocation('hallway');
@@ -887,7 +896,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           Math.hypot(av.x - RESIDENT_NPC_POS.x, av.z - RESIDENT_NPC_POS.z) < 2.2
         ) {
           return {
-            label: `Press E · Talk to ${resident.name}`,
+            label: actionLabel(`Talk to ${resident.name}`),
             execute: () => {
               av.residentGreetTimer = 4.0;
               propsRef.current.onEmoteChange('wave');
@@ -919,7 +928,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           const cat = getCatalogItem(bestItem.catalogId)!;
           if (cat.interactive) {
             return {
-              label: `Press E · ${bestItem.active ? 'Turn Off' : 'Turn On'} ${cat.name}`,
+              label: actionLabel(`${bestItem.active ? 'Turn Off' : 'Turn On'} ${cat.name}`),
               execute: () => {
                 if (loc === 'room') {
                   sfx.playToggle(!bestItem!.active);
@@ -937,7 +946,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             const seatInfo = getSeatWorldInfo(bestItem);
             if (seatInfo) {
               return {
-                label: `Press E · Sit on ${cat.name}`,
+                label: actionLabel(`Sit on ${cat.name}`),
                 execute: () => {
                   sitOnSeat(
                     bestItem!.uid,
@@ -962,7 +971,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           1.95
         ) {
           return {
-            label: 'Press E · Ride Elevator',
+            label: actionLabel('Ride Elevator'),
             execute: () => {
               releaseCursorForModal();
               sfx.playElevatorDing();
@@ -978,7 +987,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
                 ? `Your Suite ${d.roomNumber}`
                 : `${d.resident?.name}'s Suite ${d.roomNumber}`;
               return {
-                label: `Walk Through or Press E · Enter ${ownerLabel}`,
+                label: actionLabel(`Enter ${ownerLabel}`),
                 execute: () => {
                   sfx.playToggle(true);
                   propsRef.current.onEnterSuiteFromHallway(d.roomNumber);
@@ -987,7 +996,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             }
             if (d.isPlayerSuite) {
               return {
-                label: `Press E · Enter Keycard (Suite ${d.roomNumber})`,
+                label: actionLabel(`Enter Keycard (Suite ${d.roomNumber})`),
                 execute: () => {
                   sfx.playKeycardBeep();
                   propsRef.current.onUnlockHallwayDoor(d.roomNumber);
@@ -1000,7 +1009,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             if (d.resident) {
               const targetRes = d.resident;
               return {
-                label: `Press E · Ring ${targetRes.name} (Suite ${d.roomNumber})`,
+                label: actionLabel(`Ring ${targetRes.name} (Suite ${d.roomNumber})`),
                 execute: () => {
                   sfx.playIntercomRing();
                   propsRef.current.onWalkHint?.(
@@ -1035,7 +1044,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           Math.hypot(av.x - lobbyHandles.elevatorPos.x, av.z - lobbyHandles.elevatorPos.z) < 2.05
         ) {
           return {
-            label: 'Press E · Ride Elevator',
+            label: actionLabel('Ride Elevator'),
             execute: () => {
               releaseCursorForModal();
               sfx.playElevatorDing();
@@ -1048,7 +1057,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           1.95
         ) {
           return {
-            label: 'Walk Through or Press E · Exit to Main City',
+            label: actionLabel('Exit to Main City'),
             execute: () => {
               sfx.playToggle(true);
               propsRef.current.onChangeLocation('world');
@@ -1058,7 +1067,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         for (const npc of lobbyHandles.npcs) {
           if (Math.hypot(av.x - (npc.x + 2.0), av.z - npc.z) < 2.15) {
             return {
-              label: `Press E · Talk to ${npc.name}`,
+              label: actionLabel(`Talk to ${npc.name}`),
               execute: () => {
                 npc.greetTimer = 4.0;
                 av.yaw = Math.atan2(npc.x - av.x, npc.z - av.z);
@@ -1072,7 +1081,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         for (const s of lobbyHandles.seats) {
           if (Math.hypot(av.x - s.seatPos.x, av.z - s.seatPos.z) < 1.95) {
             return {
-              label: `Press E · Sit on ${s.label}`,
+              label: actionLabel(`Sit on ${s.label}`),
               execute: () => {
                 sitOnSeat(s.id, s.seatPos, s.facingYaw, s.approachPos);
                 propsRef.current.onEmoteChange('sit');
@@ -1091,8 +1100,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       ) {
         return {
           label: hotelDoorUnlocked
-            ? 'Walk Through · Enter Main Lobby (E · Intercom)'
-            : 'Press E · Enter Keycard or Ring Active User',
+            ? actionLabel('Enter Main Lobby')
+            : actionLabel('Enter Keycard or Ring Active User'),
           execute: () => {
             releaseCursorForModal();
             sfx.playClick();
@@ -1107,7 +1116,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         ) < 2.1
       ) {
         return {
-          label: 'Press E · Toggle Dance Lights',
+          label: actionLabel('Toggle Dance Lights'),
           execute: () => {
             const isOn = mainWorld.togglePartyMode();
             sfx.playToggle(isOn);
@@ -1120,7 +1129,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       for (const npc of mainWorld.npcs) {
         if (Math.hypot(av.x - npc.x, av.z - npc.z) < 2.1) {
           return {
-            label: `Press E · Talk to ${npc.name}`,
+            label: actionLabel(`Talk to ${npc.name}`),
             execute: () => {
               npc.greetTimer = 4.0;
               av.yaw = Math.atan2(npc.x - av.x, npc.z - av.z);
@@ -1134,7 +1143,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       for (const s of mainWorld.seats) {
         if (Math.hypot(av.x - s.seatPos.x, av.z - s.seatPos.z) < 1.75) {
           return {
-            label: `Press E · Sit on ${s.label}`,
+            label: actionLabel(`Sit on ${s.label}`),
             execute: () => {
               sitOnSeat(s.id, s.seatPos, s.facingYaw, s.approachPos);
               propsRef.current.onEmoteChange('sit');
@@ -1148,7 +1157,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         for (const stop of line.stops) {
           if (Math.hypot(av.x - stop.x, av.z - stop.z) < 6) {
             return {
-              label: `Press E · Board ${line.label} at ${stop.name}`,
+              label: actionLabel(`Board ${line.label} at ${stop.name}`),
               execute: () => {
                 sfx.playClick();
                 propsRef.current.onBoardTransit?.(line.id, stop.id);
@@ -1502,8 +1511,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
       if (dist > 6) return;
 
-      // In Play View: clicking canvas requests Pointer Lock for free mouse-look
-      if (propsRef.current.viewMode === 'play') {
+      // In Play View: clicking canvas requests Pointer Lock for free mouse-look.
+      // Phones skip this: a tap is an interaction, not a cursor grab.
+      if (propsRef.current.viewMode === 'play' && !propsRef.current.isTouch) {
         if (document.pointerLockElement !== renderer.domElement) {
           try {
             const maybePromise = renderer.domElement.requestPointerLock?.() as unknown as Promise<void> | undefined;
@@ -1533,6 +1543,18 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
       // ---------------- 1. MAIN WORLD INTERACTIONS ----------------
       if (loc === 'world') {
+        // Tapping a LoftLine stop or the bus itself boards / steps off it.
+        if (propsRef.current.isTouch) {
+          const transitHits = raycaster.intersectObject(transitGroup, true);
+          if (transitHits.length > 0) {
+            const transitAction = getNearbyAction();
+            if (transitAction) {
+              transitAction.execute();
+              return;
+            }
+          }
+        }
+
         const portalHits = raycaster.intersectObject(mainWorld.loftPortalGroup, true);
         if (portalHits.length > 0) {
           standUpFromSeat();
@@ -2631,6 +2653,24 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           }
         }
         controls.update();
+
+        // Rotating cutaway: keep the suite orbitable through a full 360° by
+        // hiding whichever solid wall sits between the camera and the room.
+        const inSuite = currentLoc === 'room' || currentLoc === 'resident_room';
+        const wallEdge = -GRID_SIZE / 2 + 0.35;
+        const cutNorth = inSuite && camera.position.z < wallEdge;
+        const cutWest = inSuite && camera.position.x < wallEdge;
+        if (cutNorth !== handles.wallCut.north || cutWest !== handles.wallCut.west) {
+          handles.wallCut.north = cutNorth;
+          handles.wallCut.west = cutWest;
+          handles.roomHandles.setWallCutaway(cutNorth, cutWest);
+          // Wall-mounted decor has to disappear with its wall.
+          for (const item of currentItems) {
+            if (item.wall !== 'north' && item.wall !== 'west') continue;
+            const group = handles.furnitureMap.get(item.uid);
+            if (group) group.visible = item.wall === 'north' ? !cutNorth : !cutWest;
+          }
+        }
       }
 
       // Proximity prompt check in BOTH Play View and Isometric Walk!
@@ -2796,6 +2836,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     const loc = propsRef.current.location;
 
     if (viewMode === 'play') {
+      h.wallCut.north = false;
+      h.wallCut.west = false;
+      h.roomHandles.setWallCutaway(false, false);
       h.controls.enabled = false;
       h.cameraAnim.active = false;
       h.camera.fov = 52;
@@ -2963,8 +3006,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         h.playCam.yaw = -Math.PI / 2;
       }
       h.avatarState.y = 0;
-      h.controls.minAzimuthAngle = -0.18;
-      h.controls.maxAzimuthAngle = Math.PI / 2 + 0.18;
+      // Full orbit: the rotating cutaway hides whichever wall blocks the view.
+      h.controls.minAzimuthAngle = -Infinity;
+      h.controls.maxAzimuthAngle = Infinity;
       h.controls.maxDistance = 30;
       fog.near = 32;
       fog.far = 72;

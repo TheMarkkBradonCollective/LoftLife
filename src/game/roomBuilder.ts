@@ -19,6 +19,7 @@ export interface RoomEnvironmentHandles {
   updateSurfaces: (floor: FloorStyleId, wall: WallStyleId, maxAnisotropy: number) => void;
   updateMoodBackdrop: (mood: LightingMood) => void;
   setGridVisible: (visible: boolean) => void;
+  setWallCutaway: (hideNorth: boolean, hideWest: boolean) => void;
   setDoorUnlocked: (unlocked: boolean) => void;
   setRoomBadge: (suiteNumber: string, maxAnisotropy: number) => void;
 }
@@ -433,6 +434,44 @@ export function buildRoomArchitecture(
   gridOverlay.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(subPts), subLineMat));
   roomGroup.add(gridOverlay);
 
+  // --- Rotating cutaway -------------------------------------------------------
+  // The suite only builds its north and west walls. Orbiting a full 360° means
+  // the camera sometimes sits behind one of them, so the wall between camera
+  // and room is hidden on demand instead of clamping the orbit to one corner.
+  const northOccluders: THREE.Object3D[] = [];
+  const westOccluders: THREE.Object3D[] = [];
+  const ignored = new Set<THREE.Object3D>([
+    slab,
+    floorTopMesh,
+    floorRaycastPlane,
+    northWallRaycastPlane,
+    westWallRaycastPlane,
+    gridOverlay,
+  ]);
+  const childBounds = new THREE.Box3();
+  const childCenter = new THREE.Vector3();
+  for (const child of roomGroup.children) {
+    if (ignored.has(child)) continue;
+    childBounds.setFromObject(child);
+    childBounds.getCenter(childCenter);
+    // Anything anchored to a wall has its centre on (or just outside) that wall.
+    if (childCenter.z < -half + 0.05) {
+      northOccluders.push(child);
+    } else if (childCenter.x < -half + 0.05) {
+      westOccluders.push(child);
+    }
+  }
+
+  let cutawayNorth = false;
+  let cutawayWest = false;
+  function setWallCutaway(hideNorth: boolean, hideWest: boolean) {
+    if (hideNorth === cutawayNorth && hideWest === cutawayWest) return;
+    cutawayNorth = hideNorth;
+    cutawayWest = hideWest;
+    for (const object of northOccluders) object.visible = !hideNorth;
+    for (const object of westOccluders) object.visible = !hideWest;
+  }
+
   let currentFloorTex: THREE.CanvasTexture | null = floorTopMat.map as THREE.CanvasTexture;
 
   function updateSurfaces(floor: FloorStyleId, wall: WallStyleId, anisotropy: number) {
@@ -501,6 +540,7 @@ export function buildRoomArchitecture(
     updateSurfaces,
     updateMoodBackdrop,
     setGridVisible,
+    setWallCutaway,
     setDoorUnlocked,
     setRoomBadge,
   };

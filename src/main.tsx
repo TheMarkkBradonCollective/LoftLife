@@ -2,7 +2,6 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import {ErrorBoundary} from './components/ErrorBoundary.tsx';
 import './index.css';
-import {AuthGate} from './components/AuthGate';
 import {SessionProvider, useSession} from './session';
 
 function Splash() {
@@ -16,8 +15,9 @@ function Splash() {
 
 function Root() {
   const {status} = useSession();
+  // Offline is the default: a first visit lands straight in the suite with the
+  // character stored on this device. Sign-in is offered from inside the game.
   if (status === 'loading') return <Splash />;
-  if (status === 'anonymous') return <AuthGate />;
   return <App />;
 }
 
