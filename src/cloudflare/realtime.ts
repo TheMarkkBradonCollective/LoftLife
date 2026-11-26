@@ -10,7 +10,7 @@ interface Env {
 }
 type Sql = { query(query: string, params?: unknown[]): Promise<unknown[]> };
 type Player = {
-  connId: string; userId: string; handle: string; name: string; avatar: unknown;
+  connId: string; userId: string; handle: string; name: string; avatar: unknown; isGuest?: boolean;
   instanceId: string; x: number; y: number; z: number; yaw: number;
   emote: string; location: string; lastSeen: number; lastChatAt: number; lastPoseAt?: number;
   riding?: string | null; transitLineId?: string | null; transitSeat?: number | null;
@@ -30,7 +30,8 @@ function send(ws: WebSocket, value: unknown) {
 }
 function publicPlayer(p: Player) {
   return {
-    connId: p.connId, userId: p.userId, handle: p.handle, name: p.name,
+    connId: p.connId, userId: p.userId, handle: p.handle,
+    name: p.isGuest ? `Guest · ${p.name}` : p.name, displayName: p.name, isGuest: Boolean(p.isGuest),
     avatar: p.avatar, x: p.x, y: p.y, z: p.z, yaw: p.yaw,
     emote: p.emote, location: p.location, riding: p.riding ?? null,
   };
@@ -216,6 +217,7 @@ export class LoftLifeRealtime {
         ws.close(1000, 'left');
         return;
       case 'voice': {
+        if (player.isGuest) { error(ws, 'forbidden', 'Guest visitors cannot use private voice signalling'); return; }
         const target = String(message.to ?? '');
         const peer = this.ctx.getWebSockets().find((candidate) => {
           const state = candidate.deserializeAttachment() as Player | undefined;
@@ -243,6 +245,40 @@ export class LoftLifeRealtime {
       return;
     }
     const sql = this.database();
+    if (payload.kind === 'guest') {
+      if (instanceId !== 'city:main' || (place && typeof place === 'object' && (place as {kind?:string}).kind === 'world')) {
+        error(ws, 'forbidden', 'Guest sessions can only enter TheCity');
+        ws.close(1008, 'guest_city_only');
+        return;
+      }
+      const guestRows = await sql.query(
+        'SELECT guest_id, display_name FROM ll_guest_sessions WHERE jti_hash=$1 AND guest_id=$2 AND expires_at>$3 LIMIT 1',
+        [await sha256Hex(payload.sid), payload.sub, Date.now()]
+      ) as Array<{guest_id:string;display_name:string}>;
+      const guest = guestRows[0];
+      if (!guest) {
+        error(ws, 'unauthorized', 'Guest session expired or revoked');
+        ws.close(1008, 'guest_expired');
+        return;
+      }
+      const player: Player = {
+        connId: crypto.randomUUID(), userId: guest.guest_id, handle: 'guest',
+        name: guest.display_name, avatar: null, isGuest: true, instanceId,
+        x: 0, y: 0, z: 0, yaw: 0, emote: 'idle', location: 'world',
+        lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
+      };
+      const active = this.players(instanceId);
+      if (active.length >= MAX_PLAYERS) {
+        error(ws, 'instance_full', 'TheCity is full');
+        ws.close(1013, 'instance_full');
+        return;
+      }
+      ws.serializeAttachment(player);
+      send(ws, { t: 'ready', instance: { id: instanceId, kind: 'city', worldId: null, capacity: MAX_PLAYERS, count: active.length + 1 }, you: publicPlayer(player), players: active });
+      this.broadcast(instanceId, { t: 'join', player: publicPlayer(player) }, ws);
+      this.broadcastSnapshot(instanceId, true);
+      return;
+    }
     const sessionRows = await sql.query(
       'SELECT a.id, a.handle, a.display_name, a.role FROM ll_sessions s JOIN ll_accounts a ON a.id=s.account_id WHERE s.jti_hash=$1 AND s.account_id=$2 AND s.expires_at>$3 AND COALESCE(a.suspended_until,0)<=$4 LIMIT 1',
       [await sha256Hex(payload.sid), payload.sub, Date.now(), Date.now()]
@@ -507,6 +543,7 @@ export class LoftLifeRealtime {
     return payload;
   }
   private async handleParty(ws:HibernatableWebSocket,player:Player,message:Record<string,unknown>) {
+    if (player.isGuest) { error(ws, 'forbidden', 'Guest visitors cannot use parties'); return; }
     const namespace=this.env.REALTIME;
     if(!namespace){error(ws,'party_unavailable','Party service is not configured');return;}
     const id=namespace.idFromName('party:global');
@@ -546,6 +583,10 @@ export class LoftLifeRealtime {
       error(ws,'unsupported_scope','Unknown chat scope');
       return;
     }
+    if (player.isGuest && !['city','local'].includes(scope)) {
+      error(ws, 'forbidden', 'Guest visitors can only use public city and nearby chat');
+      return;
+    }
     const world = player.instanceId.startsWith('world:');
     let dbScope = scope === 'local' ? 'local' : world ? 'world' : 'city';
     let scopeId = world ? player.instanceId.slice(6) : 'main';
@@ -576,12 +617,14 @@ export class LoftLifeRealtime {
       dbScope='party';scopeId=state.party.id;partyId=state.party.id;recipients=state.party.members.map(member=>member.userId);
     }
     const id=crypto.randomUUID();
-    await this.database().query(
-      'INSERT INTO ll_chat_messages (id, scope, scope_id, user_id, body, created_at) VALUES ($1,$2,$3,$4,$5,$6)',
-      [id,dbScope,scopeId,player.userId,body,now]
-    );
+    if (!player.isGuest && scope !== 'local') {
+      await this.database().query(
+        'INSERT INTO ll_chat_messages (id, scope, scope_id, user_id, body, created_at) VALUES ($1,$2,$3,$4,$5,$6)',
+        [id,dbScope,scopeId,player.userId,body,now]
+      );
+    }
     const mode=String(message.mode??'say');
-    const event={t:'chat',scope,mode,body,from:{userId:player.userId,handle:player.handle,displayName:player.name},to,at:now,id,scopeId};
+    const event={t:'chat',scope,mode,body,from:{userId:player.userId,handle:player.handle,displayName:player.isGuest ? `Guest · ${player.name}` : player.name,isGuest:Boolean(player.isGuest)},to,at:now,id,scopeId};
     if(scope==='local'){
       const range=mode==='whisper'?6:mode==='shout'?60:24;
       for(const peer of this.ctx.getWebSockets()){
@@ -607,7 +650,7 @@ export class LoftLifeRealtime {
     else ws.close();
     const player = ws.deserializeAttachment() as Player | undefined;
     if (player?.userId) {
-      await this.updatePartyPresence(player.userId, null);
+      if (!player.isGuest) await this.updatePartyPresence(player.userId, null);
       this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
       this.broadcastSnapshot(player.instanceId, true);
     }
@@ -615,7 +658,7 @@ export class LoftLifeRealtime {
   async webSocketError(ws: HibernatableWebSocket) {
     const player = ws.deserializeAttachment() as Player | undefined;
     if (player?.userId) {
-      await this.updatePartyPresence(player.userId, null);
+      if (!player.isGuest) await this.updatePartyPresence(player.userId, null);
       this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
     }
   }

@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, ArrowLeft, DoorOpen, Loader2, RefreshCw } from 'lucide-react';
 import { api } from '../net/api';
+import { AuthGate } from '../components/AuthGate';
 import { useSession } from '../session';
 import { PlatformDataProvider } from './data';
 import { PlatformLayout } from './PlatformLayout';
@@ -43,7 +44,13 @@ function navigate(path: string) {
 }
 
 export function PlatformApp() {
+  const session = useSession();
   const [route, setRoute] = useState<PlatformRoute>(() => parseHash(window.location.hash));
+  const [authOpen, setAuthOpen] = useState(false);
+  const [guestFormOpen, setGuestFormOpen] = useState(false);
+  const [guestDisplayName, setGuestDisplayName] = useState('');
+  const [guestError, setGuestError] = useState<string | null>(null);
+  const [guestBusy, setGuestBusy] = useState(false);
 
   useEffect(() => {
     const onHashChange = () => setRoute(parseHash(window.location.hash));
@@ -52,6 +59,63 @@ export function PlatformApp() {
   }, []);
 
   const go = useCallback((page: PlatformPage) => navigate(page), []);
+
+  useEffect(() => {
+    if (session.status === 'guest' && (route.name !== 'play' || route.entry.kind !== 'city')) navigate('play/city');
+    if (session.status !== 'guest' && route.name === 'play' && session.status !== 'online') navigate('');
+  }, [session.status, route]);
+
+  const visitAsGuest = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (guestBusy) return;
+    setGuestBusy(true); setGuestError(null);
+    try {
+      await session.startGuest(guestDisplayName);
+      navigate('play/city');
+    } catch (error) {
+      setGuestError((error as Error)?.message ?? 'Could not start a guest session.');
+    } finally { setGuestBusy(false); }
+  };
+
+  if (session.status === 'guest' && route.name !== 'play') {
+    return <div className="flex min-h-screen items-center justify-center bg-[#f4f5f6] text-slate-600">Connecting your guest visit…</div>;
+  }
+
+  if (session.status !== 'online' && session.status !== 'guest') {
+    return (
+      <main className="min-h-screen bg-[#f4f5f6] text-slate-900">
+        <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 py-8">
+          <header className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#39ff14] text-xl font-black text-[#102010]">L</div>
+            <span className="text-xl font-bold tracking-tight">LoftLife</span>
+          </header>
+          <section className="flex flex-1 flex-col items-center justify-center py-16 text-center">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">A world to call your own</p>
+            <h1 className="max-w-2xl text-4xl font-bold tracking-tight sm:text-6xl">Create. Connect. Explore.</h1>
+            <p className="mt-5 max-w-lg text-base leading-7 text-slate-600">Build your space, meet people, and explore TheCity.</p>
+            <div className="mt-9 flex w-full max-w-sm flex-col gap-3">
+              <button type="button" onClick={() => setAuthOpen(true)} className="rounded-xl bg-slate-900 px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-slate-700">Sign In</button>
+              <button type="button" onClick={() => { setGuestFormOpen(true); setGuestError(null); }} className="rounded-xl border border-slate-300 bg-white px-6 py-3.5 text-sm font-semibold text-slate-800 transition hover:bg-slate-50">Visit as Guest</button>
+            </div>
+            {guestFormOpen && (
+              <form onSubmit={visitAsGuest} className="mt-5 w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
+                <label className="block text-sm font-semibold text-slate-800" htmlFor="guest-display-name">Choose your display name</label>
+                <input id="guest-display-name" autoFocus minLength={2} maxLength={32} required value={guestDisplayName} onChange={(event) => setGuestDisplayName(event.target.value)} placeholder="What should other visitors see?" className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-3 text-sm text-slate-900 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200" />
+                <p className="mt-2 text-xs leading-5 text-slate-500">Your name appears with a Guest label. Guest access is temporary and does not create an account.</p>
+                {guestError && <p role="alert" className="mt-2 text-xs text-red-600">{guestError}</p>}
+                <div className="mt-4 flex gap-2">
+                  <button type="button" onClick={() => setGuestFormOpen(false)} className="flex-1 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700">Cancel</button>
+                  <button type="submit" disabled={guestBusy} className="flex-1 rounded-xl bg-[#39ff14] px-4 py-2.5 text-sm font-bold text-slate-950 disabled:opacity-60">{guestBusy ? 'Joining…' : 'Enter TheCity'}</button>
+                </div>
+              </form>
+            )}
+          </section>
+          <footer className="pb-3 text-center text-xs text-slate-400">LoftLife · TheCity</footer>
+        </div>
+        {authOpen && <AuthGate onClose={() => setAuthOpen(false)} showOfflineOption={false} />}
+      </main>
+    );
+  }
 
   if (route.name === 'play') {
     return <GameHost entry={route.entry} />;
@@ -105,6 +169,11 @@ function GameHost({ entry }: { entry: GameEntry }) {
     setState('checking');
     setError(null);
     try {
+      if (session.status === 'guest') {
+        if (entry.kind !== 'city') throw new Error('Guest visits are limited to the shared city.');
+        setState('ready');
+        return;
+      }
       if (entry.kind === 'suite' && session.status !== 'online') {
         setState('ready');
         return;
@@ -133,10 +202,8 @@ function GameHost({ entry }: { entry: GameEntry }) {
   }, [verify]);
 
   const leave = useCallback(() => {
-    if (session.status === 'online') {
-      session.exitTransit();
-      session.enterCity();
-    }
+    if (session.status === 'guest') void session.endGuest();
+    else if (session.status === 'online') { session.exitTransit(); session.enterCity(); }
     navigate('');
   }, [session]);
 

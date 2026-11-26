@@ -153,6 +153,8 @@ const SCHEMA_STATEMENTS = [
      expires_at BIGINT NOT NULL
    )`,
   `CREATE INDEX IF NOT EXISTS ll_sessions_account ON ll_sessions(account_id)`,
+  `CREATE TABLE IF NOT EXISTS ll_guest_sessions (jti_hash TEXT PRIMARY KEY, guest_id TEXT NOT NULL, display_name TEXT NOT NULL, created_at BIGINT NOT NULL, expires_at BIGINT NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS ll_guest_sessions_expiry ON ll_guest_sessions(expires_at)`,
   `CREATE TABLE IF NOT EXISTS ll_account_settings (
      user_id TEXT PRIMARY KEY REFERENCES ll_accounts(id) ON DELETE CASCADE,
      data_json TEXT NOT NULL,
@@ -404,6 +406,52 @@ async function handleLogout(request: Request, env: CloudflareEnv): Promise<Respo
   );
 }
 
+
+const GUEST_SESSION_TTL_SECONDS = 60 * 60 * 12;
+
+async function handleGuestSession(request: Request, env: CloudflareEnv): Promise<Response> {
+  const secret = secretFor(env);
+  if (!secret) return fail('Guest sessions are not configured.', 503, 'unconfigured');
+  const sql = await database(env);
+  if (!sql) return fail('DATABASE_URL is not configured.', 503, 'unconfigured');
+  const header = request.headers.get('authorization') ?? '';
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+
+  if (request.method === 'POST') {
+    const body = await readJson(request);
+    const rawName = typeof body.displayName === 'string'
+      ? body.displayName.replace(/[\\u0000-\\u001f\\u007f]/g, '').replace(/\\s+/g, ' ').trim()
+      : '';
+    if (rawName.length < 2 || rawName.length > 32) {
+      return fail('Choose a display name between 2 and 32 characters.', 400, 'invalid_input');
+    }
+    const displayName = validateDisplayName(rawName, '');
+    const guestId = `gst_${crypto.randomUUID()}`;
+    const jti = crypto.randomUUID();
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const expiresAt = issuedAt + GUEST_SESSION_TTL_SECONDS;
+    await sql.query(
+      'INSERT INTO ll_guest_sessions (jti_hash, guest_id, display_name, created_at, expires_at) VALUES ($1,$2,$3,$4,$5)',
+      [await sha256Hex(jti), guestId, displayName, Date.now(), expiresAt * 1000]
+    );
+    const guestToken = await signAuthToken(
+      { sub: guestId, kind: 'guest', name: displayName, sid: jti, iat: issuedAt, exp: expiresAt },
+      secret
+    );
+    return json({ guest: { id: guestId, displayName }, token: guestToken, expiresAt: expiresAt * 1000 }, 201);
+  }
+
+  if (request.method === 'DELETE') {
+    const payload = token ? await verifyAuthToken(token, secret) : null;
+    if (!payload || payload.kind !== 'guest' || typeof payload.sid !== 'string') {
+      return fail('Guest session is invalid or expired.', 401, 'unauthorized');
+    }
+    await sql.query('DELETE FROM ll_guest_sessions WHERE jti_hash=$1', [await sha256Hex(payload.sid)]);
+    return json({ ok: true });
+  }
+
+  return fail('Method not allowed.', 405, 'method_not_allowed');
+}
 
 async function currentAccount(request: Request, env: CloudflareEnv) {
   const header = request.headers.get('authorization') ?? '';
@@ -664,6 +712,12 @@ export default {
 
     try {
       if (url.pathname === '/api/health') return await handleHealth(env);
+
+      if (url.pathname === '/api/guest/session') {
+        if (!isSameOrigin(request)) return fail('Cross-origin request rejected.', 403, 'forbidden');
+        if (request.method === 'POST' && rateLimited(request)) return fail('Too many attempts. Try again shortly.', 429, 'rate_limited');
+        return await handleGuestSession(request, env);
+      }
 
       const isAuthRoute = ['/api/auth/register', '/api/auth/login', '/api/auth/logout'].includes(
         url.pathname

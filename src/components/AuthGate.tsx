@@ -8,7 +8,7 @@ type Tab = 'login' | 'register';
  * Going online. The game is playable offline by default, so this is opened from
  * inside the world and can be dismissed back to the on-device character.
  */
-export const AuthGate: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
+export const AuthGate: React.FC<{ onClose?: () => void; showOfflineOption?: boolean }> = ({ onClose, showOfflineOption = true }) => {
   const { login, register, authError, authBusy, continueOffline, status } = useSession();
   const [tab, setTab] = useState<Tab>('login');
   const [handle, setHandle] = useState('');
@@ -183,7 +183,7 @@ export const AuthGate: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
           </button>
         </form>
 
-        <div className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between gap-3">
+        {showOfflineOption && <div className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between gap-3">
           <p className="text-[11px] leading-snug text-slate-500">
             Offline keeps your character in this browser. Nothing is uploaded until you sign in.
           </p>
@@ -198,9 +198,9 @@ export const AuthGate: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
             <WifiOff className="w-3.5 h-3.5" />
             Play offline
           </button>
-        </div>
+        </div>}
 
-        {status === 'offline' && (
+        {status === 'offline' && showOfflineOption && (
           <p className="mt-3 text-[11px] text-amber-300">
             Running without a server connection.
           </p>
