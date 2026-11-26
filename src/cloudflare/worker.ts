@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless';
-import type { LoftLifeRealtime } from './realtime';
+export { LoftLifeRealtime } from './realtime';
 import {
   hashPassword,
   sha256Hex,
