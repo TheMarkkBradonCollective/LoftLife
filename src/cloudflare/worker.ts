@@ -596,6 +596,14 @@ export default {
         if (gameResponse) return gameResponse;
       }
 
+      if (url.pathname === '/api/worlds' || url.pathname.startsWith('/api/worlds/')) {
+        const auth = await currentAccount(request, env);
+        const sql = auth?.sql ?? await database(env);
+        if (!sql) return fail('DATABASE_URL is not configured.', 503, 'unconfigured');
+        const worldResponse = await handleWorldRoute(request, sql, auth?.account ?? null);
+        if (worldResponse) return worldResponse;
+      }
+
       if (url.pathname === '/ws') {
         if (request.method !== 'GET' || request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
           return fail('A WebSocket upgrade is required.', 426, 'upgrade_required');
