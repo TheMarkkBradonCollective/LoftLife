@@ -22,10 +22,18 @@ type PanelTab = 'chat' | 'people';
 
 interface SocialHudProps {
   onEnterWorld: (worldId: string) => void;
+  /** Increment to open the panel from the touch HUD's chat button. */
+  openSignal?: number;
+  /** The touch HUD has its own chat button, so the floating launcher is hidden. */
+  launcherVisible?: boolean;
 }
 
 /** Chat, presence, friends and shop/world entry points. */
-export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld }) => {
+export const SocialHud: React.FC<SocialHudProps> = ({
+  onEnterWorld,
+  openSignal = 0,
+  launcherVisible = true,
+}) => {
   const {
     status,
     connection,
@@ -65,6 +73,10 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld }) => {
   const listRef = useRef<HTMLDivElement>(null);
 
   const online = status === 'online';
+
+  useEffect(() => {
+    if (openSignal > 0) setOpen(true);
+  }, [openSignal]);
 
   const visible = messages.filter((message) => {
     if (chatTab === 'local') return message.scope === 'local';
@@ -154,7 +166,7 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld }) => {
     <>
       {/* Collapsed launcher */}
       <div className="fixed left-4 top-1/2 -translate-y-1/2 z-30 flex flex-col items-start gap-2 max-h-[80vh]">
-        {!open && (
+        {!open && launcherVisible && (
           <button
             type="button"
             onClick={() => setOpen(true)}
@@ -172,7 +184,9 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld }) => {
         )}
 
         {open && (
-          <div className={`w-[min(360px,92vw)] rounded-2xl border overflow-hidden ${panel}`}>
+          <div
+            className={`w-[min(360px,92vw)] max-h-[80dvh] overflow-y-auto rounded-2xl border ${panel}`}
+          >
             {/* Header */}
             <div className="px-3 py-2 border-b border-[#39ff14]/15 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-[#39ff14] shadow-[0_0_8px_#39ff14]" />

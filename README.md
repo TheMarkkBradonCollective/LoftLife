@@ -97,15 +97,20 @@ split and the pieces that still need a live Neon sign-in test.
   only inside the whisper/say/shout distance bands, with volume following distance.
 - **Rideable transit**: two LoftLine routes with marked stops. Seats are assigned by the server,
   rider positions are server-authoritative, and passengers who board the same line share the tram.
-- **Mobile controls**: virtual stick, drag-look, sprint toggle, jump, interact and push-to-talk,
-  driven through the same movement code as the keyboard.
+- **Responsive HUD and device recognition**: runtime/input detection (desktop web, installed PWA,
+  Windows EXE, Android APK, Android/iOS browser, tablet, hybrid touch laptop) chooses a
+  keyboard/mouse or touch HUD, switching live as the player changes input without resetting the
+  camera. Mobile gets a virtual stick, drag-look area, contextual Action button, sprint, jump,
+  emote, voice, chat, map and menu, with a lighter renderer budget — all through the same
+  movement/camera code as the keyboard. See [docs/DEVICE-COMPATIBILITY.md](docs/DEVICE-COMPATIBILITY.md).
 - Wardrobe studio locks unowned clothing with its server price; the 3D viewport is lazy-loaded so
   the sign-in wall no longer ships Three.js.
 - Reports and admin moderation endpoints; audit log.
 
 **Not implemented yet** (see [docs/ROADMAP.md](docs/ROADMAP.md)): custom uploaded assets, the Unity 6
 Windows/Android clients, server-side collision re-simulation, an earned-income loop, and CI/load
-testing.
+testing. The web app already detects packaged Android/desktop shells and adapts its HUD, but the
+native wrappers themselves are not part of this repository.
 
 ---
 
@@ -139,4 +144,6 @@ docs/              AUDIT.md, ARCHITECTURE.md, ROADMAP.md
 - [docs/AUDIT.md](docs/AUDIT.md) — honest audit of the codebase as found, plus the work done.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — server design, data model, realtime protocol,
   hosting and costs, and the path to Unity.
+- [docs/DEVICE-COMPATIBILITY.md](docs/DEVICE-COMPATIBILITY.md) — runtime/input detection matrix,
+  HUD rules per platform, mobile renderer budget and the test report.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased plan with current status.

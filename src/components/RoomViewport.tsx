@@ -35,6 +35,7 @@ import {
   resolveCityCameraScale,
 } from '../game/worldBuilder';
 import { createTransitBusMesh, createTransitStopMarker } from '../game/transitBuilder';
+import { getDeviceProfile } from '../game/platform';
 import { touchInput } from '../game/touchInput';
 import type {
   ActiveResident,
@@ -454,10 +455,14 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       }
     })();
 
+    // Mobile browsers and native shells get a lighter renderer: the same scene
+    // and game logic, with cheaper anti-aliasing, shadows and texture budgets.
+    const mobileRuntime = getDeviceProfile().lowPowerGraphics;
+
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({
-        antialias: !isSoftwareGl,
+        antialias: !isSoftwareGl && !mobileRuntime,
         powerPreference: 'high-performance',
       });
     } catch {
@@ -468,11 +473,14 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.08;
-    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = !isSoftwareGl;
+    renderer.setPixelRatio(
+      isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, mobileRuntime ? 1.5 : 2)
+    );
+    renderer.shadowMap.enabled = !isSoftwareGl && !mobileRuntime;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.setSize(mount.clientWidth, mount.clientHeight);
     renderer.domElement.style.display = 'block';
+    renderer.domElement.style.touchAction = 'none';
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
     mount.appendChild(renderer.domElement);
@@ -485,7 +493,10 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     renderer.domElement.addEventListener('webglcontextlost', onContextLost);
     renderer.domElement.addEventListener('webglcontextrestored', onContextRestored);
 
-    const maxAnisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    const maxAnisotropy = Math.min(
+      mobileRuntime ? 4 : 8,
+      renderer.capabilities.getMaxAnisotropy()
+    );
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color('#dfe8f2');
@@ -520,8 +531,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     const keyLight = new THREE.DirectionalLight(0xfff4e0, 1.9);
     keyLight.position.set(-12, 16, 8);
-    keyLight.castShadow = true;
-    keyLight.shadow.mapSize.set(2048, 2048);
+    keyLight.castShadow = !isSoftwareGl && !mobileRuntime;
+    keyLight.shadow.mapSize.set(mobileRuntime ? 1024 : 2048, mobileRuntime ? 1024 : 2048);
     keyLight.shadow.camera.near = 1;
     keyLight.shadow.camera.far = 70;
     const d = 16;
@@ -1504,7 +1515,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
       // In Play View: clicking canvas requests Pointer Lock for free mouse-look
       if (propsRef.current.viewMode === 'play') {
-        if (document.pointerLockElement !== renderer.domElement) {
+        // Pointer lock is a mouse feature; touch and pen look is drag-based and
+        // pointer lock would break the touch HUD on Android/iOS.
+        if (e.pointerType === 'mouse' && document.pointerLockElement !== renderer.domElement) {
           try {
             const maybePromise = renderer.domElement.requestPointerLock?.() as unknown as Promise<void> | undefined;
             if (maybePromise && typeof maybePromise.catch === 'function') {

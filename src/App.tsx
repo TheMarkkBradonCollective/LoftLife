@@ -21,6 +21,7 @@ import {
   LampFloor,
   Layers,
   Map as MapIcon,
+  Menu as MenuIcon,
   MessageCircle,
   Monitor,
   Move,
@@ -54,7 +55,7 @@ import { HotelDoorTerminalModal } from './components/HotelDoorTerminalModal';
 import type { CameraPresetRequest } from './components/RoomViewport';
 import { SocialHud } from './components/SocialHud';
 import { TouchControls } from './components/TouchControls';
-import { isTouchDevice } from './game/touchInput';
+import { useDeviceProfile } from './components/useDeviceProfile';
 
 // Three.js is only needed once the world renders; lazy-loading keeps the
 // sign-in wall light.
@@ -219,8 +220,15 @@ export default function App() {
   const [doorTerminalOpen, setDoorTerminalOpen] = useState(false);
   const [elevatorModalOpen, setElevatorModalOpen] = useState(false);
 
-  const touchDevice = useMemo(() => isTouchDevice(), []);
-  const [viewMode, setViewMode] = useState<ViewMode>(() => (isTouchDevice() ? 'play' : 'isometric'));
+  // Runtime recognition drives the interface. `inputMode` follows the input the
+  // player is actually using, so a touch laptop keeps the desktop HUD until its
+  // screen is touched (and gets the touch HUD without resetting the camera).
+  const device = useDeviceProfile();
+  const touchHud = device.inputMode === 'touch';
+  const actionCue = touchHud ? 'tap Action' : 'press E';
+  const [viewMode, setViewMode] = useState<ViewMode>(() =>
+    device.primaryInput === 'touch' ? 'play' : 'isometric'
+  );
   const [mode, setMode] = useState<GameMode>('walk');
   const [items, setItems] = useState<PlacedItem[]>(initial.items);
   const [history, setHistory] = useState<PlacedItem[][]>([]);
@@ -254,7 +262,9 @@ export default function App() {
   const [movingUid, setMovingUid] = useState<string | null>(null);
 
   // UI Chrome state
-  const [dockCollapsed, setDockCollapsed] = useState(() => isTouchDevice());
+  const [dockCollapsed, setDockCollapsed] = useState(() => device.primaryInput === 'touch');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [socialHudSignal, setSocialHudSignal] = useState(0);
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [cityMapOpen, setCityMapOpen] = useState(false);
   const [cityStreet, setCityStreet] = useState('M St & 15th St');
@@ -365,7 +375,9 @@ export default function App() {
         setCityMapOpen(false);
       }
       if (next === 'world') {
-        showHint('Main City · Walk to Hotel Main Entrance & press E for Keycard / Guest Intercom');
+        showHint(
+          `Main City · Walk to Hotel Main Entrance & ${actionCue} for Keycard / Guest Intercom`
+        );
       } else if (next === 'lobby') {
         showHint('Main Lobby · Walk into the North brass elevator to ride to Floors 2–4');
       } else if (next === 'hallway') {
@@ -374,10 +386,12 @@ export default function App() {
       } else if (next === 'room') {
         setActiveResident(null);
         setHallwayFloor(PLAYER_SUITE_FLOOR);
-        showHint(`${roomName} (Suite ${PLAYER_SUITE_NUMBER}) · Walk to West door & press E for Keycard`);
+        showHint(
+          `${roomName} (Suite ${PLAYER_SUITE_NUMBER}) · Walk to West door & ${actionCue} for Keycard`
+        );
       }
     },
-    [hallwayFloor, roomName, showHint]
+    [hallwayFloor, roomName, showHint, actionCue]
   );
 
   const handleUnlockRoomDoor = useCallback(() => {
@@ -407,11 +421,11 @@ export default function App() {
         setTargetVisitResident(null);
         setLocation('resident_room');
         setMode('walk');
-        showHint(`Entered ${res.name}'s Suite ${res.roomNumber} · Press E near ${res.name} to chat`);
+        showHint(`Entered ${res.name}'s Suite ${res.roomNumber} · ${actionCue} near ${res.name} to chat`);
         showNpcChat(res.name, res.greeting);
       }
     },
-    [handleChangeLocation, showHint, showNpcChat]
+    [handleChangeLocation, showHint, showNpcChat, actionCue]
   );
 
   const handleUnlockMainWithKeycard = useCallback(() => {
@@ -551,13 +565,34 @@ export default function App() {
         setPlacingCatalogId(null);
         setMovingUid(null);
         setAvatarModalOpen(false);
-        showHint('Play View · WASD move · Click or drag mouse to look · Esc unlocks cursor');
+        showHint(
+          touchHud
+            ? 'Play View · Left stick moves · Drag the right side to look'
+            : 'Play View · WASD move · Click or drag mouse to look · Esc unlocks cursor'
+        );
       } else {
         showHint('Isometric View');
       }
       return next;
     });
-  }, [showHint]);
+  }, [showHint, touchHud]);
+
+  const handleQuickTravel = useCallback(() => {
+    if (activeWorld) {
+      handleLeaveWorld();
+      setLocation('world');
+      session.enterCity();
+      return;
+    }
+    handleChangeLocation(location === 'world' ? 'room' : 'world');
+  }, [activeWorld, handleLeaveWorld, handleChangeLocation, location, session]);
+
+  const handleToggleCameraZoom = useCallback(() => {
+    sfx.playClick();
+    const next = cameraToggle === 'overview' ? 'closeup' : 'overview';
+    setCameraToggle(next);
+    setCameraPreset({ id: Date.now(), type: next });
+  }, [cameraToggle]);
 
   const handlePlaceItem = useCallback(
     (candidate: Omit<PlacedItem, 'uid'>) => {
@@ -833,7 +868,81 @@ export default function App() {
   const hudPanelClass =
     'bg-[#0b100d]/95 text-slate-100 border-[#39ff14]/30 neon-panel-glow';
 
-  const anyModalOpen = avatarModalOpen || cityMapOpen || doorTerminalOpen || elevatorModalOpen;
+  const anyModalOpen =
+    avatarModalOpen || cityMapOpen || doorTerminalOpen || elevatorModalOpen || mobileMenuOpen;
+
+  // The builder needs its dock on touch; gameplay needs the touch HUD instead.
+  useEffect(() => {
+    if (touchHud && mode === 'edit') setDockCollapsed(false);
+  }, [touchHud, mode]);
+
+  // Leaving touch mode closes the touch-only sheet.
+  useEffect(() => {
+    if (!touchHud) setMobileMenuOpen(false);
+  }, [touchHud]);
+
+  // Native shells: Android hardware back / Capacitor back button closes the
+  // top-most layer instead of dropping the player out of the game.
+  const closeTopLayerRef = useRef<() => boolean>(() => false);
+  useEffect(() => {
+    closeTopLayerRef.current = () => {
+      if (mobileMenuOpen) {
+        setMobileMenuOpen(false);
+        return true;
+      }
+      if (cityMapOpen) {
+        setCityMapOpen(false);
+        return true;
+      }
+      if (avatarModalOpen) {
+        setAvatarModalOpen(false);
+        return true;
+      }
+      if (doorTerminalOpen) {
+        setDoorTerminalOpen(false);
+        return true;
+      }
+      if (elevatorModalOpen) {
+        setElevatorModalOpen(false);
+        return true;
+      }
+      if (activeWorld) {
+        handleLeaveWorld();
+        return true;
+      }
+      return false;
+    };
+  });
+
+  useEffect(() => {
+    if (!device.isNativeApp) return;
+    const onBack = () => {
+      if (closeTopLayerRef.current()) return;
+      (
+        window as unknown as {
+          Capacitor?: { Plugins?: { App?: { minimizeApp?: () => void } } };
+        }
+      ).Capacitor?.Plugins?.App?.minimizeApp?.();
+    };
+    const capacitorListener = (
+      window as unknown as {
+        Capacitor?: {
+          Plugins?: {
+            App?: {
+              addListener?: (event: string, callback: () => void) => { remove?: () => void } | void;
+            };
+          };
+        };
+      }
+    ).Capacitor?.Plugins?.App?.addListener?.('backButton', onBack);
+    document.addEventListener('backbutton', onBack);
+    return () => {
+      document.removeEventListener('backbutton', onBack);
+      if (capacitorListener && typeof capacitorListener === 'object') {
+        capacitorListener.remove?.();
+      }
+    };
+  }, [device.isNativeApp]);
 
   const locationTitle = activeWorld
     ? `${activeWorld.name}${activeWorld.canEdit ? ' · Building' : ' · Visiting'}`
@@ -877,7 +986,7 @@ export default function App() {
   }, [session.status, session.remotePlayers, session.instance, activeWorld, location]);
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden select-none">
+    <div className="relative w-screen h-[100dvh] overflow-hidden select-none">
       {/* Full-Screen 3D Canvas (lazy-loaded: the sign-in wall ships no Three.js) */}
       <Suspense
         fallback={
@@ -936,32 +1045,47 @@ export default function App() {
       </Suspense>
 
       {/* Functional Aiming Reticle when Pointer-Locked in Play View */}
-      {viewMode === 'play' && pointerLocked && (
+      {viewMode === 'play' && pointerLocked && !touchHud && (
         <div className="fixed inset-0 pointer-events-none z-20 flex items-center justify-center">
           <div className="w-1.5 h-1.5 rounded-full bg-[#39ff14] shadow-sm ring-2 ring-black/60" />
         </div>
       )}
 
       {/* Top-Left Brand & Hotel / City Summary */}
-      <div className="fixed top-4 left-4 z-20 pointer-events-auto">
-        <div className={`px-4 py-2.5 rounded-xl border flex items-center gap-3 ${hudPanelClass}`}>
+      <div
+        className={`fixed z-20 pointer-events-auto ${
+          touchHud
+            ? 'top-[calc(env(safe-area-inset-top)+0.5rem)] left-3 max-w-[calc(100vw-11rem)]'
+            : 'top-4 left-4'
+        }`}
+      >
+        <div
+          className={`rounded-xl border flex items-center gap-3 ${
+            touchHud ? 'px-3 py-1.5' : 'px-4 py-2.5'
+          } ${hudPanelClass}`}
+        >
           <span className="font-display text-base font-bold tracking-tight text-[#39ff14] whitespace-nowrap shrink-0">
             LoftLife
           </span>
           <span className="text-xs text-[#39ff14]/45" aria-hidden="true">
             |
           </span>
-          <div className="flex items-center gap-2 text-xs text-slate-200 whitespace-nowrap">
-            <span className="font-medium text-white">{locationTitle}</span>
-            <span className="text-[#39ff14]/60" aria-hidden="true">
-              ·
-            </span>
-            <span className="font-mono-tabular text-slate-300">{locationSub}</span>
+          <div className="flex items-center gap-2 text-xs text-slate-200 whitespace-nowrap min-w-0">
+            <span className="font-medium text-white truncate">{locationTitle}</span>
+            {!touchHud && (
+              <>
+                <span className="text-[#39ff14]/60" aria-hidden="true">
+                  ·
+                </span>
+                <span className="font-mono-tabular text-slate-300">{locationSub}</span>
+              </>
+            )}
           </div>
         </div>
       </div>
 
       {/* Top-Right Compact Mode & Utility Bar */}
+      {!touchHud && (
       <div className="fixed top-4 right-4 z-20 max-w-[calc(100vw-27rem)] flex flex-wrap items-center justify-end gap-2 pointer-events-auto">
         {/* Leave a player-created world and restore the hotel suite */}
         {activeWorld && (
@@ -977,15 +1101,7 @@ export default function App() {
         {/* Exit to Main World / Return to My Suite Quick Travel */}
         <button
           type="button"
-          onClick={() => {
-            if (activeWorld) {
-              handleLeaveWorld();
-              setLocation('world');
-              session.enterCity();
-              return;
-            }
-            handleChangeLocation(location === 'world' ? 'room' : 'world');
-          }}
+          onClick={handleQuickTravel}
           className={`px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
             location === 'world'
               ? 'bg-[#39ff14] text-[#051205] border-[#39ff14] hover:bg-[#5bff3b] neon-btn-glow'
@@ -1173,12 +1289,7 @@ export default function App() {
             type="button"
             title={cameraToggle === 'overview' ? 'Zoom to Avatar' : 'Room Overview'}
             aria-label="Toggle camera zoom"
-            onClick={() => {
-              sfx.playClick();
-              const next = cameraToggle === 'overview' ? 'closeup' : 'overview';
-              setCameraToggle(next);
-              setCameraPreset({ id: Date.now(), type: next });
-            }}
+            onClick={handleToggleCameraZoom}
             className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-slate-300 hover:bg-white/10 hover:text-[#39ff14]"
           >
             <Camera className="w-3.5 h-3.5" />
@@ -1200,10 +1311,61 @@ export default function App() {
           </button>
         </div>
       </div>
+      )}
+
+      {/* Mobile top bar: community chat, city map and the game menu */}
+      {touchHud && (
+        <div className="fixed right-3 top-[calc(env(safe-area-inset-top)+0.5rem)] z-40 flex items-center gap-1.5">
+          <button
+            type="button"
+            aria-label="Open community chat"
+            onClick={() => {
+              sfx.playClick();
+              setSocialHudSignal((value) => value + 1);
+            }}
+            className={`w-10 h-10 rounded-xl border flex items-center justify-center ${hudPanelClass}`}
+          >
+            <MessageCircle className="w-4 h-4 text-[#39ff14]" />
+          </button>
+          {location === 'world' && (
+            <button
+              type="button"
+              aria-label="Toggle city map"
+              onClick={() => {
+                sfx.playClick();
+                setCityMapOpen((value) => !value);
+              }}
+              className={`w-10 h-10 rounded-xl border flex items-center justify-center ${
+                cityMapOpen ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]' : hudPanelClass
+              }`}
+            >
+              <MapIcon className="w-4 h-4" />
+            </button>
+          )}
+          <button
+            type="button"
+            aria-label="Open game menu"
+            aria-expanded={mobileMenuOpen}
+            onClick={() => {
+              sfx.playClick();
+              setMobileMenuOpen((value) => !value);
+            }}
+            className={`w-10 h-10 rounded-xl border flex items-center justify-center ${
+              mobileMenuOpen ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]' : hudPanelClass
+            }`}
+          >
+            <MenuIcon className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Transient Walk / Action Hint Banner */}
       {walkHint && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+        <div
+          className={`fixed left-1/2 -translate-x-1/2 z-20 pointer-events-none ${
+            touchHud ? 'top-[calc(env(safe-area-inset-top)+3.6rem)] max-w-[92vw]' : 'top-20'
+          }`}
+        >
           <div className={`px-3.5 py-1.5 rounded-lg border text-xs font-medium text-[#d8ffd0] ${hudPanelClass}`}>
             {walkHint}
           </div>
@@ -1211,7 +1373,7 @@ export default function App() {
       )}
 
       {/* Proximity Action Prompt (Isometric Walk & Play View) */}
-      {proximityPrompt && !anyModalOpen && (
+      {proximityPrompt && !anyModalOpen && !touchHud && (
         <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
           <div className="px-4 py-2 rounded-xl bg-[#39ff14] text-[#051205] font-bold text-xs border border-[#8eff78] neon-btn-glow">
             {proximityPrompt}
@@ -1221,7 +1383,11 @@ export default function App() {
 
       {/* NPC Dialogue Toast */}
       {npcChat && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 w-[min(460px,90vw)] pointer-events-auto">
+        <div
+          className={`fixed left-1/2 -translate-x-1/2 z-30 w-[min(460px,90vw)] pointer-events-auto ${
+            touchHud ? 'bottom-[calc(env(safe-area-inset-bottom)+12rem)]' : 'bottom-24'
+          }`}
+        >
           <div className={`px-4 py-3 rounded-xl border flex items-start justify-between gap-3 ${hudPanelClass}`}>
             <div className="flex items-start gap-2.5">
               <MessageCircle className="w-4 h-4 mt-0.5 text-[#39ff14] shrink-0" />
@@ -1242,7 +1408,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Collapsible Unified Bottom Control Dock */}
+      {/* Collapsible Unified Bottom Control Dock (desktop HUD, or touch builder) */}
+      {(!touchHud || mode === 'edit') && (
       <div
         className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-30 w-[min(940px,95vw)] flex flex-col items-center transition-transform duration-200 ease-out ${
           dockCollapsed ? 'translate-y-[calc(100%-34px)]' : 'translate-y-0'
@@ -1796,19 +1963,202 @@ export default function App() {
           )}
         </div>
       </div>
+      )}
 
-      {/* Mobile virtual stick, drag-look and contextual buttons */}
+      {touchHud && mobileMenuOpen && (
+        <div className="fixed inset-0 z-50" role="dialog" aria-label="Game menu">
+          <button
+            type="button"
+            aria-label="Close menu"
+            onClick={() => setMobileMenuOpen(false)}
+            className="absolute inset-0 bg-black/65"
+          />
+          <div
+            className={`absolute left-1/2 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] -translate-x-1/2 w-[min(560px,calc(100vw-0.75rem))] max-h-[calc(100dvh-1.5rem)] overflow-y-auto rounded-2xl border p-3 space-y-3 ${hudPanelClass}`}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-white">Game Menu</span>
+              <span className="text-[10px] uppercase tracking-wide text-[#39ff14]/70">
+                {device.label}
+              </span>
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(false)}
+                aria-label="Close menu"
+                className="ml-auto p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  handleTogglePlayView();
+                  setMobileMenuOpen(false);
+                }}
+                className="px-3 py-2.5 rounded-xl border border-white/12 bg-white/8 text-xs font-semibold text-slate-100 flex items-center gap-2"
+              >
+                {viewMode === 'play' ? (
+                  <Eye className="w-4 h-4 text-[#39ff14]" />
+                ) : (
+                  <Gamepad2 className="w-4 h-4 text-[#39ff14]" />
+                )}
+                {viewMode === 'play' ? 'Isometric View' : 'Play View'}
+              </button>
+
+              {location === 'room' && (!activeWorld || activeWorld.canEdit) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleModeSwitch(mode === 'walk' ? 'edit' : 'walk');
+                    setMobileMenuOpen(false);
+                  }}
+                  className="px-3 py-2.5 rounded-xl border border-white/12 bg-white/8 text-xs font-semibold text-slate-100 flex items-center gap-2"
+                >
+                  <PencilRuler className="w-4 h-4 text-[#39ff14]" />
+                  {mode === 'walk' ? 'Edit Room' : 'Walk Mode'}
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  sfx.playClick();
+                  setAvatarModalOpen(true);
+                  setMobileMenuOpen(false);
+                }}
+                className="px-3 py-2.5 rounded-xl border border-white/12 bg-white/8 text-xs font-semibold text-slate-100 flex items-center gap-2"
+              >
+                <User className="w-4 h-4 text-[#39ff14]" />
+                Avatar
+              </button>
+
+              <button
+                type="button"
+                onClick={handleToggleCameraZoom}
+                className="px-3 py-2.5 rounded-xl border border-white/12 bg-white/8 text-xs font-semibold text-slate-100 flex items-center gap-2"
+              >
+                <Camera className="w-4 h-4 text-[#39ff14]" />
+                {cameraToggle === 'overview' ? 'Zoom In' : 'Room Overview'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !muted;
+                  sfx.muted = next;
+                  setMuted(next);
+                  if (!next) sfx.playClick();
+                }}
+                className="px-3 py-2.5 rounded-xl border border-white/12 bg-white/8 text-xs font-semibold text-slate-100 flex items-center gap-2"
+              >
+                {muted ? (
+                  <VolumeX className="w-4 h-4 text-[#39ff14]" />
+                ) : (
+                  <Volume2 className="w-4 h-4 text-[#39ff14]" />
+                )}
+                {muted ? 'Unmute' : 'Mute'}
+              </button>
+
+              {session.voiceStatus !== 'unsupported' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void toggleVoice();
+                  }}
+                  className="px-3 py-2.5 rounded-xl border border-white/12 bg-white/8 text-xs font-semibold text-slate-100 flex items-center gap-2"
+                >
+                  {session.voiceStatus === 'ready' ? (
+                    <Mic className="w-4 h-4 text-sky-300" />
+                  ) : (
+                    <MicOff className="w-4 h-4 text-[#39ff14]" />
+                  )}
+                  {session.voiceStatus === 'ready' ? 'Voice On' : 'Voice Off'}
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  handleQuickTravel();
+                  setMobileMenuOpen(false);
+                }}
+                className="col-span-2 px-3 py-2.5 rounded-xl border border-[#39ff14]/45 bg-[#111914] text-xs font-bold text-[#39ff14] flex items-center gap-2"
+              >
+                {location === 'world' ? (
+                  <Home className="w-4 h-4" />
+                ) : (
+                  <DoorOpen className="w-4 h-4" />
+                )}
+                {location === 'world' ? `Return to Suite ${PLAYER_SUITE_NUMBER}` : 'Main City'}
+              </button>
+
+              {activeWorld && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleLeaveWorld();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="col-span-2 px-3 py-2.5 rounded-xl border border-[#ffb878] bg-[#ffb878] text-xs font-bold text-[#1a1005] flex items-center gap-2"
+                >
+                  <Home className="w-4 h-4" />
+                  Leave {activeWorld.name}
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1 rounded-xl border border-white/10 p-1">
+              {(['morning', 'golden', 'night'] as const).map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    sfx.playClick();
+                    setMood(id);
+                  }}
+                  className={`flex-1 px-2 py-1.5 rounded-lg text-[11px] font-semibold ${
+                    mood === id ? 'bg-[#39ff14] text-[#051205]' : 'text-slate-300 hover:bg-white/10'
+                  }`}
+                >
+                  {id === 'golden' ? 'Golden Hour' : id === 'morning' ? 'Morning' : 'Night'}
+                </button>
+              ))}
+            </div>
+
+            <p className="text-[11px] leading-snug text-slate-400">
+              Left stick moves · drag the right side to look · Action button interacts. Keyboard,
+              mouse and all existing shortcuts still work on hybrid devices.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Touch gameplay HUD: movement stick, look area and contextual actions */}
       <TouchControls
-        active={touchDevice && !anyModalOpen && session.status === 'online'}
+        active={touchHud && !anyModalOpen && mode !== 'edit'}
         lookEnabled={viewMode === 'play'}
         voiceEnabled={session.voiceStatus === 'ready'}
+        voiceAvailable={session.voiceStatus !== 'unsupported'}
+        actionLabel={proximityPrompt}
+        portrait={device.orientation === 'portrait'}
         onEmote={() => triggerEmote(activeEmote === 'dance' ? 'wave' : 'dance')}
         onTalkStart={() => session.setPushToTalk(true)}
         onTalkEnd={() => session.setPushToTalk(false)}
+        onToggleVoice={() => {
+          sfx.playClick();
+          void toggleVoice();
+        }}
       />
 
       {/* Community: chat, presence, friends, shop and worlds */}
-      <SocialHud onEnterWorld={handleEnterWorld} />
+      <SocialHud
+        onEnterWorld={handleEnterWorld}
+        launcherVisible={!touchHud}
+        openSignal={socialHudSignal}
+      />
 
       {/* Avatar Character Studio Modal */}
       <AvatarModal

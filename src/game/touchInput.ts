@@ -36,11 +36,6 @@ export function resetTouchInput() {
   touchInput.lookDy = 0;
 }
 
-export function isTouchDevice(): boolean {
-  if (typeof window === 'undefined') return false;
-  return (
-    'ontouchstart' in window ||
-    (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0) ||
-    window.matchMedia?.('(pointer: coarse)').matches === true
-  );
-}
+// Device/input recognition lives in `platform.ts`: the HUD must not be chosen
+// from touch capability alone (touch laptops need the desktop interface until
+// the screen is actually touched).
