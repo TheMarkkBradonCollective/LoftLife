@@ -87,6 +87,13 @@ export class LoftLifeRealtime {
       await this.relayUsers(party.members,body.message);
       return Response.json({ok:true});
     }
+    if (requestUrl.pathname === '/internal/party/presence-snapshot' && request.method === 'GET') {
+      const state = await this.partyData();
+      const counts = new Map<string,number>();
+      for (const instanceId of Object.values(state.userInstances)) counts.set(instanceId,(counts.get(instanceId)??0)+1);
+      const instances = [...counts.entries()].map(([id,count])=>({id,kind:id.startsWith('world:')?'world':'city',worldId:id.startsWith('world:')?id.slice(6):null,capacity:MAX_PLAYERS,count}));
+      return Response.json({online:Object.values(state.userInstances).length,instances,cityCapacity:MAX_PLAYERS});
+    }
     if (requestUrl.pathname === '/internal/party/state' && request.method === 'POST') {
       const body = await request.json().catch(() => ({})) as { userId?: string };
       if (!body.userId) return new Response('userId required',{status:400});
