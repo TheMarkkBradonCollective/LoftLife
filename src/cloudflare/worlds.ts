@@ -34,6 +34,10 @@ async function permission(sql: Sql, world: World, user: User | null) {
     }
   }
   const status = String(world.status ?? 'offline');
+  if (user && world.owner_id !== user.id) {
+    const blocked = await sql.query('SELECT 1 FROM ll_blocks WHERE user_id=$1 AND blocked_id=$2 LIMIT 1', [world.owner_id, user.id]);
+    if (blocked.length) return { canEnter: false, canEdit: false, canBuild: false, canManageStatus: false, role };
+  }
   const canBuild = role === 'owner' || role === 'co_owner' || role === 'builder';
   const canManageStatus = role === 'owner' || role === 'co_owner';
   if (role === 'owner') return { canEnter: true, canEdit: status === 'build_mode', canBuild, canManageStatus, role };
@@ -48,10 +52,6 @@ async function permission(sql: Sql, world: World, user: User | null) {
     return { canEnter: false, canEdit: false, canBuild, canManageStatus, role };
   }
   if (status === 'live') {
-    if (user) {
-      const blocked = await sql.query('SELECT 1 FROM ll_blocks WHERE user_id=$1 AND blocked_id=$2 LIMIT 1', [world.owner_id, user.id]);
-      if (blocked.length) return { canEnter: false, canEdit: false, canBuild, canManageStatus, role };
-    }
     return { canEnter: true, canEdit: false, canBuild, canManageStatus, role };
   }
   if (!user) return { canEnter: false, canEdit: false, canBuild, canManageStatus, role };
