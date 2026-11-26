@@ -9,7 +9,7 @@ type Sql = { query(query: string, params?: unknown[]): Promise<unknown[]> };
 type Player = {
   connId: string; userId: string; handle: string; name: string; avatar: unknown;
   instanceId: string; x: number; y: number; z: number; yaw: number;
-  emote: string; location: string; lastSeen: number; lastChatAt: number;
+  emote: string; location: string; lastSeen: number; lastChatAt: number; lastPoseAt?: number;
 };
 const MAX_PLAYERS = 64;
 const MAX_CHAT_LENGTH = 280;
