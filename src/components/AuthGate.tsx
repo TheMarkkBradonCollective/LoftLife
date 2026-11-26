@@ -72,7 +72,7 @@ export const AuthGate: React.FC<{ onClose?: () => void; showOfflineOption?: bool
         </div>
         <p className="text-xs text-slate-400 mb-5">
           Sign in to open your dashboard, messages, friends and destinations. Your character, outfit
-          and suite from this device come online with you. You can also keep playing offline.
+          and suite from this device come online with you.{showOfflineOption ? ' You can also keep playing offline.' : ''}
         </p>
 
         <div className="flex gap-1 p-1 rounded-xl border border-white/10 mb-4">

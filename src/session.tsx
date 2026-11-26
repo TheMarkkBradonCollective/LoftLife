@@ -904,13 +904,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const enableVoice = useCallback<SessionValue['enableVoice']>(async () => {
+    if (status === 'guest') return 'off';
     // Turning the microphone on is an explicit action, so it also clears a
     // post-reconnect pause. Voice Range Off still blocks transmission.
     voiceControlsRef.current!.suspended = false;
     await voiceRef.current?.enable();
     applyVoice();
     return voiceRef.current?.status ?? 'off';
-  }, [applyVoice]);
+  }, [applyVoice, status]);
 
   const disableVoice = useCallback(() => {
     voiceRef.current?.disable();
