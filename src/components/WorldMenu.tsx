@@ -307,7 +307,6 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
     description: '',
     access: 'public' as WorldAccess,
     maxVisitors: 30,
-    published: false,
   });
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -414,6 +413,36 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
       setManageError(error instanceof ApiError ? error.message : 'Could not save world settings');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const changeWorldStatus = async (status: 'live' | 'available' | 'offline') => {
+    if (!world || !canManage) return;
+    setMemberBusy(true);
+    setManageError(null);
+    try {
+      await api.setWorldStatus(world.id, status);
+      onWorldUpdated(await api.world(world.id));
+      setSaveMessage(`City status set to ${status.replace('_',' ')}`);
+    } catch (error) {
+      setManageError(error instanceof ApiError ? error.message : 'Could not change city status');
+    } finally {
+      setMemberBusy(false);
+    }
+  };
+
+  const requestBuildMode = async () => {
+    if (!world || !world.canBuild || world.status !== 'offline') return;
+    setMemberBusy(true);
+    setManageError(null);
+    try {
+      const result = await api.requestWorldBuildMode(world.id);
+      onWorldUpdated(await api.world(world.id));
+      setSaveMessage(result.pending ? 'Build Mode is queued until everyone leaves.' : 'Build Mode is ready.');
+    } catch (error) {
+      setManageError(error instanceof ApiError ? error.message : 'Could not enter Build Mode');
+    } finally {
+      setMemberBusy(false);
     }
   };
 
@@ -699,6 +728,23 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                     </dd>
                   </div>
                 </dl>
+                {world && (
+                  <div className="flex flex-wrap gap-2 border-t border-white/8 pt-3">
+                    {canManage && world.status !== 'live' && (
+                      <button type="button" disabled={memberBusy} onClick={() => void changeWorldStatus('live')} className="px-3 py-1.5 rounded-lg bg-[#39ff14] text-[#051205] text-xs font-bold disabled:opacity-40">Go Live</button>
+                    )}
+                    {canManage && world.status !== 'available' && (
+                      <button type="button" disabled={memberBusy} onClick={() => void changeWorldStatus('available')} className="px-3 py-1.5 rounded-lg bg-white/10 text-xs font-semibold disabled:opacity-40">Set Available</button>
+                    )}
+                    {canManage && !['offline','build_mode'].includes(world.status) && (
+                      <button type="button" disabled={memberBusy} onClick={() => void changeWorldStatus('offline')} className="px-3 py-1.5 rounded-lg bg-white/10 text-xs font-semibold disabled:opacity-40">Set Offline</button>
+                    )}
+                    {world.canBuild && world.status === 'offline' && (
+                      <button type="button" disabled={memberBusy} onClick={() => void requestBuildMode()} className="px-3 py-1.5 rounded-lg bg-white/10 text-xs font-semibold disabled:opacity-40">Build Mode</button>
+                    )}
+                    {world.status === 'build_pending' && <span className="text-xs text-amber-200 self-center">Waiting for everyone to leave before Build Mode starts.</span>}
+                  </div>
+                )}
                 {world?.description && (
                   <p className="text-xs leading-relaxed text-slate-300 border-t border-white/8 pt-2">
                     {world.description}
