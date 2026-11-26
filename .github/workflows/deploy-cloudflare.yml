@@ -7,8 +7,11 @@ on:
 
 jobs:
   deploy:
-    if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.DATABASE_URL != '' && secrets.LOFFLIFE_SESSION_SECRET != '' }}
+    if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.DATABASE_URL != '' && secrets.LOFTLIFE_SESSION_SECRET != '' }}
     runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 92d9592953c4d46474ae07993913f710
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,7 +19,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run test
+      - run: npm test
       - run: npm run lint
       - run: npm run build
       - name: Configure Neon connection secret
@@ -25,10 +28,7 @@ jobs:
         run: printf '%s' "$DATABASE_URL" | npx --yes wrangler@4 secret put DATABASE_URL
       - name: Configure session signing secret
         env:
-          LOFTLIFE_SESSION_SECRET: ${{ secrets.LOFFLIFE_SESSION_SECRET }}
+          LOFTLIFE_SESSION_SECRET: ${{ secrets.LOFTLIFE_SESSION_SECRET }}
         run: printf '%s' "$LOFTLIFE_SESSION_SECRET" | npx --yes wrangler@4 secret put LOFTLIFE_SESSION_SECRET
       - name: Deploy Worker and Durable Objects
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: 92d9592953c4d46474ae07993913f710
         run: npx --yes wrangler@4 deploy
