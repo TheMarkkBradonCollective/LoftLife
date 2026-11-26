@@ -219,7 +219,7 @@ export async function handleWorldRoute(request: Request, sql: Sql, user: User | 
   }
   if (action === 'invite' && request.method === 'POST') {
     const access = await permission(sql,world,user);
-    if (!access.canEdit) return fail('Only the owner or a collaborator can invite players.',403,'forbidden');
+    if (!access.canManageStatus) return fail('Only the owner or co-owner can invite players.',403,'forbidden');
     const body = await request.json().catch(()=>({})) as World;
     const targets = await sql.query('SELECT id FROM ll_accounts WHERE handle=$1 LIMIT 1',[String(body.handle??'').toLowerCase()]) as Array<{id:string}>;
     if (!targets[0]) return fail('No player with that handle.',404,'not_found');
