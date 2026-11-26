@@ -328,7 +328,7 @@ export class LoftLifeRealtime {
       if (!blocked.length) {
         if (world.status === 'live') allowed = true;
         else if (world.status === 'build_mode') allowed = canBuild;
-        else if (world.status === 'offline' || world.status === 'build_pending') allowed = canManage;
+        else if (world.status === 'offline') allowed = canManage;
         else if (world.status === 'available') {
           allowed = Boolean(role) || world.access === 'public';
           if (!allowed && world.access === 'friends') {
