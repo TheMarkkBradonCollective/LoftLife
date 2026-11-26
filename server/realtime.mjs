@@ -15,6 +15,7 @@ import { userForToken } from './auth.mjs';
 import { db, now } from './db.mjs';
 import { canEnterWorld, canEditWorld } from './worlds.mjs';
 import { dmScopeId, isBlockedBetween, recordMessage } from './social.mjs';
+import { dmAllowed } from './settings.mjs';
 import {
   acceptPartyInvite,
   createParty,
@@ -284,6 +285,9 @@ function handleChat(player, instance, msg) {
     if (!target) return fail(player.ws, 'not_found', 'No player with that handle');
     if (isBlockedBetween(player.userId, target.id)) {
       return fail(player.ws, 'blocked', 'You cannot message this player');
+    }
+    if (!dmAllowed(player.userId, target.id)) {
+      return fail(player.ws, 'forbidden', 'This player only accepts messages from friends');
     }
     const saved = recordMessage({
       scope: 'dm',

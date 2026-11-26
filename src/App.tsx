@@ -26,6 +26,7 @@ import {
   Layers,
   Loader2,
   LogIn,
+  LogOut,
   Map as MapIcon,
   MessageCircle,
   Monitor,
@@ -78,6 +79,8 @@ import { bindingMatchesEvent } from '../shared/keybindings.mjs';
 import { useKeybindings } from './game/keybindings';
 import { wallAxis } from '../shared/room-walls.mjs';
 import { useSession } from './session';
+import { useSettings } from './platform/settings';
+import type { GameEntry } from './platform/types';
 import { sfx } from './game/audio';
 import {
   DEFAULT_AVATAR,
@@ -300,8 +303,16 @@ function readPortraitOrientation(): boolean {
   return window.innerHeight >= window.innerWidth;
 }
 
-export default function App() {
+interface AppProps {
+  /** Which destination the platform opened; the dashboard is never rendered here. */
+  entry?: GameEntry;
+  /** Return to the LoftLife platform without destroying the account session. */
+  onExitPlatform?: () => void;
+}
+
+export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const session = useSession();
+  const { settings } = useSettings();
 
   // Server-owned state wins when signed in; localStorage stays the offline path.
   // Read once on mount — later edits flow through state and the save effects below.
@@ -319,7 +330,9 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const [location, setLocation] = useState<WorldLocation>('room');
+  const [location, setLocation] = useState<WorldLocation>(
+    entry?.kind === 'city' ? 'world' : 'room'
+  );
   const [hallwayFloor, setHallwayFloor] = useState<number>(PLAYER_SUITE_FLOOR);
   const [unlockedRooms, setUnlockedRooms] = useState<string[]>([]);
   const [mainDoorUnlocked, setMainDoorUnlocked] = useState<boolean>(false);
@@ -341,7 +354,9 @@ export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
     device.controls === 'touch' ? (readPortraitOrientation() ? 'isometric' : 'play') : 'isometric'
   );
-  const [mode, setMode] = useState<GameMode>(() => (gameplayAllowed ? 'walk' : 'edit'));
+  const [mode, setMode] = useState<GameMode>(() =>
+    entry?.kind === 'suite' && entry.edit ? 'edit' : gameplayAllowed ? 'walk' : 'edit'
+  );
   const [items, setItems] = useState<PlacedItem[]>(initial.items);
   const [history, setHistory] = useState<PlacedItem[][]>([]);
   const [surfaces, setSurfaces] = useState<RoomSurfaceConfig>(initial.surfaces);
@@ -795,6 +810,27 @@ export default function App() {
     },
     [gameplayAllowed, session, showHint]
   );
+
+  // Apply the destination the platform asked for, once per mount. A world entry
+  // still validates access through the API; a failure leaves the player in the suite.
+  const entryAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!entry || entryAppliedRef.current) return;
+    entryAppliedRef.current = true;
+    if (entry.kind === 'city') {
+      setLocation('world');
+      session.enterCity();
+      showHint('TheCity · walk to the Grand Hotel entrance and press E for the keycard');
+    } else if (entry.kind === 'suite') {
+      setLocation('room');
+      if (entry.edit) setMode('edit');
+      session.enterCity();
+      showHint(entry.edit ? 'Edit Room · place furniture, then walk to explore' : 'Welcome to your suite');
+    } else if (entry.kind === 'world') {
+      void handleEnterWorld(entry.worldId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** Return from a player world to the hotel suite. */
   const handleLeaveWorld = useCallback(() => {
@@ -1391,6 +1427,7 @@ export default function App() {
         onUnlockRoomDoor={handleUnlockRoomDoor}
         onUnlockHallwayDoor={handleUnlockHallwayDoor}
         onEnterSuiteFromHallway={handleEnterSuiteFromHallway}
+        graphicsQuality={settings.graphics.quality}
       />
       </Suspense>
 
@@ -1432,6 +1469,19 @@ export default function App() {
           touchDevice ? '[&_button]:min-h-10 [&_button]:min-w-10' : ''
         }`}
       >
+        {onExitPlatform && (
+          <button
+            type="button"
+            onClick={onExitPlatform}
+            title="Leave this destination and return to the LoftLife platform"
+            aria-label="Exit to LoftLife"
+            className="px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-[#0b100d]/95 text-slate-200 border-white/15 hover:bg-[#131d17]"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Exit to LoftLife</span>
+          </button>
+        )}
+
         {/* Offline is the default; this is the door to the shared world. */}
         {session.status !== 'online' && (
           <button

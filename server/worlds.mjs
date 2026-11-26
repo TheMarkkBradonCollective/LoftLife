@@ -14,6 +14,7 @@ import {
   sanitizeRoomState,
   sanitizeText,
 } from './validate.mjs';
+import { invitationsAllowed } from './settings.mjs';
 
 const MAX_WORLDS_PER_OWNER = 20;
 
@@ -284,6 +285,9 @@ export function inviteToWorld(userId, worldId, handle) {
     .prepare('SELECT id FROM users WHERE handle = ?')
     .get(String(handle ?? '').toLowerCase());
   if (!target) throw notFound('No player with that handle');
+  if (!invitationsAllowed(target.id)) {
+    throw forbidden('This player is not accepting world invitations');
+  }
   db.prepare(
     `INSERT INTO world_invites (world_id, user_id, created_at) VALUES (?, ?, ?)
      ON CONFLICT(world_id, user_id) DO NOTHING`

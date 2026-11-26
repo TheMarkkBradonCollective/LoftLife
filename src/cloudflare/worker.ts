@@ -3,6 +3,7 @@ import { handleWorldRoute } from './worlds';
 import { handleSocialRoute } from './social';
 import { handleEconomyRoute } from './economy';
 import { handleTransitRoute } from './transit';
+import { handlePlatformRoute } from './platform';
 export { LoftLifeRealtime } from './realtime';
 import {
   hashPassword,
@@ -152,6 +153,17 @@ const SCHEMA_STATEMENTS = [
      expires_at BIGINT NOT NULL
    )`,
   `CREATE INDEX IF NOT EXISTS ll_sessions_account ON ll_sessions(account_id)`,
+  `CREATE TABLE IF NOT EXISTS ll_account_settings (
+     user_id TEXT PRIMARY KEY REFERENCES ll_accounts(id) ON DELETE CASCADE,
+     data_json TEXT NOT NULL,
+     updated_at BIGINT NOT NULL
+   )`,
+  `CREATE TABLE IF NOT EXISTS ll_dm_reads (
+     user_id TEXT NOT NULL REFERENCES ll_accounts(id) ON DELETE CASCADE,
+     peer_id TEXT NOT NULL REFERENCES ll_accounts(id) ON DELETE CASCADE,
+     last_read_at BIGINT NOT NULL,
+     PRIMARY KEY (user_id, peer_id)
+   )`,
 ];
 
 let schemaReady: Promise<void> | null = null;
@@ -683,6 +695,14 @@ export default {
         if (!env.REALTIME) return fail('Realtime Durable Object binding is not configured.',503,'realtime_unconfigured');
         const id = env.REALTIME.idFromName('party:global');
         return env.REALTIME.get(id).fetch(new Request('https://loftlife-internal/internal/party/presence-snapshot'));
+      }
+
+      if (url.pathname === '/api/settings' || url.pathname.startsWith('/api/messages/')) {
+        const auth = await currentAccount(request, env);
+        const sql = auth?.sql ?? (await database(env));
+        if (!sql) return fail('DATABASE_URL is not configured.', 503, 'unconfigured');
+        const platformResponse = await handlePlatformRoute(request, sql, auth?.account ?? null);
+        if (platformResponse) return platformResponse;
       }
 
       if (url.pathname.startsWith('/api/')) {

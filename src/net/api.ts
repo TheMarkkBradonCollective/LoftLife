@@ -120,6 +120,25 @@ export interface ShopEntry {
   label?: string;
 }
 
+export interface ConversationEntry {
+  userId: string;
+  handle: string;
+  displayName: string;
+  avatar: AvatarConfig | null;
+  unread: number;
+  lastMessage: { body: string; createdAt: number; fromMe: boolean };
+}
+
+export interface PublicProfile {
+  userId: string;
+  handle: string;
+  displayName: string;
+  bio: string;
+  avatar: AvatarConfig | null;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
 export interface FriendEntry {
   userId: string;
   handle: string;
@@ -338,6 +357,30 @@ export const api = {
     request<{ instanceId: string; capacity: number; name: string }>(`/worlds/${id}/entry`),
 
   friends: () => request<FriendEntry[]>('/friends'),
+
+  /** Account preferences persisted server-side; local storage is the offline copy. */
+  settings: () => request<{ settings: Record<string, unknown> }>('/settings'),
+
+  saveSettings: (settings: unknown) =>
+    request<{ settings: Record<string, unknown> }>('/settings', {
+      method: 'PUT',
+      body: { settings },
+    }),
+
+  conversations: () =>
+    request<{ conversations: ConversationEntry[] }>('/messages/conversations'),
+
+  markConversationRead: (handle: string) =>
+    request<{ ok: boolean; handle: string }>('/messages/read', {
+      method: 'POST',
+      body: { handle },
+    }),
+
+  suiteOf: (handle: string) =>
+    request<SuiteState>(`/suites/${encodeURIComponent(handle)}`),
+
+  profileOf: (handle: string) =>
+    request<PublicProfile>(`/profiles/${encodeURIComponent(handle)}`),
 
   requestFriend: (handle: string) =>
     request<{ status: string }>('/friends/request', { method: 'POST', body: { handle } }),

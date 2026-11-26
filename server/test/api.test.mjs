@@ -715,3 +715,144 @@ test('realtime: boarding a LoftLine bus assigns a server-owned seat', async () =
 
   client.close();
 });
+
+/* ------------------------- platform shell features ------------------------ */
+
+test('platform settings persist and privacy rules are enforced', async () => {
+  const owner = await newAccount();
+  const stranger = await newAccount();
+
+  const defaults = await api('GET', '/api/settings', { token: owner.token });
+  assert.equal(defaults.status, 200);
+  assert.equal(defaults.json.settings.privacy.messages, 'everyone');
+  assert.equal(defaults.json.settings.graphics.quality, 'high');
+
+  const saved = await api('PUT', '/api/settings', {
+    token: owner.token,
+    body: {
+      settings: {
+        privacy: { profileVisibility: 'private', friendRequests: 'nobody' },
+        graphics: { quality: 'low' },
+        accessibility: { largeText: true },
+        controls: { isometric: { forward: 'KeyI' } },
+        unknownSection: { nope: true },
+      },
+    },
+  });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.json.settings.privacy.profileVisibility, 'private');
+  assert.equal(saved.json.settings.privacy.friendRequests, 'nobody');
+  assert.equal(saved.json.settings.graphics.quality, 'low');
+  assert.equal(saved.json.settings.accessibility.largeText, true);
+  assert.equal(saved.json.settings.controls, undefined, 'controls live in their own account store');
+  assert.equal(saved.json.settings.unknownSection, undefined, 'unknown keys are dropped');
+
+  const reloaded = await api('GET', '/api/settings', { token: owner.token });
+  assert.equal(reloaded.json.settings.privacy.profileVisibility, 'private');
+  assert.equal(reloaded.json.settings.graphics.quality, 'low');
+  assert.equal(reloaded.json.settings.accessibility.largeText, true);
+
+  const request = await api('POST', '/api/friends/request', {
+    token: stranger.token,
+    body: { handle: owner.handle },
+  });
+  assert.equal(request.status, 403, 'closed friend requests are refused');
+
+  const hidden = await api('GET', `/api/profiles/${owner.handle}`, { token: stranger.token });
+  assert.equal(hidden.status, 403, 'a private profile is not readable by strangers');
+
+  const own = await api('GET', `/api/profiles/${owner.handle}`, { token: owner.token });
+  assert.equal(own.status, 200, 'the owner can always read their own profile');
+  assert.equal(own.json.bio !== undefined, true);
+});
+
+test('DM inbox lists conversations, unread counts and read markers', async () => {
+  const sender = await newAccount();
+  const recipient = await newAccount();
+  const port = Number(new URL(base).port);
+  const clientA = makeClient(port);
+  const clientB = makeClient(port);
+  await Promise.all([clientA.opened, clientB.opened]);
+
+  clientA.send({ t: 'hello', token: sender.token, place: { kind: 'city' } });
+  await clientA.waitFor((m) => m.t === 'ready');
+  clientB.send({ t: 'hello', token: recipient.token, place: { kind: 'city' } });
+  await clientB.waitFor((m) => m.t === 'ready');
+
+  clientA.send({ t: 'chat', scope: 'dm', to: recipient.handle, body: 'Meet at the hotel?' });
+  const delivered = await clientB.waitFor(
+    (m) => m.t === 'chat' && m.scope === 'dm' && m.body === 'Meet at the hotel?'
+  );
+  assert.equal(delivered.from.handle, sender.handle);
+
+  const inbox = await api('GET', '/api/messages/conversations', { token: recipient.token });
+  assert.equal(inbox.status, 200);
+  const thread = inbox.json.conversations.find((entry) => entry.handle === sender.handle);
+  assert.ok(thread, 'the conversation is listed for the recipient');
+  assert.equal(thread.unread, 1);
+  assert.equal(thread.lastMessage.body, 'Meet at the hotel?');
+  assert.equal(thread.lastMessage.fromMe, false);
+
+  const read = await api('POST', '/api/messages/read', {
+    token: recipient.token,
+    body: { handle: sender.handle },
+  });
+  assert.equal(read.status, 200);
+
+  const after = await api('GET', '/api/messages/conversations', { token: recipient.token });
+  assert.equal(
+    after.json.conversations.find((entry) => entry.handle === sender.handle).unread,
+    0
+  );
+
+  const history = await api(
+    'GET',
+    `/api/chat/history?scope=dm&with=${sender.handle}`,
+    { token: recipient.token }
+  );
+  assert.equal(history.status, 200);
+  assert.ok(history.json.some((message) => message.body === 'Meet at the hotel?'));
+
+  clientA.close();
+  clientB.close();
+});
+
+test('friends-only DMs and invite preferences are refused over the socket and API', async () => {
+  const guarded = await newAccount();
+  const outsider = await newAccount();
+
+  const saved = await api('PUT', '/api/settings', {
+    token: guarded.token,
+    body: { settings: { privacy: { messages: 'friends', invitations: 'nobody' } } },
+  });
+  assert.equal(saved.status, 200);
+
+  const port = Number(new URL(base).port);
+  const client = makeClient(port);
+  await client.opened;
+  client.send({ t: 'hello', token: outsider.token, place: { kind: 'city' } });
+  await client.waitFor((m) => m.t === 'ready');
+
+  client.send({ t: 'chat', scope: 'dm', to: guarded.handle, body: 'Are you there?' });
+  const refused = await client.waitFor((m) => m.t === 'error');
+  assert.equal(refused.code, 'forbidden');
+  client.close();
+
+  const inbox = await api('GET', '/api/messages/conversations', { token: guarded.token });
+  assert.equal(inbox.status, 200);
+  assert.equal(
+    inbox.json.conversations.some((entry) => entry.handle === outsider.handle),
+    false,
+    'a refused DM is not delivered or stored'
+  );
+
+  const world = await api('POST', '/api/worlds', {
+    token: outsider.token,
+    body: { name: 'Closed House', access: 'invite' },
+  });
+  const invite = await api('POST', `/api/worlds/${world.json.id}/invite`, {
+    token: outsider.token,
+    body: { handle: guarded.handle },
+  });
+  assert.equal(invite.status, 403, 'invitations can be turned off server-side');
+});

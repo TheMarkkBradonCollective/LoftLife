@@ -6,6 +6,7 @@ import { badRequest, conflict, forbidden, notFound } from './errors.mjs';
 import { DEFAULT_OWNED_CLOTHING, ownsItem } from './economy.mjs';
 import { sanitizeAvatar, sanitizeText, pickOne } from './validate.mjs';
 import { normalizeVoicePreferences } from '../shared/voice-controls.mjs';
+import { friendRequestsAllowed } from './settings.mjs';
 
 export const CHAT_SCOPES = ['city', 'world', 'dm', 'party'];
 const MAX_MESSAGE = 240;
@@ -120,6 +121,9 @@ export function sendFriendRequest(userId, handle) {
     db.prepare("UPDATE friendships SET status = 'accepted' WHERE a = ? AND b = ?").run(a, b);
     return { status: 'accepted' };
   }
+  if (!friendRequestsAllowed(target.id)) {
+    throw forbidden('This player is not accepting friend requests');
+  }
   db.prepare(
     "INSERT INTO friendships (a, b, status, requested_by, created_at) VALUES (?, ?, 'pending', ?, ?)"
   ).run(a, b, userId, now());
@@ -225,6 +229,87 @@ export function recordMessage({ scope, scopeId, userId, body }) {
     'INSERT INTO chat_messages (id, scope, scope_id, user_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)'
   ).run(id, scope, scopeId, userId, clean, at);
   return { id, scope, scopeId, userId, body: clean, createdAt: at };
+}
+
+/** DM inbox: latest message per partner, with unread counts and partner avatars. */
+export function listConversations(viewerId, limit = 50) {
+  const rows = db
+    .prepare(
+      `SELECT m.scope_id, m.body, m.created_at, m.user_id
+       FROM chat_messages m
+       WHERE m.scope = 'dm' AND (m.scope_id LIKE ? OR m.scope_id LIKE ?)
+       ORDER BY m.created_at DESC LIMIT 500`
+    )
+    .all(`${viewerId}|%`, `%|${viewerId}`);
+
+  const latest = new Map();
+  for (const row of rows) {
+    if (!latest.has(row.scope_id)) latest.set(row.scope_id, row);
+  }
+
+  const reads = new Map(
+    db
+      .prepare('SELECT peer_id, last_read_at FROM dm_reads WHERE user_id = ?')
+      .all(viewerId)
+      .map((row) => [row.peer_id, row.last_read_at])
+  );
+
+  const conversations = [];
+  for (const [scopeId, last] of latest) {
+    const [a, b] = scopeId.split('|');
+    const peerId = a === viewerId ? b : a;
+    if (!peerId || peerId === viewerId) continue;
+    if (isBlockedBetween(viewerId, peerId)) continue;
+    const partner = db
+      .prepare(
+        `SELECT u.handle, p.display_name, p.avatar_json
+         FROM users u LEFT JOIN profiles p ON p.user_id = u.id WHERE u.id = ?`
+      )
+      .get(peerId);
+    if (!partner) continue;
+    let avatar = null;
+    try {
+      avatar = partner.avatar_json ? JSON.parse(partner.avatar_json) : null;
+    } catch {
+      avatar = null;
+    }
+    const lastRead = reads.get(peerId) ?? 0;
+    const unread = db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM chat_messages WHERE scope = 'dm' AND scope_id = ? AND user_id = ? AND created_at > ?"
+      )
+      .get(scopeId, peerId, lastRead).n;
+    conversations.push({
+      userId: peerId,
+      handle: partner.handle,
+      displayName: partner.display_name ?? partner.handle,
+      avatar,
+      unread,
+      lastMessage: {
+        body: last.body,
+        createdAt: last.created_at,
+        fromMe: last.user_id === viewerId,
+      },
+    });
+  }
+
+  return conversations
+    .sort((left, right) => right.lastMessage.createdAt - left.lastMessage.createdAt)
+    .slice(0, Math.min(100, Math.max(1, Number(limit) || 50)));
+}
+
+/** Mark a DM conversation read up to now; earlier messages stay unread-free. */
+export function markConversationRead(viewerId, handle) {
+  const target = db
+    .prepare('SELECT id FROM users WHERE handle = ?')
+    .get(String(handle ?? '').toLowerCase());
+  if (!target) throw notFound('No player with that handle');
+  if (isBlockedBetween(viewerId, target.id)) throw forbidden('This conversation is unavailable');
+  db.prepare(
+    `INSERT INTO dm_reads (user_id, peer_id, last_read_at) VALUES (?, ?, ?)
+     ON CONFLICT(user_id, peer_id) DO UPDATE SET last_read_at = excluded.last_read_at`
+  ).run(viewerId, target.id, now());
+  return { ok: true, handle: String(handle).toLowerCase() };
 }
 
 export function chatHistory({ scope, scopeId, viewerId, limit = 50 }) {

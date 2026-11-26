@@ -134,6 +134,8 @@ interface RoomViewportProps {
   followCharacter?: boolean;
   modalOpen?: boolean;
   isTouch?: boolean;
+  /** Platform graphics preference; applied when the renderer is created. */
+  graphicsQuality?: 'low' | 'medium' | 'high';
   remotePlayers?: RemotePlayer[];
   playerPoseRef?: React.MutableRefObject<{ x: number; z: number; yaw: number }>;
   transitLines?: TransitLine[];
@@ -241,6 +243,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   movingUid,
   closeZoom = false,
   followCharacter = true,
+  graphicsQuality = 'high',
   modalOpen = false,
   isTouch = false,
   remotePlayers = [],
@@ -502,8 +505,11 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.08;
-    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = !isSoftwareGl;
+    const qualityCap = graphicsQuality === 'low' ? 1 : graphicsQuality === 'medium' ? 1.5 : 2;
+    renderer.setPixelRatio(
+      isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, qualityCap)
+    );
+    renderer.shadowMap.enabled = !isSoftwareGl && graphicsQuality !== 'low';
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.setSize(mount.clientWidth, mount.clientHeight);
     renderer.domElement.style.display = 'block';

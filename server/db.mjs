@@ -171,6 +171,20 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 CREATE INDEX IF NOT EXISTS chat_scope ON chat_messages(scope, scope_id, created_at DESC);
 
+-- Per-account preferences and per-conversation read markers for the platform UI.
+CREATE TABLE IF NOT EXISTS account_settings (
+  user_id    TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  data_json  TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS dm_reads (
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  peer_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  last_read_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, peer_id)
+);
+
 CREATE TABLE IF NOT EXISTS reports (
   id             TEXT PRIMARY KEY,
   reporter_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
