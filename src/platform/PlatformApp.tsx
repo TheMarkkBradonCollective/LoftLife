@@ -203,7 +203,7 @@ function GameHost({ entry }: { entry: GameEntry }) {
 
   const leave = useCallback(() => {
     if (session.status === 'guest') void session.endGuest();
-    else if (session.status === 'online') { session.exitTransit(); session.enterCity(); }
+    else if (session.status === 'online') session.exitCity();
     navigate('');
   }, [session]);
 

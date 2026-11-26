@@ -153,6 +153,7 @@ interface SessionValue {
     emote: string;
   }) => void;
   enterCity: () => void;
+  exitCity: () => void;
   enterWorld: (worldId: string) => Promise<void>;
   clearChatError: () => void;
   partyAction: (
@@ -212,6 +213,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<SessionStatus>('loading');
   const [guestToken, setGuestToken] = useState<string | null>(() => readGuestToken());
   const [guestName, setGuestName] = useState<string | null>(() => readGuestName());
+  const [realtimeActive, setRealtimeActive] = useState(false);
+  const pendingWorldRef = useRef<string | null>(null);
   const [user, setUser] = useState<SessionUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [wallet, setWallet] = useState<Wallet>(EMPTY_WALLET);
@@ -430,7 +433,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   // Realtime connection follows the signed-in state.
   useEffect(() => {
-    if (status !== 'online' && status !== 'guest') {
+    if ((status !== 'online' && status !== 'guest') || (status === 'online' && !realtimeActive)) {
       realtimeRef.current?.close();
       realtimeRef.current = null;
       setRemotePlayers([]);
@@ -452,6 +455,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       onReady: ({ instance: info, you, players }) => {
         selfConnRef.current = you.connId;
         setInstance(info);
+        if (pendingWorldRef.current) {
+          const worldId = pendingWorldRef.current;
+          pendingWorldRef.current = null;
+          realtimeRef.current?.switchPlace({ kind: 'world', worldId });
+        }
         setRemotePlayers(players.filter((player) => player.connId !== you.connId));
         setTransitVehicles([]);
         setRiding(null);
@@ -515,9 +523,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       client.close();
       realtimeRef.current = null;
     };
-  }, [status, guestToken]);
-
-  // Transit routes are public, server-owned data (also consumed by a future
+  }, [status, guestToken, realtimeActive]); (also consumed by a future
   // Unity client), so they are fetched once on boot.
   useEffect(() => {
     api
@@ -647,6 +653,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setGuestToken(result.token); setGuestName(result.guest.displayName);
       setUser(null); setProfile(null); setWallet(EMPTY_WALLET); setInventory([]); setSuite(null);
       setParty(null); setPartyInvites([]); setMessages([]);
+      pendingWorldRef.current = null; setRealtimeActive(true);
       setStatus('guest');
     } catch (error) {
       setAuthError(messageOf(error));
@@ -656,6 +663,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const endGuest = useCallback(async () => {
     const token = guestToken;
+    setRealtimeActive(false); pendingWorldRef.current = null;
     realtimeRef.current?.close(); realtimeRef.current = null;
     if (token) { try { await api.revokeGuestSession(token); } catch { /* Expiry still bounds the token. */ } }
     writeGuestSession(null, null);
@@ -715,6 +723,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // Signing out locally is what matters.
     }
     setToken(null);
+    setRealtimeActive(false); pendingWorldRef.current = null;
     realtimeRef.current?.close();
     realtimeRef.current = null;
     setUser(null);
@@ -873,13 +882,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const enterCity = useCallback(() => {
+    pendingWorldRef.current = null; setRealtimeActive(true);
     realtimeRef.current?.switchPlace({ kind: 'city' });
   }, []);
+
+  const exitCity = useCallback(() => {
+    setRealtimeActive(false); pendingWorldRef.current = null;
+    realtimeRef.current?.close(); realtimeRef.current = null;
+    setRemotePlayers([]); setMessages([]); setInstance(null); setConnection('idle');
+    setParty(null); setPartyInvites([]); setTransitVehicles([]); setRiding(null);
+    voiceRef.current?.disable(); applyVoice();
+  }, [applyVoice]);
 
   const enterWorld = useCallback(async (worldId: string) => {
     if (status === 'guest') { setChatError('Guest visitors can only explore TheCity.'); return; }
     await api.worldEntry(worldId);
-    realtimeRef.current?.switchPlace({ kind: 'world', worldId });
+    if (realtimeRef.current) realtimeRef.current.switchPlace({ kind: 'world', worldId });
+    else { pendingWorldRef.current = worldId; setRealtimeActive(true); }
   }, [status]);
 
   const clearChatError = useCallback(() => setChatError(null), []);
@@ -997,6 +1016,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       guestName,
       startGuest,
       endGuest,
+      exitCity,
       user,
       profile,
       wallet,
@@ -1058,6 +1078,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       guestName,
       startGuest,
       endGuest,
+      exitCity,
       user,
       profile,
       wallet,

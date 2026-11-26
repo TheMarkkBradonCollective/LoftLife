@@ -878,23 +878,6 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     handleLeaveWorld();
   }, [activeWorld, session.status, items, surfaces, mood, showHint, handleLeaveWorld]);
 
-  /** M-menu travel: player worlds leave first, then Main City. */
-  const handleTravelCity = useCallback(() => {
-    if (activeWorld) {
-      handleLeaveWorld();
-      setLocation('world');
-      session.enterCity();
-      showHint('Main City · press M for the map and world menu');
-      return;
-    }
-    handleChangeLocation('world');
-  }, [activeWorld, handleLeaveWorld, session, handleChangeLocation, showHint]);
-
-  const handleTravelSuite = useCallback(() => {
-    if (activeWorld) handleLeaveWorld();
-    handleChangeLocation('room');
-  }, [activeWorld, handleLeaveWorld, handleChangeLocation]);
-
   const pushHistory = useCallback((prevItems: PlacedItem[]) => {
     setHistory((h) => [...h.slice(-19), prevItems]);
   }, []);
@@ -2576,8 +2559,6 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onSetTouch={controls.setTouch}
         onResetTouch={controls.resetTouch}
         onWorldUpdated={handleWorldUpdated}
-        onTravelCity={handleTravelCity}
-        onTravelSuite={handleTravelSuite}
         onLeaveWorld={handleLeaveWorldConfirmed}
         onOpenCityMap={() => setCityMapOpen(true)}
         onEditRoom={() => handleModeSwitch('edit')}

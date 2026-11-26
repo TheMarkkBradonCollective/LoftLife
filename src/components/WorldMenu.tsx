@@ -69,8 +69,6 @@ interface WorldMenuProps {
   onSetTouch: (patch: Partial<TouchLayoutPreferences>) => void;
   onResetTouch: () => void;
   onWorldUpdated: (world: WorldSummary) => void;
-  onTravelCity: () => void;
-  onTravelSuite: () => void;
   onLeaveWorld: () => Promise<void>;
   onOpenCityMap: () => void;
   onEditRoom: () => void;
@@ -270,8 +268,6 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
   onSetTouch,
   onResetTouch,
   onWorldUpdated,
-  onTravelCity,
-  onTravelSuite,
   onLeaveWorld,
   onOpenCityMap,
   onEditRoom,
