@@ -71,6 +71,7 @@ interface WorldMenuProps {
   onLeaveWorld: () => Promise<void>;
   onOpenCityMap: () => void;
   onEditRoom: () => void;
+  guestMode?: boolean;
 }
 
 const panel = 'bg-[#0b100d] text-slate-100 border-[#39ff14]/30';
@@ -272,6 +273,7 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
   onLeaveWorld,
   onOpenCityMap,
   onEditRoom,
+  guestMode = false,
 }) => {
   const [tab, setTab] = useState<MenuTab>('map');
   const [confirmLeave, setConfirmLeave] = useState(false);
