@@ -3,7 +3,7 @@ import { Loader2, ShoppingBag, Shirt, Sofa, X } from 'lucide-react';
 import { api, ApiError, type ShopEntry } from '../net/api';
 import { useSession } from '../session';
 
-const panel = 'bg-[#0b100d]/97 text-slate-100 border-[#39ff14]/30 neon-panel-glow';
+const panel = 'bg-[#15181c]/97 text-slate-100 border-white/20';
 
 const currencyLabel = (currency: 'yuanzi' | 'tongbao') => (currency === 'yuanzi' ? '元' : '宝');
 
@@ -82,11 +82,11 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
       <div className={`w-[min(720px,96vw)] max-h-[86vh] rounded-2xl border overflow-hidden flex flex-col ${panel}`}>
-        <div className="px-4 py-3 border-b border-[#39ff14]/15 flex items-center gap-3">
-          <ShoppingBag className="w-4 h-4 text-[#39ff14]" />
+        <div className="px-4 py-3 border-b border-white/10 flex items-center gap-3">
+          <ShoppingBag className="w-4 h-4 text-white" />
           <h2 className="font-display text-sm font-bold">LoftLife Market</h2>
           <div className="ml-auto flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded bg-black/45 text-[11px] font-mono-tabular text-[#39ff14]">
+            <span className="px-2 py-0.5 rounded bg-black/45 text-[11px] font-mono-tabular text-white">
               元 {wallet.yuanzi}
             </span>
             <span className="px-2 py-0.5 rounded bg-black/45 text-[11px] font-mono-tabular text-amber-300">
@@ -108,7 +108,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
             type="button"
             onClick={() => setTab('furniture')}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 ${
-              tab === 'furniture' ? 'bg-[#39ff14] text-[#051205]' : 'text-slate-300 hover:bg-white/10'
+              tab === 'furniture' ? 'bg-white text-[#15181b]' : 'text-slate-300 hover:bg-white/10'
             }`}
           >
             <Sofa className="w-3.5 h-3.5" /> Furniture
@@ -117,7 +117,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
             type="button"
             onClick={() => setTab('clothing')}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 ${
-              tab === 'clothing' ? 'bg-[#39ff14] text-[#051205]' : 'text-slate-300 hover:bg-white/10'
+              tab === 'clothing' ? 'bg-white text-[#15181b]' : 'text-slate-300 hover:bg-white/10'
             }`}
           >
             <Shirt className="w-3.5 h-3.5" /> Wardrobe
@@ -129,7 +129,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
             className={`px-4 py-2 text-xs border-b ${
               error
                 ? 'border-red-500/20 text-red-200 bg-red-500/10'
-                : 'border-[#39ff14]/20 text-[#8eff78] bg-[#39ff14]/8'
+                : 'border-white/15 text-white/85 bg-white text-[#15181b]/8'
             }`}
           >
             {error ?? flash}
@@ -146,7 +146,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
             return (
               <div
                 key={item.id}
-                className="rounded-xl border border-white/10 bg-[#101713] p-3 flex flex-col gap-2"
+                className="rounded-xl border border-white/10 bg-white/[0.05] p-3 flex flex-col gap-2"
               >
                 <div className="text-xs font-semibold text-slate-100 leading-tight">{label(item)}</div>
                 <div className="flex items-center justify-between">
@@ -154,14 +154,14 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
                     {currencyLabel(item.currency)} {item.price}
                   </span>
                   {count > 0 && (
-                    <span className="text-[10px] text-[#39ff14] font-mono-tabular">×{count}</span>
+                    <span className="text-[10px] text-white font-mono-tabular">×{count}</span>
                   )}
                 </div>
                 <button
                   type="button"
                   disabled={readOnly || busyId === item.id || clothingOwned || !affordable}
                   onClick={() => purchase(item)}
-                  className="mt-auto px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 bg-[#39ff14] text-[#051205] hover:bg-[#5bff3b] disabled:opacity-40"
+                  className="mt-auto px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 bg-white text-[#15181b] hover:bg-white/90 disabled:opacity-40"
                 >
                   {busyId === item.id && <Loader2 className="w-3 h-3 animate-spin" />}
                   {readOnly ? 'Sign in to purchase' : clothingOwned ? 'Owned' : affordable ? 'Buy' : 'Not enough'}

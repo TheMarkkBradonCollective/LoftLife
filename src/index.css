@@ -90,16 +90,25 @@ main::-webkit-scrollbar,
   width: 10px;
   height: 10px;
 }
-main::-webkit-scrollbar-thumb,
-.overflow-y-auto::-webkit-scrollbar-thumb {
+main::-webkit-scrollbar-thumb {
   background: rgba(57, 255, 20, 0.18);
   border-radius: 999px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
-main::-webkit-scrollbar-thumb:hover,
-.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+main::-webkit-scrollbar-thumb:hover {
   background: rgba(57, 255, 20, 0.32);
+  background-clip: content-box;
+}
+/* Panels and sheets use neutral scrollbars; green stays brand-only. */
+.overflow-y-auto::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.32);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.5);
   background-clip: content-box;
 }
 main::-webkit-scrollbar-track,
@@ -116,81 +125,289 @@ main::-webkit-scrollbar-track,
 }
 
 
-/* -------------------------------------------------------------------------
-   Neutral game HUD skin
-   The game world stays visually dominant; LoftLife green is a brand accent,
-   not the surface color of controls, panels, or interactive chrome.
-   ------------------------------------------------------------------------- */
+/* =========================================================================
+   LoftLife game interface design system
+   Translucent charcoal controls over the world, light surfaces for menus,
+   LoftLife green reserved for brand marks, selections and status pips.
+   ========================================================================= */
 :root {
-  --ll-hud-surface: rgba(24, 28, 34, 0.72);
-  --ll-hud-surface-strong: rgba(20, 24, 30, 0.9);
-  --ll-hud-border: rgba(255, 255, 255, 0.24);
-  --ll-hud-text: rgba(255, 255, 255, 0.94);
-  --ll-hud-muted: rgba(255, 255, 255, 0.66);
+  --ll-ink: #171a1e;
+  --ll-ink-soft: rgba(23, 26, 30, 0.62);
+  --ll-glass: rgba(24, 27, 32, 0.56);
+  --ll-glass-strong: rgba(20, 23, 28, 0.82);
+  --ll-glass-hover: rgba(255, 255, 255, 0.14);
+  --ll-hairline: rgba(255, 255, 255, 0.16);
+  --ll-brand: #39ff14;
+  --ll-brand-quiet: #6ee787;
+  --ll-light: #f5f6f4;
+  --ll-light-raised: #ffffff;
+  --ll-radius-control: 18px;
+  --ll-shadow: 0 10px 30px rgba(0, 0, 0, 0.28), 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  --ll-shadow-sheet: 0 30px 80px rgba(4, 8, 6, 0.42);
+  --ll-safe-top: env(safe-area-inset-top, 0px);
+  --ll-safe-right: env(safe-area-inset-right, 0px);
+  --ll-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --ll-safe-left: env(safe-area-inset-left, 0px);
 }
-.ll-game-hud,
-.ll-community {
-  color: var(--ll-hud-text);
+
+.ll-surface {
+  background: var(--ll-glass);
+  border: 1px solid var(--ll-hairline);
+  box-shadow: var(--ll-shadow);
+  -webkit-backdrop-filter: blur(16px) saturate(135%);
+  backdrop-filter: blur(16px) saturate(135%);
 }
-.ll-touch-stick,
-[class*="touch-stick"] {
-  background: radial-gradient(circle at 35% 25%, rgba(255,255,255,.22), rgba(25,29,35,.48)) !important;
-  border: 1px solid rgba(255,255,255,.48) !important;
-  box-shadow: 0 5px 22px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.24);
-  backdrop-filter: blur(10px) saturate(120%);
-  -webkit-backdrop-filter: blur(10px) saturate(120%);
+
+.ll-surface--strong {
+  background: var(--ll-glass-strong);
 }
-.ll-touch-stick__knob,
-.ll-touch-stick [class*="rounded-full"][class*="bg-"] {
-  background: rgba(245,247,250,.78) !important;
-  border: 1px solid rgba(255,255,255,.8) !important;
-  box-shadow: 0 2px 12px rgba(0,0,0,.25);
+
+.ll-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--ll-glass);
+  border: 1px solid var(--ll-hairline);
+  color: #fff;
+  -webkit-backdrop-filter: blur(16px) saturate(135%);
+  backdrop-filter: blur(16px) saturate(135%);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
 }
-.ll-touch-stick__label,
-.ll-touch-stick [class*="uppercase"] {
-  color: rgba(255,255,255,.72) !important;
-}
-.ll-touch-look,
-.ll-touch-voice,
-.ll-touch-action,
-.ll-touch-button {
-  color: white;
-  background: var(--ll-hud-surface);
-  border: 1px solid var(--ll-hud-border);
-  box-shadow: 0 5px 18px rgba(0,0,0,.22);
-  backdrop-filter: blur(12px) saturate(120%);
-  -webkit-backdrop-filter: blur(12px) saturate(120%);
-}
-.ll-touch-look:active,
-.ll-touch-action:active,
-.ll-touch-button:active {
-  background: rgba(255,255,255,.25);
-}
-.ll-community {
-  background: rgba(22,26,32,.94);
-  border: 1px solid rgba(255,255,255,.16);
-  box-shadow: 0 18px 48px rgba(0,0,0,.36);
-  backdrop-filter: blur(22px) saturate(125%);
-  -webkit-backdrop-filter: blur(22px) saturate(125%);
-}
-.ll-community button:focus-visible,
-.ll-touch-look:focus-visible,
-.ll-touch-action:focus-visible,
-.ll-touch-button:focus-visible {
-  outline: 2px solid rgba(255,255,255,.9);
+
+.ll-active {
+  outline: 2px solid rgba(255, 255, 255, 0.86);
   outline-offset: 2px;
 }
-@media (max-width: 639px) {
-  .ll-community { max-height: calc(100dvh - env(safe-area-inset-top) - 8px); }
+
+.ll-focus:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.92);
+  outline-offset: 2px;
 }
-@media (orientation: landscape) and (max-height: 380px) {
-  .ll-community { max-height: calc(100dvh - 8px); }
+
+.ll-menu-sheet {
+  background: var(--ll-light);
+  color: var(--ll-ink);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: var(--ll-shadow-sheet);
 }
+
+.ll-menu-card {
+  background: var(--ll-light-raised);
+  border: 1px solid rgba(17, 20, 24, 0.08);
+  border-radius: 16px;
+  padding: 14px 16px;
+}
+
+.ll-menu-tile {
+  background: var(--ll-light-raised);
+  border: 1px solid rgba(17, 20, 24, 0.08);
+  border-radius: 14px;
+  transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+.ll-menu-tile:hover {
+  background: #fff;
+  border-color: rgba(17, 20, 24, 0.16);
+}
+.ll-menu-tile[aria-current='true'] {
+  border-color: rgba(17, 20, 24, 0.2);
+  box-shadow: 0 1px 0 rgba(17, 20, 24, 0.04), 0 8px 20px rgba(17, 20, 24, 0.07);
+}
+
+.ll-brand-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ll-brand);
+  box-shadow: 0 0 0 3px rgba(57, 255, 20, 0.14);
+}
+
+.ll-joystick {
+  position: relative;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  background:
+    radial-gradient(circle at 34% 26%, rgba(255, 255, 255, 0.22), rgba(18, 21, 26, 0.42) 68%),
+    rgba(16, 19, 23, 0.34);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+  backdrop-filter: blur(12px) saturate(120%);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  touch-action: none;
+}
+.ll-joystick::after {
+  content: '';
+  position: absolute;
+  inset: 22%;
+  border-radius: 999px;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  pointer-events: none;
+}
+.ll-joystick__knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(226, 231, 236, 0.86));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  pointer-events: none;
+}
+
+.ll-action-primary {
+  border-radius: 999px;
+  background: rgba(28, 32, 37, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  color: #fff;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  -webkit-backdrop-filter: blur(16px) saturate(130%);
+  backdrop-filter: blur(16px) saturate(130%);
+  transition: transform 120ms ease, background-color 120ms ease;
+}
+.ll-action-primary:active {
+  transform: scale(0.95);
+  background: rgba(255, 255, 255, 0.22);
+}
+.ll-action-primary[data-pressed='true'] {
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ll-ink);
+}
+
+.ll-popover {
+  background: var(--ll-glass-strong);
+  border: 1px solid var(--ll-hairline);
+  border-radius: 18px;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.36);
+  -webkit-backdrop-filter: blur(20px) saturate(130%);
+  backdrop-filter: blur(20px) saturate(130%);
+  color: #fff;
+}
+
+.ll-notice {
+  background: rgba(24, 27, 32, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  color: #fff;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+}
+
+.ll-social-sheet {
+  background: rgba(21, 24, 29, 0.96);
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  color: #f4f6f5;
+  -webkit-backdrop-filter: blur(24px) saturate(130%);
+  backdrop-filter: blur(24px) saturate(130%);
+}
+
+.ll-build-sheet {
+  background: rgba(22, 25, 30, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 20px;
+  color: #fff;
+  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.36);
+  -webkit-backdrop-filter: blur(22px) saturate(130%);
+  backdrop-filter: blur(22px) saturate(130%);
+}
+
+@keyframes ll-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes ll-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes ll-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.ll-animate-pop {
+  animation: ll-pop-in 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.ll-animate-rise {
+  animation: ll-rise-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.ll-animate-fade {
+  animation: ll-fade-in 160ms ease both;
+}
+
+/* Light menu scrollbars stay neutral (green is not a UI surface colour). */
+.ll-menu-sheet ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.ll-menu-sheet ::-webkit-scrollbar-thumb {
+  background: rgba(17, 20, 24, 0.18);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ll-animate-pop,
+  .ll-animate-rise,
+  .ll-animate-fade {
+    animation: none !important;
+  }
+  .ll-surface,
+  .ll-pill,
+  .ll-action-primary,
+  .ll-menu-tile,
+  .ll-focus {
+    transition-duration: 0.001ms !important;
+  }
+}
+
 @media (prefers-reduced-transparency: reduce) {
-  .ll-touch-stick, .ll-touch-look, .ll-touch-voice, .ll-touch-action,
-  .ll-touch-button, .ll-community {
-    backdrop-filter: none;
+  .ll-surface,
+  .ll-pill,
+  .ll-surface--strong,
+  .ll-joystick,
+  .ll-action-primary,
+  .ll-popover,
+  .ll-notice,
+  .ll-social-sheet,
+  .ll-build-sheet {
+    background: #191d22;
     -webkit-backdrop-filter: none;
-    background-color: rgba(20,24,30,.94);
+    backdrop-filter: none;
+  }
+  .ll-social-sheet,
+  .ll-build-sheet {
+    background: #191d22;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .ll-surface,
+  .ll-pill,
+  .ll-popover,
+  .ll-notice,
+  .ll-social-sheet,
+  .ll-build-sheet {
+    border-color: rgba(255, 255, 255, 0.5);
+  }
+  .ll-focus:focus-visible {
+    outline-width: 3px;
   }
 }

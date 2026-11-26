@@ -101,12 +101,15 @@ split and the pieces that still need a live Neon sign-in test.
   mic test; preferences save on-device offline and to the account when signed in.
 - **Rideable transit**: two LoftLine routes with marked stops. Seats are assigned by the server,
   rider positions are server-authoritative, and passengers who board the same line share the tram.
-- **Device-aware HUD**: runtime/input detection (desktop web, installed PWA, Windows EXE,
-  Android APK, Android/iOS browser, tablet, hybrid touch laptop) allows gameplay on every
-  supported platform and chooses a keyboard/mouse or touch HUD, switching live as the player
-  changes input without resetting the camera. Touch gets a virtual stick, camera Look strip,
-  contextual Action, sprint, jump, emote, voice bubble, chat and map/menu, with a lighter
-  renderer budget. See [docs/DEVICE-COMPATIBILITY.md](docs/DEVICE-COMPATIBILITY.md).
+- **Device-aware game HUD**: one cohesive interface built from `src/hud/`, composed for six
+  presentations (mobile portrait/landscape, tablet portrait/landscape, desktop browser and the
+  installed desktop app). Touch gets a single joystick, camera drag plus a Camera popover,
+  contextual actions, sprint/jump/emote, voice and chat; desktop keeps keyboard/mouse and never
+  mounts touch controls. A light central game menu holds Map, World, Inventory, Character,
+  Social, Friends, Messages, Emotes, Settings and Leave world, and gameplay input is suppressed
+  while it or the social sheet is open. Contextual actions, HUD states and safe-area layout are
+  described in [docs/HUD-REDESIGN.md](docs/HUD-REDESIGN.md); runtime detection and device
+  testing are in [docs/DEVICE-COMPATIBILITY.md](docs/DEVICE-COMPATIBILITY.md).
 - **Avatar zoom**: `Z` (or the camera button) eases the camera toward the avatar and back to the
   exact previous distance and angle in both isometric and third-person views.
 - Wardrobe studio locks unowned clothing with its server price; the 3D viewport is lazy-loaded so
@@ -139,8 +142,11 @@ src/
   net/realtime.ts  reconnecting WebSocket client
   net/voice.ts     WebRTC proximity voice with push-to-talk
   session.tsx      account state, sync, presence, chat, party, voice, transit (React context)
-  components/      AuthGate, SocialHud, TouchControls, ShopModal, WorldsModal, 3D viewport, modals
+  hud/             game interface: layouts (touch/desktop), joystick, actions, top HUD,
+                   central menu, social sheet, editing panel, design primitives
+  components/      AuthGate, 3D viewport, world menu, shop/worlds/settings modals
   game/            city layout, hotel/world builders, furniture, avatar rig, transit, audio
+shared/            pure rules shared by server and client (device detection, HUD presentation)
 docs/              AUDIT.md, ARCHITECTURE.md, ROADMAP.md
 ```
 
@@ -149,6 +155,8 @@ docs/              AUDIT.md, ARCHITECTURE.md, ROADMAP.md
 - [docs/AUDIT.md](docs/AUDIT.md) — honest audit of the codebase as found, plus the work done.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — server design, data model, realtime protocol,
   hosting and costs, and the path to Unity.
+- [docs/HUD-REDESIGN.md](docs/HUD-REDESIGN.md) — HUD systems, states, the six device layouts,
+  screenshots and the verification report.
 - [docs/DEVICE-COMPATIBILITY.md](docs/DEVICE-COMPATIBILITY.md) — runtime/input matrix, HUD rules,
-  mobile renderer budget and the test report.
+  mobile renderer budget and the device test report.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased plan with current status.

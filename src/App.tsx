@@ -1,71 +1,23 @@
-import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  AlertTriangle,
-  Armchair,
-  BedDouble,
-  BookOpen,
-  Camera,
-  ChevronDown,
-  ChevronUp,
-  Cloud,
-  CloudOff,
-  Coffee,
-  Copy,
-  DoorOpen,
-  Eraser,
-  Eye,
-  Flame,
-  Frame,
-  Gamepad2,
-  Hand,
-  HardDrive,
-  Home,
-  ArrowUp,
-  LampDesk,
-  LampFloor,
-  Layers,
-  Loader2,
-  LogIn,
-  Map as MapIcon,
-  MessageCircle,
-  Monitor,
-  Move,
-  Music,
-  Paintbrush,
-  PencilRuler,
-  RotateCw,
-  Settings,
-  Sofa,
-  Sparkles,
-  Sprout,
-  Sun,
-  Sunset,
-  Moon,
-  Trash2,
-  Trees,
-  Tv,
-  Undo2,
-  User,
-  Utensils,
-  Volume2,
-  VolumeX,
-  Footprints,
-  X,
-} from 'lucide-react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AuthGate } from './components/AuthGate';
 import { AvatarModal } from './components/AvatarModal';
 import { CityMapModal } from './components/CityMapModal';
 import { ElevatorPanelModal } from './components/ElevatorPanelModal';
 import { HotelDoorTerminalModal } from './components/HotelDoorTerminalModal';
 import { AirportTravelModal } from './components/AirportTravelModal';
-import { ShopModal } from './components/ShopModal';
 import { RoomSettingsModal } from './components/RoomSettingsModal';
 import { SyncConflictModal } from './components/SyncConflictModal';
-import { SocialHud } from './components/SocialHud';
+import { ShopModal } from './components/ShopModal';
+import { WorldsModal } from './components/WorldsModal';
+import { GameInterface } from './hud/GameInterface';
+import { GameMenu } from './hud/GameMenu';
+import { SocialPanel } from './hud/SocialPanel';
+import type { BuildController, SocialIntent } from './hud/types';
 import { PlatformNotice } from './components/PlatformNotice';
 import { WorldMenu } from './components/WorldMenu';
-import { TouchControls } from './components/TouchControls';
 import { useDeviceEnvironment } from './game/platform';
+import { touchInput } from './game/touchInput';
+import { resolveHudPresentation } from '../shared/hud-presentation.mjs';
 import { MOBILE_GAMEPLAY_MESSAGE } from '../shared/device-platform.mjs';
 
 // Three.js is only needed once the world renders; lazy-loading keeps the
@@ -74,7 +26,7 @@ const RoomViewport = lazy(() =>
   import('./components/RoomViewport').then((module) => ({ default: module.RoomViewport }))
 );
 import { api, type WorldSummary } from './net/api';
-import { MIC_MODE_INFO, VOICE_RANGE_INFO } from '../shared/voice-controls.mjs';
+import { VOICE_RANGE_INFO } from '../shared/voice-controls.mjs';
 import { isEditableElement } from '../shared/desktop-shortcuts.mjs';
 import { bindingMatchesEvent } from '../shared/keybindings.mjs';
 import { useKeybindings } from './game/keybindings';
@@ -85,29 +37,24 @@ import type { GameEntry } from './platform/types';
 import { sfx } from './game/audio';
 import {
   DEFAULT_AVATAR,
-  FLOOR_STYLES,
-  FURNITURE_CATALOG,
   getCatalogItem,
   GRID_SIZE,
   HOTEL_RESIDENTS,
   PLAYER_SUITE_FLOOR,
   PLAYER_SUITE_NUMBER,
   ROOM_PRESETS,
-  WALL_STYLES,
 } from './game/catalog';
 import { getEffectiveSize, isValidPlacement, SNAP_STEP, snapGrid } from './game/gridMath';
 import type {
   ActiveResident,
   AvatarConfig,
   EmoteType,
-  FloorStyleId,
   FurnitureCategory,
   GameMode,
   LightingMood,
   PlacedItem,
   RoomSurfaceConfig,
   ViewMode,
-  WallStyleId,
   WorldLocation,
 } from './game/types';
 
@@ -240,64 +187,6 @@ function keepBackup(key: string, payload: Record<string, unknown>) {
   }
 }
 
-function getCategoryIcon(catalogId: string) {
-  switch (catalogId) {
-    case 'plush_sofa':
-    case 'sectional_sofa':
-      return <Sofa className="w-4 h-4" />;
-    case 'lounge_chair':
-    case 'bar_stool':
-      return <Armchair className="w-4 h-4" />;
-    case 'cozy_bed':
-      return <BedDouble className="w-4 h-4" />;
-    case 'dining_set':
-      return <Utensils className="w-4 h-4" />;
-    case 'espresso_bar':
-      return <Coffee className="w-4 h-4" />;
-    case 'dual_desk':
-      return <Monitor className="w-4 h-4" />;
-    case 'coffee_table':
-    case 'side_desk':
-      return <Layers className="w-4 h-4" />;
-    case 'record_console':
-      return <Music className="w-4 h-4" />;
-    case 'media_tv':
-      return <Tv className="w-4 h-4" />;
-    case 'fireplace':
-      return <Flame className="w-4 h-4" />;
-    case 'bookshelf':
-      return <BookOpen className="w-4 h-4" />;
-    case 'arc_lamp':
-      return <LampFloor className="w-4 h-4" />;
-    case 'table_lamp':
-      return <LampDesk className="w-4 h-4" />;
-    case 'monstera_plant':
-      return <Sprout className="w-4 h-4" />;
-    case 'olive_tree':
-      return <Trees className="w-4 h-4" />;
-    case 'woven_rug':
-      return <Layers className="w-4 h-4" />;
-    case 'neon_sign':
-      return <Sparkles className="w-4 h-4" />;
-    case 'wall_art':
-    case 'wall_shelf':
-    case 'floor_mirror':
-      return <Frame className="w-4 h-4" />;
-    default:
-      return <Sofa className="w-4 h-4" />;
-  }
-}
-
-const CATEGORY_TABS: { id: 'all' | FurnitureCategory; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'seating', label: 'Seating' },
-  { id: 'tables', label: 'Tables' },
-  { id: 'living', label: 'Living' },
-  { id: 'lighting', label: 'Lighting' },
-  { id: 'plants_rugs', label: 'Plants & Rugs' },
-  { id: 'wall', label: 'Wall' },
-];
-
 function readPortraitOrientation(): boolean {
   if (typeof window === 'undefined') return true;
   const query = window.matchMedia?.('(orientation: portrait)');
@@ -379,6 +268,13 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(initial.avatar);
   const [activeWorld, setActiveWorld] = useState<WorldSummary | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  // The world/controls sheet is a detail view opened from the central menu.
+  const [worldMenuOpen, setWorldMenuOpen] = useState(false);
+  const [worldMenuTab, setWorldMenuTab] = useState<'map' | 'world' | 'manage' | 'controls'>('map');
+  const [socialIntent, setSocialIntent] = useState<SocialIntent>('chat');
+  const [shopOpen, setShopOpen] = useState(false);
+  const [worldsOpen, setWorldsOpen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   const controls = useKeybindings({
     online: session.status === 'online',
     userId: session.user?.id ?? null,
@@ -420,7 +316,6 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const onlineReadyRef = useRef(false);
   const [cityMapOpen, setCityMapOpen] = useState(false);
   const [cityStreet, setCityStreet] = useState('M St & 15th St');
-  const [muted, setMuted] = useState(false);
   // Z toggles the camera distance only: close avatar view vs wide room view.
   const [closeZoom, setCloseZoom] = useState(false);
   // F toggles Follow Character in Isometric Mode; Play View always follows.
@@ -431,6 +326,9 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   useEffect(() => {
     if (!(import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) return;
     (window as unknown as Record<string, unknown>).__loftlife_env = device;
+    // Live pose probe for the dev preview (?hudDebug=1); the ref is mutated by
+    // the render loop, so reading it in the console stays current.
+    (window as unknown as Record<string, unknown>).__loftlife_pose = playerPoseRef.current;
   }, [device]);
 
   useEffect(() => {
@@ -1233,20 +1131,211 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     );
   }, [followCharacter, showHint, viewMode]);
 
-  const filteredCatalog = useMemo(() => {
-    if (categoryFilter === 'all') return FURNITURE_CATALOG;
-    return FURNITURE_CATALOG.filter((item) => item.category === categoryFilter);
-  }, [categoryFilter]);
-
   const placingCatalogItem = useMemo(
     () => (placingCatalogId ? getCatalogItem(placingCatalogId) ?? null : null),
     [placingCatalogId]
   );
 
-  const hudPanelClass =
-    'bg-[#0b100d]/95 text-slate-100 border-[#39ff14]/30 neon-panel-glow';
+  /** Open the central menu. Chat closes so gameplay input is fully suppressed. */
+  const openGameMenu = useCallback(() => {
+    sfx.playClick();
+    session.setChatOpen(false);
+    setMenuOpen(true);
+  }, [session.setChatOpen]);
+
+  const openSocial = useCallback(
+    (intent: SocialIntent) => {
+      sfx.playClick();
+      setSocialIntent(intent);
+      session.setChatOpen(true);
+    },
+    [session.setChatOpen]
+  );
+
+  const handleToggleChat = useCallback(() => {
+    sfx.playClick();
+    if (session.chatOpen) {
+      session.setChatOpen(false);
+      return;
+    }
+    setSocialIntent('chat');
+    session.setChatOpen(true);
+  }, [session.chatOpen, session.setChatOpen]);
+
+  const openWorldControls = useCallback(() => {
+    sfx.playClick();
+    setMenuOpen(false);
+    setWorldMenuTab('controls');
+    setWorldMenuOpen(true);
+  }, []);
+
+  const openWorldManage = useCallback(() => {
+    sfx.playClick();
+    setMenuOpen(false);
+    setWorldMenuTab('map');
+    setWorldMenuOpen(true);
+  }, []);
+
+  /** The menu asks for a specific camera; the existing toggle preserves state. */
+  const handleSetView = useCallback(
+    (next: ViewMode) => {
+      if (!gameplayAllowed || next === viewMode) return;
+      handleTogglePlayView();
+    },
+    [gameplayAllowed, viewMode, handleTogglePlayView]
+  );
+
+  const toggleFullscreen = useCallback(() => {
+    if (typeof document === 'undefined') return;
+    if (document.fullscreenElement) {
+      void document.exitFullscreen?.();
+      return;
+    }
+    void document.documentElement.requestFullscreen?.().catch(() => {
+      showHint('Fullscreen is not available in this window');
+    });
+  }, [showHint]);
+
+  useEffect(() => {
+    const update = () => setFullscreen(Boolean(document.fullscreenElement));
+    update();
+    document.addEventListener('fullscreenchange', update);
+    return () => document.removeEventListener('fullscreenchange', update);
+  }, []);
+
+  const hudDebug = useMemo(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('hudDebug')) return null;
+    return {
+      presentation: resolveHudPresentation({
+        deviceClass: device.deviceClass,
+        touch: device.controls === 'touch',
+        installed: device.installed,
+        portrait: isPortrait,
+      }) as string,
+      platform: device.platform,
+      input: device.inputMode,
+    };
+  }, [device.deviceClass, device.controls, device.installed, device.platform, device.inputMode, isPortrait]);
+
+  const handlePickCatalog = useCallback(
+    (catalogId: string) => {
+      const catalog = getCatalogItem(catalogId);
+      if (!catalog) return;
+      sfx.playClick();
+      if (placingCatalogId === catalogId) {
+        setPlacingCatalogId(null);
+        return;
+      }
+      setMovingUid(null);
+      setSelectedUid(null);
+      setPlacingCatalogId(catalogId);
+      setPlacingColor(catalog.defaultColor);
+      setPlacingRotation(0);
+    },
+    [placingCatalogId]
+  );
+
+  const handleBuildRecolor = useCallback(
+    (hex: string) => {
+      if (placingCatalogId || movingUid) {
+        sfx.playClick();
+        setPlacingColor(hex);
+        return;
+      }
+      handleRecolorSelected(hex);
+    },
+    [placingCatalogId, movingUid, handleRecolorSelected]
+  );
+
+  const handleClearSuite = useCallback(() => {
+    sfx.playRemove();
+    pushHistory(items);
+    setItems([]);
+    setSelectedUid(null);
+    setPlacingCatalogId(null);
+    setMovingUid(null);
+  }, [items, pushHistory]);
+
+  const handleApplyPreset = useCallback(
+    (presetId: string) => {
+      const preset = ROOM_PRESETS.find((entry) => entry.id === presetId);
+      if (!preset) return;
+      sfx.playPlace();
+      pushHistory(items);
+      setItems(preset.items.map((item) => ({ ...item })));
+      setSurfaces({ ...preset.surfaces });
+      setMood(preset.mood);
+      setRoomName(preset.name);
+      setSelectedUid(null);
+      setPlacingCatalogId(null);
+      setMovingUid(null);
+    },
+    [items, pushHistory]
+  );
+
 
   const canEditRoom = location === 'room' && (!activeWorld || activeWorld.canEdit);
+
+  // Presentation-only controller for the build overlay. Every entry maps to the
+  // existing builder state/handler; no furniture rule is re-implemented here.
+  const buildController: BuildController = {
+    tab: editTab,
+    setTab: setEditTab,
+    categoryFilter,
+    setCategoryFilter,
+    itemCount: items.length,
+    historyLength: history.length,
+    canEdit: canEditRoom,
+    collapsed: dockCollapsed,
+    onToggleCollapsed: () => setDockCollapsed((value) => !value),
+    placing: placingCatalogItem
+      ? {
+          id: placingCatalogItem.id,
+          name: placingCatalogItem.name,
+          colors: placingCatalogItem.colors,
+          color: placingColor,
+          isWall: placingCatalogItem.layer === 'wall',
+        }
+      : null,
+    movingName: movingUid
+      ? getCatalogItem(items.find((item) => item.uid === movingUid)?.catalogId ?? '')?.name ?? 'item'
+      : null,
+    selected:
+      selectedItem && selectedCatalog
+        ? {
+            name: selectedCatalog.name,
+            size: selectedCatalog.size,
+            colors: selectedCatalog.colors,
+            color: selectedItem.color,
+            isWall: selectedCatalog.layer === 'wall',
+          }
+        : null,
+    onPickCatalog: handlePickCatalog,
+    onCancelPlacement: () => {
+      setPlacingCatalogId(null);
+      setMovingUid(null);
+    },
+    onRotate: rotateSelectedOrPlacing,
+    onRecolor: handleBuildRecolor,
+    onStartMove: handleStartMoveSelected,
+    onDuplicate: handleDuplicateSelected,
+    onDelete: handleDeleteSelected,
+    onUndo: handleUndo,
+    onClear: handleClearSuite,
+    onDone: () => handleModeSwitch('walk'),
+    surfaces,
+    onFloorChange: (floor) => setSurfaces((current) => ({ ...current, floor })),
+    onWallChange: (wall) => setSurfaces((current) => ({ ...current, wall })),
+    presets: ROOM_PRESETS.map((preset) => ({
+      id: preset.id,
+      name: preset.name,
+      count: preset.items.length,
+      active: roomName === preset.name,
+    })),
+    onPreset: handleApplyPreset,
+  };
 
   const anyModalOpen =
     avatarModalOpen ||
@@ -1258,6 +1347,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     roomSettingsOpen ||
     authOpen ||
     menuOpen ||
+    worldMenuOpen ||
     conflictOpen;
 
   // Android back closes the top layer first, then minimizes the app. The
@@ -1276,6 +1366,10 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       }
       if (authOpen) {
         setAuthOpen(false);
+        return true;
+      }
+      if (worldMenuOpen) {
+        setWorldMenuOpen(false);
         return true;
       }
       if (menuOpen) {
@@ -1326,6 +1420,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     conflictOpen,
     authOpen,
     menuOpen,
+    worldMenuOpen,
     roomSettingsOpen,
     avatarModalOpen,
     cityMapOpen,
@@ -1490,7 +1585,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         movingUid={movingUid}
         closeZoom={closeZoom}
         followCharacter={followCharacter}
-        modalOpen={anyModalOpen}
+        modalOpen={anyModalOpen || session.chatOpen}
         remotePlayers={remoteInThisScene}
         playerPoseRef={playerPoseRef}
         transitLines={session.transitLines}
@@ -1532,921 +1627,165 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         </div>
       )}
 
-      {/* Top-Left Brand & Hotel / City Summary */}
-      <div className="fixed top-4 left-4 z-20 pointer-events-auto max-w-[calc(100vw-2rem)]">
-        <div
-          className={`px-4 py-2.5 rounded-xl border flex items-center gap-3 min-w-0 ${hudPanelClass}`}
-        >
-          <span className="font-display text-base font-bold tracking-tight text-[#39ff14] whitespace-nowrap shrink-0">
-            LoftLife
-          </span>
-          <span className="text-xs text-[#39ff14]/45" aria-hidden="true">
-            |
-          </span>
-          <div className="flex items-center gap-2 text-xs text-slate-200 min-w-0 whitespace-nowrap">
-            <span className="font-medium text-white truncate max-w-[42vw] sm:max-w-none">
-              {locationTitle}
-            </span>
-            <span className="hidden lg:inline text-[#39ff14]/60" aria-hidden="true">
-              ·
-            </span>
-            <span className="hidden lg:inline font-mono-tabular text-slate-300 truncate">
-              {locationSub}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Top-Right Compact Mode & Utility Bar */}
-      <div
-        className={`fixed top-[4.5rem] sm:top-4 right-3 sm:right-4 z-20 max-w-[calc(100vw-1.5rem)] sm:max-w-[calc(100vw-27rem)] flex items-center gap-2 pointer-events-auto ${
-          touchDevice
-            ? 'flex-nowrap justify-start overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&_button]:min-h-10 [&_button]:min-w-10'
-            : 'flex-wrap justify-end'
-        }`}
-      >
-        {/* Offline is the default; this is the door to the shared world. */}
-        {session.status !== 'online' && (
-          <button
-            type="button"
-            onClick={() => {
-              sfx.playClick();
-              setAuthOpen(true);
-            }}
-            className="px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-[#111914] text-[#39ff14] border-[#39ff14]/45 hover:bg-[#19261d]"
-          >
-            <LogIn className="w-3.5 h-3.5" />
-            Play online
-          </button>
-        )}
-
-        {/* Persistence status: local-only, uploading, synced, or waiting on a choice. */}
-        {conflict ? (
-          <button
-            type="button"
-            onClick={() => setConflictOpen(true)}
-            title="Your device suite differs from your account"
-            className="px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-amber-400/15 text-amber-300 border-amber-400/45 hover:bg-amber-400/25"
-          >
-            <AlertTriangle className="w-3.5 h-3.5" />
-            Sync paused
-          </button>
-        ) : session.status !== 'online' ? (
-          <span
-            title="Character and suite are saved in this browser"
-            className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 ${hudPanelClass}`}
-          >
-            <HardDrive className="w-3.5 h-3.5 text-[#39ff14]" />
-            Local
-          </span>
-        ) : session.syncState === 'error' ? (
-          <button
-            type="button"
-            onClick={retryOnlineSave}
-            title={session.syncError ?? 'Saving to your account failed'}
-            className="px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-red-500/15 text-red-200 border-red-500/40 hover:bg-red-500/25"
-          >
-            <CloudOff className="w-3.5 h-3.5" />
-            Not saved
-          </button>
-        ) : (
-          <span
-            title="Character and suite are saved to your account"
-            className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 ${hudPanelClass}`}
-          >
-            {session.syncState === 'saving' ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-[#39ff14]" />
-            ) : (
-              <Cloud className="w-3.5 h-3.5 text-[#39ff14]" />
-            )}
-            {session.syncState === 'saving'
-              ? 'Saving…'
-              : session.syncState === 'synced'
-              ? 'Synced'
-              : 'Connected'}
-          </span>
-        )}
-
-        {/* Desktop entry point; the APK uses its touch Map button. */}
-        {gameplayAllowed && device.desktop && !touchDevice && (
-          <button
-            type="button"
-            onClick={() => {
-              sfx.playClick();
-              setMenuOpen(true);
-            }}
-            aria-label="Map and world menu"
-            className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${hudPanelClass}`}
-          >
-            <MapIcon className="w-3.5 h-3.5 text-[#39ff14]" />
-            Map &amp; World <span className="text-[10px] text-slate-400">(M)</span>
-          </button>
-        )}
-
-        {/* Camera switcher is desktop-only: phones derive the view from orientation. */}
-        {device.desktop && !touchDevice && (
-          <div className={`p-1 rounded-xl border flex items-center gap-1 ${hudPanelClass}`}>
-            <button
-              type="button"
-              onClick={() => {
-                if (viewMode !== 'isometric') handleTogglePlayView();
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-                viewMode === 'isometric'
-                  ? 'bg-[#39ff14] text-[#051205]'
-                  : 'text-slate-300 hover:bg-white/10'
-              }`}
-            >
-              <Eye className="w-3.5 h-3.5" />
-              Isometric
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (viewMode !== 'play') handleTogglePlayView();
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-                viewMode === 'play'
-                  ? 'bg-[#39ff14] text-[#051205]'
-                  : 'text-slate-300 hover:bg-white/10'
-              }`}
-            >
-              <Gamepad2 className="w-3.5 h-3.5" />
-              Play View
-            </button>
-          </div>
-        )}
-
-        {/* Lighting Mood Selector */}
-        <div className={`p-1 rounded-xl border flex items-center gap-0.5 ${hudPanelClass}`}>
-          {(
-            [
-              { id: 'morning', label: 'Morning', icon: <Sun className="w-3.5 h-3.5" /> },
-              { id: 'golden', label: 'Golden Hour', icon: <Sunset className="w-3.5 h-3.5" /> },
-              { id: 'night', label: 'Night', icon: <Moon className="w-3.5 h-3.5" /> },
-            ] as const
-          ).map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              title={m.label}
-              aria-label={`Set lighting to ${m.label}`}
-              onClick={() => {
-                sfx.playClick();
-                setMood(m.id);
-              }}
-              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-                mood === m.id
-                  ? 'bg-[#39ff14] text-[#051205]'
-                  : 'text-slate-300 hover:bg-white/10'
-              }`}
-            >
-              {m.icon}
-            </button>
-          ))}
-        </div>
-
-        {/* Owners get one tap into furnishing; visitors never see this. */}
-        {canEditRoom && mode === 'walk' && (
-          <button
-            type="button"
-            onClick={() => {
-              sfx.playClick();
-              handleModeSwitch('edit');
-            }}
-            aria-label="Edit suite"
-            title="Edit this suite's furniture and finishes"
-            className="px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 bg-[#39ff14] text-[#051205] border-[#39ff14] hover:bg-[#5bff3b] neon-btn-glow"
-          >
-            <PencilRuler className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Edit suite</span>
-          </button>
-        )}
-
-        {/* Camera & Avatar & Sound */}
-        <div className={`p-1 rounded-xl border flex items-center gap-1 ${hudPanelClass}`}>
-          <button
-            type="button"
-            title="Room settings · Walk, Edit and controls"
-            aria-label="Room settings"
-            aria-expanded={roomSettingsOpen}
-            onClick={() => {
-              sfx.playClick();
-              setRoomSettingsOpen((v) => !v);
-            }}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-              roomSettingsOpen
-                ? 'bg-[#39ff14] text-[#051205]'
-                : 'text-slate-300 hover:bg-white/10 hover:text-[#39ff14]'
-            }`}
-          >
-            <Settings className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              sfx.playClick();
-              setAvatarModalOpen((v) => !v);
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-              avatarModalOpen
-                ? 'bg-[#39ff14] text-[#051205]'
-                : 'text-slate-200 hover:bg-white/10'
-            }`}
-          >
-            <User className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Avatar</span>
-          </button>
-
-          {!touchDevice && (
-            <button
-              type="button"
-              title={closeZoom ? 'Wide room view (Z)' : 'Close avatar view (Z)'}
-              aria-label={closeZoom ? 'Wide room view' : 'Close avatar view'}
-              aria-pressed={closeZoom}
-              onClick={toggleCloseZoom}
-              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-                closeZoom
-                  ? 'bg-[#39ff14] text-[#051205]'
-                  : 'text-slate-300 hover:bg-white/10 hover:text-[#39ff14]'
-              }`}
-            >
-              <Camera className="w-3.5 h-3.5" />
-            </button>
-          )}
-
-          <button
-            type="button"
-            title={muted ? 'Unmute Sound' : 'Mute Sound'}
-            aria-label={muted ? 'Unmute Sound' : 'Mute Sound'}
-            onClick={() => {
-              const next = !muted;
-              sfx.muted = next;
-              setMuted(next);
-              if (!next) sfx.playClick();
-            }}
-            className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-slate-300 hover:bg-white/10 hover:text-[#39ff14]"
-          >
-            {muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-          </button>
-        </div>
-      </div>
-
-      {/* Transient Walk / Action Hint Banner */}
-      {walkHint && (
-        <div className="fixed top-[11.75rem] sm:top-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none max-w-[92vw]">
-          <div className={`px-3.5 py-1.5 rounded-lg border text-xs font-medium text-[#d8ffd0] ${hudPanelClass}`}>
-            {walkHint}
-          </div>
-        </div>
-      )}
-
-      {/* Proximity Action Prompt (Isometric Walk & Play View) */}
-      {proximityPrompt && !anyModalOpen && (
-        <div className="fixed bottom-52 sm:bottom-28 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
-          <div className="px-4 py-2 rounded-xl bg-[#39ff14] text-[#051205] font-bold text-xs border border-[#8eff78] neon-btn-glow">
-            {proximityPrompt}
-          </div>
-        </div>
-      )}
-
-      {/* NPC Dialogue Toast */}
-      {npcChat && (
-        <div className="fixed bottom-52 sm:bottom-24 left-1/2 -translate-x-1/2 z-30 w-[min(460px,90vw)] pointer-events-auto">
-          <div className={`px-4 py-3 rounded-xl border flex items-start justify-between gap-3 ${hudPanelClass}`}>
-            <div className="flex items-start gap-2.5">
-              <MessageCircle className="w-4 h-4 mt-0.5 text-[#39ff14] shrink-0" />
-              <div className="text-xs leading-relaxed">
-                <span className="font-semibold text-[#39ff14] mr-1.5">{npcChat.speaker}:</span>
-                <span className="text-slate-200">{npcChat.message}</span>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setNpcChat(null)}
-              aria-label="Dismiss dialogue"
-              className="p-1 rounded-md opacity-60 hover:opacity-100"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Collapsible Unified Bottom Control Dock */}
-      <div
-        className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-30 w-[min(940px,95vw)] flex flex-col items-center transition-transform duration-200 ease-out ${
-          dockCollapsed ? 'translate-y-[calc(100%-34px)]' : 'translate-y-0'
-        }`}
-      >
-        {/* Contextual Selected-Item / Active-Placement Bar in Edit Mode */}
-        {!dockCollapsed && mode === 'edit' && (placingCatalogItem || movingUid) && (
-          <div
-            className={`mb-2 w-full max-w-2xl px-4 py-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-3 ${hudPanelClass}`}
-          >
-            <div className="flex items-center gap-2.5 text-xs">
-              <span className="font-semibold">
-                {movingUid
-                  ? `Moving ${getCatalogItem(items.find((i) => i.uid === movingUid)?.catalogId || '')?.name}`
-                  : `Placing ${placingCatalogItem?.name}`}
-              </span>
-              <span className="opacity-45" aria-hidden="true">
-                ·
-              </span>
-              <span className="opacity-75">
-                {placingCatalogItem?.layer === 'wall'
-                  ? 'Click any wall (N, S, E or W)'
-                  : 'Click floor tile to place'}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {placingCatalogItem && placingCatalogItem.colors.length > 0 && (
-                <div className="flex items-center gap-1 pr-2 border-r border-current/15">
-                  {placingCatalogItem.colors.map((c) => (
-                    <button
-                      key={c.hex}
-                      type="button"
-                      title={c.label}
-                      onClick={() => {
-                        sfx.playClick();
-                        setPlacingColor(c.hex);
-                      }}
-                      className={`w-5 h-5 rounded-full border transition-transform ${
-                        placingColor === c.hex
-                          ? 'border-[#39ff14] scale-115 ring-2 ring-[#39ff14]/40'
-                          : 'border-white/20 hover:scale-105'
-                      }`}
-                      style={{ backgroundColor: c.hex }}
-                    />
-                  ))}
-                </div>
-              )}
-
-              {(placingCatalogItem?.layer !== 'wall' || movingUid) && (
-                <button
-                  type="button"
-                  onClick={rotateSelectedOrPlacing}
-                  className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-[#39ff14] text-[#051205] hover:bg-[#5bff3b] flex items-center gap-1 whitespace-nowrap"
-                >
-                  <RotateCw className="w-3.5 h-3.5" />
-                  Rotate (R)
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={() => {
-                  sfx.playClick();
-                  setPlacingCatalogId(null);
-                  setMovingUid(null);
-                }}
-                className="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 whitespace-nowrap bg-white/10 hover:bg-white/20 text-slate-200"
-              >
-                <X className="w-3.5 h-3.5" />
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        {!dockCollapsed &&
-          mode === 'edit' &&
-          !placingCatalogItem &&
-          !movingUid &&
-          selectedItem &&
-          selectedCatalog && (
-            <div
-              className={`mb-2 w-full max-w-3xl px-4 py-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-3 ${hudPanelClass}`}
-            >
-              <div className="flex items-center gap-2 text-xs">
-                <span className="font-semibold text-white">{selectedCatalog.name}</span>
-                <span className="opacity-40" aria-hidden="true">
-                  ·
-                </span>
-                <span className="font-mono-tabular text-[#39ff14]">
-                  {selectedCatalog.size[0]}×{selectedCatalog.size[1]}m
-                </span>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                {/* Live Recolor Swatches */}
-                <div className="flex items-center gap-1 pr-2 border-r border-white/15">
-                  {selectedCatalog.colors.map((c) => (
-                    <button
-                      key={c.hex}
-                      type="button"
-                      title={c.label}
-                      onClick={() => handleRecolorSelected(c.hex)}
-                      className={`w-5 h-5 rounded-full border transition-transform ${
-                        selectedItem.color === c.hex
-                          ? 'border-[#39ff14] scale-115 ring-2 ring-[#39ff14]/40'
-                          : 'border-white/20 hover:scale-105'
-                      }`}
-                      style={{ backgroundColor: c.hex }}
-                    />
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleStartMoveSelected}
-                  className="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 whitespace-nowrap bg-white/10 hover:bg-white/20 text-slate-100"
-                >
-                  <Move className="w-3.5 h-3.5" />
-                  Move
-                </button>
-
-                {selectedCatalog.layer !== 'wall' && (
-                  <button
-                    type="button"
-                    onClick={rotateSelectedOrPlacing}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 whitespace-nowrap bg-white/10 hover:bg-white/20 text-slate-100"
-                  >
-                    <RotateCw className="w-3.5 h-3.5" />
-                    Rotate
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={handleDuplicateSelected}
-                  className="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 whitespace-nowrap bg-white/10 hover:bg-white/20 text-slate-100"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  Duplicate
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleDeleteSelected}
-                  className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-red-600 text-white hover:bg-red-700 flex items-center gap-1 whitespace-nowrap"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Delete
-                </button>
-              </div>
-            </div>
-          )}
-
-        {/* Collapse / Expand Handle */}
-        <button
-          type="button"
-          onClick={() => setDockCollapsed((c) => !c)}
-          className={`mb-1 px-3 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1 transition-colors ${hudPanelClass}`}
-        >
-          {dockCollapsed ? (
-            <>
-              <ChevronUp className="w-3.5 h-3.5" />
-              Show Controls
-            </>
-          ) : (
-            <>
-              <ChevronDown className="w-3.5 h-3.5" />
-              Hide Controls
-            </>
-          )}
-        </button>
-
-        {/* Main Dock Panel */}
-        <div className={`w-full rounded-2xl border overflow-hidden ${hudPanelClass}`}>
-          {mode === 'walk' ? (
-            <div className="px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => triggerEmote('wave')}
-                  className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
-                    activeEmote === 'wave'
-                      ? 'bg-[#39ff14] text-[#051205]'
-                      : 'bg-white/8 hover:bg-white/15 text-slate-100'
-                  }`}
-                >
-                  <Hand className="w-3.5 h-3.5" />
-                  Wave
-                </button>
-                <button
-                  type="button"
-                  onClick={() => triggerEmote('dance')}
-                  className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
-                    activeEmote === 'dance'
-                      ? 'bg-[#39ff14] text-[#051205]'
-                      : 'bg-white/8 hover:bg-white/15 text-slate-100'
-                  }`}
-                >
-                  <Music className="w-3.5 h-3.5" />
-                  Dance
-                </button>
-                <button
-                  type="button"
-                  onClick={() => triggerEmote('cheer')}
-                  className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
-                    activeEmote === 'cheer'
-                      ? 'bg-[#39ff14] text-[#051205]'
-                      : 'bg-white/8 hover:bg-white/15 text-slate-100'
-                  }`}
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Cheer
-                </button>
-                <button
-                  type="button"
-                  onClick={() => triggerEmote('jump')}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap bg-white/8 hover:bg-white/15 text-slate-100"
-                >
-                  <ArrowUp className="w-3.5 h-3.5" />
-                  Jump
-                </button>
-                {activeEmote !== 'idle' && activeEmote !== 'walk' && (
-                  <button
-                    type="button"
-                    onClick={() => setActiveEmote('idle')}
-                    className="px-3 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap text-slate-300 hover:bg-white/10"
-                  >
-                    Stand Still
-                  </button>
-                )}
-              </div>
-
-              <div className="text-xs opacity-70 flex items-center gap-2 whitespace-nowrap">
-                {!gameplayAllowed ? (
-                  <span>
-                    Loft manager · this runtime is not supported for walking; manage your suite here
-                  </span>
-                ) : touchDevice ? (
-                  <span>
-                    {location === 'world'
-                      ? 'Tap street to walk · Tap a LoftLine stop to board · Tap Hotel doors for Keycard'
-                      : location === 'lobby'
-                      ? 'Tap floor to walk · Tap the brass elevator'
-                      : location === 'hallway'
-                      ? 'Tap a numbered door for Keycard / Ring · Tap the elevator'
-                      : location === 'resident_room'
-                      ? `Visiting Suite ${activeResident?.roomNumber} · Tap ${activeResident?.name} to chat`
-                      : 'Tap floor to walk · Tap furniture to use it · Tap the West door for Keycard'}
-                  </span>
-                ) : viewMode === 'play' ? (
-                  <>
-                    <span>WASD move (camera auto-follows) · Shift sprint · Space jump</span>
-                    <span aria-hidden="true">·</span>
-                    <span>Mouse look (click to lock)</span>
-                    <span aria-hidden="true">·</span>
-                    <span>E interact · V Isometric</span>
-                  </>
-                ) : location === 'world' ? (
-                  <>
-                    <span>Click street to walk · WASD pans · Shift sprint</span>
-                    <span aria-hidden="true">·</span>
-                    <span>M Map &amp; World</span>
-                    <span aria-hidden="true">·</span>
-                    <span>At Hotel Door: press E for Keycard or Ring Active User</span>
-                  </>
-                ) : location === 'lobby' ? (
-                  <>
-                    <span>Click floor to walk · WASD pans</span>
-                    <span aria-hidden="true">·</span>
-                    <span>North Elevator → Floors 2–4</span>
-                    <span aria-hidden="true">·</span>
-                    <span>South Doors → Main City</span>
-                  </>
-                ) : location === 'hallway' ? (
-                  <>
-                    <span>Walk corridor to numbered doors</span>
-                    <span aria-hidden="true">·</span>
-                    <span>Press E at door for Keycard / Ring</span>
-                    <span aria-hidden="true">·</span>
-                    <span>West Elevator → Change Floor</span>
-                  </>
-                ) : location === 'resident_room' ? (
-                  <>
-                    <span>Visiting Suite {activeResident?.roomNumber}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>Press E near {activeResident?.name} to chat</span>
-                    <span aria-hidden="true">·</span>
-                    <span>West Door → Floor Hallway</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Click floor to walk · WASD pans · F follow · Z zoom · M menu</span>
-                    <span aria-hidden="true">·</span>
-                    <span>West Door: press E to enter Keycard → Lobby &amp; Elevator</span>
-                  </>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col">
-              {/* Top Edit Tab Row */}
-              <div className="px-4 py-2 border-b border-[#39ff14]/15 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      sfx.playClick();
-                      setEditTab('catalog');
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
-                      editTab === 'catalog'
-                        ? 'bg-[#39ff14] text-[#051205]'
-                        : 'text-slate-300 hover:bg-white/10'
-                    }`}
-                  >
-                    <Sofa className="w-3.5 h-3.5" />
-                    Furniture
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      sfx.playClick();
-                      setEditTab('surfaces');
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
-                      editTab === 'surfaces'
-                        ? 'bg-[#39ff14] text-[#051205]'
-                        : 'text-slate-300 hover:bg-white/10'
-                    }`}
-                  >
-                    <Paintbrush className="w-3.5 h-3.5" />
-                    Walls & Floors
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      sfx.playClick();
-                      setEditTab('presets');
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
-                      editTab === 'presets'
-                        ? 'bg-[#39ff14] text-[#051205]'
-                        : 'text-slate-300 hover:bg-white/10'
-                    }`}
-                  >
-                    <Layers className="w-3.5 h-3.5" />
-                    Room Layouts
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <span className="hidden md:inline text-[11px] text-slate-400 mr-2">
-                    Drag items to move · Arrows nudge 0.5m · R rotate
-                  </span>
-                  <button
-                    type="button"
-                    disabled={history.length === 0}
-                    onClick={handleUndo}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors whitespace-nowrap disabled:opacity-35 text-slate-200 hover:bg-white/10"
-                  >
-                    <Undo2 className="w-3.5 h-3.5" />
-                    Undo
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      sfx.playRemove();
-                      pushHistory(items);
-                      setItems([]);
-                      setSelectedUid(null);
-                      setPlacingCatalogId(null);
-                      setMovingUid(null);
-                    }}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors whitespace-nowrap text-red-300 hover:bg-red-500/20"
-                  >
-                    <Eraser className="w-3.5 h-3.5" />
-                    Clear Floor
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleModeSwitch('walk')}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors whitespace-nowrap bg-[#39ff14] text-[#051205] hover:bg-[#5bff3b] neon-btn-glow"
-                  >
-                    <Footprints className="w-3.5 h-3.5" />
-                    Done
-                  </button>
-                </div>
-              </div>
-
-              {/* Edit Tab Content */}
-              {editTab === 'catalog' && (
-                <div className="px-4 py-2.5 space-y-2.5">
-                  {/* Category Filter Strip */}
-                  <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-                    {CATEGORY_TABS.map((cat) => (
-                      <button
-                        key={cat.id}
-                        type="button"
-                        onClick={() => {
-                          sfx.playClick();
-                          setCategoryFilter(cat.id);
-                        }}
-                        className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
-                          categoryFilter === cat.id
-                            ? 'bg-[#39ff14] text-[#051205]'
-                            : 'text-slate-300 hover:bg-white/10'
-                        }`}
-                      >
-                        {cat.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Horizontal Scrollable Furniture Cards */}
-                  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-                    {filteredCatalog.map((item) => {
-                      const isActive = placingCatalogId === item.id;
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => {
-                            sfx.playClick();
-                            if (isActive) {
-                              setPlacingCatalogId(null);
-                            } else {
-                              setMovingUid(null);
-                              setSelectedUid(null);
-                              setPlacingCatalogId(item.id);
-                              setPlacingColor(item.defaultColor);
-                              setPlacingRotation(0);
-                            }
-                          }}
-                          className={`min-w-[126px] px-3 py-2 rounded-xl border text-left transition-all shrink-0 flex flex-col gap-1.5 ${
-                            isActive
-                              ? 'bg-[#39ff14] text-[#051205] border-[#39ff14] neon-btn-glow'
-                              : 'bg-[#101713] border-white/12 hover:border-[#39ff14]/50 text-slate-100'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between w-full">
-                            <span
-                              className={`w-7 h-7 rounded-lg flex items-center justify-center ${
-                                isActive
-                                  ? 'bg-black/15 text-[#051205]'
-                                  : 'bg-white/8 text-[#39ff14]'
-                              }`}
-                            >
-                              {getCategoryIcon(item.id)}
-                            </span>
-                            <span
-                              className="w-3.5 h-3.5 rounded-full border border-black/25"
-                              style={{ backgroundColor: item.defaultColor }}
-                            />
-                          </div>
-                          <div>
-                            <div className="text-xs font-semibold truncate">{item.name}</div>
-                            <div
-                              className={`text-[11px] font-mono-tabular ${
-                                isActive ? 'text-[#0a230a]' : 'text-slate-400'
-                              }`}
-                            >
-                              {item.size[0]}×{item.size[1]}m
-                              {item.sittable ? ' · Sit' : item.interactive ? ' · Use' : ''}
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {editTab === 'surfaces' && (
-                <div className="px-4 py-3 grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <span className="block text-xs font-medium text-slate-300">Floor Finish</span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {FLOOR_STYLES.map((fl) => {
-                        const active = surfaces.floor === fl.id;
-                        return (
-                          <button
-                            key={fl.id}
-                            type="button"
-                            onClick={() => {
-                              sfx.playClick();
-                              setSurfaces((s) => ({ ...s, floor: fl.id as FloorStyleId }));
-                            }}
-                            className={`px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-2 transition-colors whitespace-nowrap ${
-                              active
-                                ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]'
-                                : 'bg-[#101713] border-white/12 text-slate-200 hover:border-[#39ff14]/45'
-                            }`}
-                          >
-                            <span
-                              className="w-3.5 h-3.5 rounded-full border border-black/25"
-                              style={{ backgroundColor: fl.color }}
-                            />
-                            {fl.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <span className="block text-xs font-medium text-slate-300">Wall Paint</span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {WALL_STYLES.map((wl) => {
-                        const active = surfaces.wall === wl.id;
-                        return (
-                          <button
-                            key={wl.id}
-                            type="button"
-                            onClick={() => {
-                              sfx.playClick();
-                              setSurfaces((s) => ({ ...s, wall: wl.id as WallStyleId }));
-                            }}
-                            className={`px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-2 transition-colors whitespace-nowrap ${
-                              active
-                                ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]'
-                                : 'bg-[#101713] border-white/12 text-slate-200 hover:border-[#39ff14]/45'
-                            }`}
-                          >
-                            <span
-                              className="w-3.5 h-3.5 rounded-full border border-black/25"
-                              style={{ backgroundColor: wl.color }}
-                            />
-                            {wl.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {editTab === 'presets' && (
-                <div className="px-4 py-3 flex flex-wrap items-center gap-2">
-                  {ROOM_PRESETS.map((preset) => (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      onClick={() => {
-                        sfx.playPlace();
-                        pushHistory(items);
-                        setItems(preset.items.map((it) => ({ ...it })));
-                        setSurfaces({ ...preset.surfaces });
-                        setMood(preset.mood);
-                        setRoomName(preset.name);
-                        setSelectedUid(null);
-                        setPlacingCatalogId(null);
-                        setMovingUid(null);
-                      }}
-                      className={`px-4 py-2 rounded-xl border text-xs font-semibold flex items-center gap-2 transition-colors whitespace-nowrap ${
-                        roomName === preset.name
-                          ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]'
-                          : 'bg-[#101713] border-white/12 text-slate-200 hover:border-[#39ff14]/45'
-                      }`}
-                    >
-                      <span>{preset.name}</span>
-                      <span
-                        className={`font-mono-tabular ${
-                          roomName === preset.name ? 'text-[#0a230a]' : 'text-slate-400'
-                        }`}
-                      >
-                        {preset.items.length} items
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Mobile virtual stick, drag-look and contextual buttons */}
-      <TouchControls
-        active={device.controls === 'touch' && !anyModalOpen && session.status !== 'loading'}
-        voice={session.voice}
+      {/* Unified gameplay interface: minimal top HUD, thumb controls,
+          contextual actions and build tools. */}
+      <GameInterface
+        device={device}
+        portrait={isPortrait}
+        menuOpen={menuOpen}
         chatOpen={session.chatOpen}
+        editing={mode === 'edit'}
+        riding={Boolean(session.riding)}
+        nearbyLabel={proximityPrompt}
+        locationTitle={locationTitle}
+        locationSub={locationSub}
+        presence={session.presenceOnline}
+        connection={session.connection}
+        online={session.status === 'online'}
+        syncState={session.syncState}
+        syncError={session.syncError}
+        conflict={Boolean(conflict)}
+        partyInvite={session.partyInvites.length > 0}
+        voice={session.voice}
+        layout={controls.touch}
+        camera={{
+          viewMode,
+          closeZoom,
+          followCharacter,
+          canChangeView: device.desktop,
+          onSetView: handleSetView,
+          onToggleZoom: toggleCloseZoom,
+          onToggleFollow: toggleFollowCharacter,
+        }}
+        emote={{ active: activeEmote, onEmote: triggerEmote }}
+        build={mode === 'edit' ? buildController : null}
+        hint={walkHint}
+        npcChat={npcChat}
+        onDismissNpc={() => setNpcChat(null)}
+        onOpenMenu={openGameMenu}
+        onOpenChat={handleToggleChat}
+        onOpenPeople={() => openSocial('people')}
+        onRetrySync={retryOnlineSave}
         onCycleRange={cycleRange}
+        onRangeChange={session.setVoiceRange}
         onMicPress={() => {
           void session.pressMicrophone();
         }}
         onMicRelease={session.releaseMicrophone}
-        onToggleChat={() => {
-          sfx.playClick();
-          session.toggleChat();
-        }}
         onOpenVoiceSettings={() => {
           sfx.playClick();
           setRoomSettingsOpen(true);
         }}
-        onEmote={() => triggerEmote(activeEmote === 'dance' ? 'wave' : 'dance')}
+        onInteract={() => {
+          touchInput.interact = true;
+        }}
+        onJump={() => {
+          touchInput.jump = true;
+        }}
+        fullscreen={fullscreen}
+        onToggleFullscreen={toggleFullscreen}
+      />
+
+      {/* One consistent game menu: map, world, inventory, character, social,
+          emotes, settings, controls and leaving the session. */}
+      <GameMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        location={location}
+        world={activeWorld}
+        suite={session.suite}
+        roomName={roomName}
+        items={items}
+        avatar={avatarConfig}
+        playerPoseRef={playerPoseRef}
+        instance={
+          session.instance
+            ? {
+                id: session.instance.id,
+                kind: session.instance.kind,
+                worldId: (session.instance as { worldId?: string | null }).worldId ?? null,
+                count: session.instance.count,
+                capacity: session.instance.capacity,
+              }
+            : null
+        }
+        players={remoteInThisScene.map((player) => ({
+          handle: player.handle,
+          displayName: '',
+        }))}
+        mode={mode}
+        canEditRoom={canEditRoom}
         viewMode={viewMode}
         closeZoom={closeZoom}
         followCharacter={followCharacter}
+        mood={mood}
+        touch={controls.touch}
+        syncing={controls.syncing}
+        syncError={controls.syncError}
+        conflict={Boolean(conflict)}
+        deviceLabel={device.label}
+        installed={device.installed}
+        online={session.status === 'online'}
+        guest={session.status === 'guest'}
+        activeEmote={activeEmote}
+        fullscreen={fullscreen}
+        debug={hudDebug}
+        onSetTouch={controls.setTouch}
+        onResetTouch={controls.resetTouch}
+        onSetMood={setMood}
+        onSetView={handleSetView}
         onToggleZoom={toggleCloseZoom}
         onToggleFollow={toggleFollowCharacter}
-        onOpenMenu={() => {
-          sfx.playClick();
-          setMenuOpen(true);
-        }}
-        actionLabel={proximityPrompt}
-        lookEnabled={viewMode === 'play' && touchDevice}
-        layout={controls.touch}
+        onLeaveWorld={handleLeaveWorldConfirmed}
+        onEditRoom={() => handleModeSwitch('edit')}
+        onOpenCityMap={() => setCityMapOpen(true)}
+        onOpenRoomSettings={() => setRoomSettingsOpen(true)}
+        onOpenAvatar={() => setAvatarModalOpen(true)}
+        onOpenShop={() => setShopOpen(true)}
+        onOpenWorlds={() => setWorldsOpen(true)}
+        onOpenAuth={() => setAuthOpen(true)}
+        onOpenControls={openWorldControls}
+        onOpenWorldManage={openWorldManage}
+        onOpenSocial={openSocial}
+        onEmote={triggerEmote}
+        onExitPlatform={
+          onExitPlatform
+            ? () => {
+                if (activeWorld) {
+                  void handleLeaveWorldConfirmed().then(() => onExitPlatform());
+                } else {
+                  onExitPlatform();
+                }
+              }
+            : undefined
+        }
+        onRequestFullscreen={toggleFullscreen}
+        onRetrySync={retryOnlineSave}
       />
 
-      {/* Community: chat, presence, friends, shop and worlds */}
-      <SocialHud onEnterWorld={handleEnterWorld} gameplayAllowed={gameplayAllowed} />
+      {/* Social sheet: chat, people, friends, party, shop and worlds. */}
+      <SocialPanel
+        open={session.chatOpen && !menuOpen}
+        onClose={() => session.setChatOpen(false)}
+        onEnterWorld={handleEnterWorld}
+        gameplayAllowed={gameplayAllowed}
+        intent={socialIntent}
+      />
+
+      <ShopModal
+        open={shopOpen}
+        onClose={() => setShopOpen(false)}
+        readOnly={session.status === 'guest'}
+      />
+      <WorldsModal
+        open={worldsOpen && session.status !== 'guest'}
+        onClose={() => setWorldsOpen(false)}
+        onEnter={(worldId) => {
+          setWorldsOpen(false);
+          void handleEnterWorld(worldId);
+        }}
+        gameplayAllowed={gameplayAllowed}
+      />
 
       {/* Unsupported runtimes see the dashboard + loft manager only. */}
       {!gameplayAllowed && <PlatformNotice platformLabel={device.label} />}
@@ -2486,7 +1825,6 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         touchDevice={touchDevice}
         gameplayAllowed={gameplayAllowed}
         platformLabel={device.label}
-        isPortrait={isPortrait}
         voice={session.voice}
         onEnableVoice={session.enableVoice}
         onDisableVoice={session.disableVoice}
@@ -2531,8 +1869,9 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
 
       {/* Central M menu: map, world info, management, leave and controls. */}
       <WorldMenu
-        open={menuOpen}
-        onClose={() => setMenuOpen(false)}
+        open={worldMenuOpen}
+        onClose={() => setWorldMenuOpen(false)}
+        initialTab={worldMenuTab}
         location={location}
         guestMode={session.status === 'guest'}
         world={activeWorld}

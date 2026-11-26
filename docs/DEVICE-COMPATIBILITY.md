@@ -6,8 +6,11 @@ player is actually using — never from window width alone.
 
 Implementation: [`shared/device-platform.mjs`](../shared/device-platform.mjs)
 (pure classification), [`src/game/platform.ts`](../src/game/platform.ts) (live
-input/React binding), [`src/components/TouchControls.tsx`](../src/components/TouchControls.tsx)
-(touch HUD), [`src/App.tsx`](../src/App.tsx) (HUD selection and native back) and
+input/React binding), [`src/hud/GameInterface.tsx`](../src/hud/GameInterface.tsx)
+(presentation/state and layout choice), [`src/hud/layouts/TouchHud.tsx`](../src/hud/layouts/TouchHud.tsx)
+and [`src/hud/layouts/DesktopHud.tsx`](../src/hud/layouts/DesktopHud.tsx),
+[`shared/hud-presentation.mjs`](../shared/hud-presentation.mjs) (pure HUD rules),
+[`src/App.tsx`](../src/App.tsx) (session wiring and native back) and
 [`src/components/RoomViewport.tsx`](../src/components/RoomViewport.tsx) (shared
 movement/camera and the mobile renderer budget).
 
@@ -59,41 +62,48 @@ only change `inputMode`, never camera yaw/pitch, movement state or location.
 
 ## 3. HUD rules
 
+The HUD is one system, not a stack of permanent toolbars. It renders only the
+controls for the current state and keeps the world dominant.
+
 | Situation | HUD |
 | --- | --- |
-| Desktop, any window width | Keyboard/mouse HUD: top utility bar, bottom dock, keyboard shortcuts, pointer-lock look, no touch controls mounted |
-| Touch in use (phone, tablet, APK) | Touch HUD: movement stick on the preferred side, camera controls, contextual Action, sprint/jump/emote, grouped voice bubble, chat and map/menu |
+| Desktop, any window width | Keyboard/mouse HUD: compact floating world/status pill, voice + chat + menu, labeled action cluster, no touch controls mounted |
+| Installed desktop app | Same controls inside a full-width app bar, with a fullscreen/window control |
+| Touch (phone, tablet, APK, mobile browser) | One joystick opposite the 44 px action cluster, camera drag on the world, compact top pill, safe-area insets |
+| Portrait | Isometric view, joystick pans the camera, action cluster stacked lower-right |
+| Landscape | Play View, joystick walks, 2×2 action grid lower-right, controls clear of gesture edges |
+| Tablet | Labeled actions, social shortcut rail above the joystick, wider spacing — not a stretched phone layout |
 | Hybrid device | One HUD at a time. Touch HUD only while touch is the last input; moving the mouse or pressing a key returns the desktop HUD. |
-| Play View on touch | A compact **Look** strip on the left edge rotates the camera; the rest of the canvas stays free for taps and drag gestures |
-| Touch header | One horizontally scrollable row, so lighting, avatar, sound, settings and Exit stay reachable without a second row covering the game |
-| Builder (Edit Room) | Gameplay touch layer is unmounted; catalog and placement use the same taps as before |
+| Near an object/player | The primary contextual action (Interact/Open/Use/Sit/Unlock/View profile) replaces nothing else; utility actions stay in place |
+| Social sheet or chat open | Joystick and action cluster are unmounted; the sheet owns the screen and typing never moves the avatar |
+| Game menu open | All gameplay HUD hidden, world input paused, camera state preserved; closing restores the previous state |
+| Editing | Walking controls replaced by the build panel: catalog, surfaces, layouts, selection, done |
+| Vehicle | While `session.riding` (LoftLine transit), walking actions are replaced by ride controls; not exercised offline |
 
-Desktop HUD contains no joystick, direction pad or mobile look pad. The touch
-layer unmounts completely (`active === false` returns `null`), so no invisible
-element keeps intercepting input. Desktop-only camera and map controls are
-hidden while a hybrid device is using touch.
+Desktop HUD contains no joystick or look strip. The touch layer only mounts on
+touch presentations, so a narrow desktop window stays keyboard/mouse.
 
 Touch HUD details:
 
-- Movement joystick → `touchInput.moveX/moveZ` → the same movement code as WASD
-- Look strip (Play View) and canvas drag → the same `playCam.yaw/pitch` values as
-  mouse look
-- Action button uses the live proximity prompt and is disabled/dimmed when
-  nothing is in reach; it calls the same interaction path as `E`/tap
-- Jump, sprint toggle, emote, push-to-talk (or turn voice on), chat, map/menu,
-  camera zoom and follow
-- Safe-area insets keep controls clear of notches and system bars
-- Portrait stacks the camera/action row above the stick; landscape places it in
-  the free bottom-center band between the stick and the context buttons
-- Right- and left-handed layouts are both measured: the camera row and voice
-  bubble move to the free edge rather than overlapping the stick
-- Large control size is capped to Standard in narrow portrait, where four
-  enlarged context buttons cannot fit beside the stick
+- One joystick writes `touchInput.moveX/moveZ`, the same singleton WASD uses
+- Camera orbit is a drag on the world (the old permanent LOOK strip is gone);
+  Camera/Emote/Sprint/Jump sit in the compact action layer, with follow, zoom
+  and isometric/play mode in the Camera popover and the menu
+- The primary action uses the live proximity prompt, is dimmed/disabled when
+  nothing is in reach, shows its label and key hint, and runs the same
+  interaction path as `E`/tap
+- Voice (range, push-to-talk, status), chat and the central menu are always one
+  tap away without a second toolbar row
+- Safe-area insets keep controls clear of notches and system bars; control size
+  (small/standard/large) and handedness live in Settings → Controls
 - Portrait renders isometric and landscape renders Play View; neither blocks
   access, so no forced-rotation wall is needed
+- System reduced motion/transparency and the explicit accessibility settings
+  are respected; all icon buttons carry accessible labels and 44 px targets
 
 World entry, travel, chat, voice and editing use the same session/API code on
-every runtime. The backend permission model is unchanged.
+every runtime. The backend permission model is unchanged. Full detail:
+[`docs/HUD-REDESIGN.md`](HUD-REDESIGN.md).
 
 ## 4. Mobile performance budget
 
@@ -114,72 +124,74 @@ input, so touching a desktop screen cannot reduce desktop quality.
 
 ### Environments actually exercised
 
-- **Typecheck / build:** `npx tsc --noEmit` and `npm run build` pass.
-- **Classification table (Node, pure detector):** 13 tests covering Windows/Mac
-  desktop, a narrow desktop with touch, a touch-only desktop, iPhone, Android
-  phone, iPadOS desktop-Safari UA, Android tablet, APK bridge, Android PWA,
-  Windows EXE, installed desktop app/PWA, Chrome App, TV, unknown runtime and
-  `canStartGameplay`. All returned the expected platform, device class, controls
-  and access.
-- **Desktop Chrome (cloud browser, 1280×800):** `desktop-web`, keyboard/mouse
-  HUD, map button present, zero sticks/look areas/action buttons in the DOM.
-- **Android mobile browser (Pixel UA, mobile + touch, 390×844):**
-  `android-web`, gameplay allowed, touch HUD with movement stick, Action button
-  and map/menu. No desktop Play View switcher.
-- **Android portrait and landscape (390×844, 844×390):** `android-web`,
-  gameplay allowed. Portrait showed the stick, Action and map/menu; landscape
-  added the Play View Look strip. Camera/action, voice bubble, stick, context
-  buttons and Look strip were measured with zero overlap and fully inside the
-  viewport for right- and left-handed layouts at Standard and Large size.
-- **Visual review:** portrait and landscape screenshots were inspected after
-  the layout pass. The touch header stays on one scrollable row; in landscape
-  the camera/action row sits between the stick and context buttons, clear of the
-  header, voice bubble and Look strip.
-- **Hybrid touch laptop (desktop UA, fine pointer, touch points):** started on
-  the desktop HUD; a touch pointer switched to the touch HUD in place (stick
-  mounted); a mouse move switched back (stick unmounted). No reload.
-- **Android APK bridge (mobile context with `window.LoftLifeAndroid`):**
-  `android-app`/`LoftLife Android app`, gameplay allowed, touch HUD. Native back
-  closed the open Map & World menu; with nothing open it called `minimizeApp`.
-- **TV browser UA:** `unsupported`, gameplay refused, no stick, "Gameplay
-  unavailable" notice shown.
-- **Phone portrait and landscape screenshots:** reviewed the touch HUD
-  visually; stick, Action, camera row, voice bubble, action row and map stayed
-  inside the viewport.
+All browser runs used the dev server and Chromium with CDP device emulation
+(viewport, mobile flag, touch points and user agent) in this workspace.
+
+- **Typecheck / build / unit tests:** `npx tsc --noEmit` passes, `npm test`
+  passes 109/109 (including 8 HUD presentation tests), `npm run build`
+  succeeds with only the pre-existing chunk-size warning, and
+  `npx wrangler deploy --dry-run` bundles the Worker and assets.
+- **Desktop Chrome (1440×900):** `desktop-web`, keyboard/mouse HUD, no
+  joystick mounted, menu and social sheet open and close with the HUD hidden
+  while open. Re-checked after merging the guest-city, airport and hotel
+  rollout with a registered account: suite HUD, all ten menu sections, editing
+  and the contextual hotel `Unlock` action render.
+- **Desktop app (Windows bridge marker, 1440×900):** `windows-exe`,
+  `installed: true`, full-width app bar, fullscreen control, keyboard/mouse HUD.
+- **iOS mobile portrait (390×844):** `ios-web`, `mobile`, gameplay allowed,
+  `touch` input. Joystick 132 px at x=18, action stack 48 px at x=324; no
+  overlap, all inside the viewport (top pill 54 px high).
+- **iOS mobile landscape (844×390):** `ios-web`, Play View, joystick 121 px,
+  actions a 2×2 grid ending 18 px from the edge. A joystick drag moved the
+  avatar **2.91 m**; a separate 140 px canvas drag orbited the camera without
+  opening the menu, social sheet or an action.
+- **iPad portrait (820×1180):** labeled action cluster, social rail above the
+  joystick, no overlap; top pill shows brand, suite, floor/items, `Solo` and
+  voice.
+- **iPad landscape (1180×820):** same zones with wider spacing; top pill 60 px.
+- **Orientation change:** 390×844 → 844×390 and 820×1180 → 1180×820 resized
+  live; HUD re-composed without a reload or layout overlap.
+- **Contextual action (desktop):** walking into the studio stool radius showed
+  primary `Sit on Studio Stool` with the `E` hint.
+- **Central menu (desktop and mobile):** all 10 sections reachable; mobile uses
+  wrapped section chips; Settings exposes camera, lighting, touch size,
+  handedness, opacity, audio, graphics, accessibility and display.
+- **Social sheet:** opens from the chat button; joystick and action cluster are
+  absent from the DOM while it is open.
+- **Editing:** menu → World → Furnish this suite mounts the build panel and
+  unmounts the walking controls.
+- **Visual review:** the screenshots in [`artifacts/hud`](../artifacts/hud) were
+  inspected for control overlap, clipping, contrast and safe margins.
 
 ### Not tested here
 
-- Physical Android/iOS/tablet hardware and a real hybrid touch laptop; browser
-  runs used emulated viewports and input events.
-- The Windows EXE/iOS shells (no wrapper in this repository) and their
-  back/close behaviour.
-- Walking to an interactable and pressing Action; camera drag distance; world
-  entry, travel and permissions against the live backend. The dev preview has no
-  game server, so those flows were not re-exercised here and remain server-enforced.
-- Every screen size and orientation. A legacy 568×320 short landscape still
-  needs a dedicated compact HUD: at that height the stick meets the Look strip
-  and the centered camera row meets the context buttons. Modern 390×844 and
-  844×390 layouts were measured clean.
-- Pixel-by-pixel spacing on physical hardware; the browser runs used emulated
-  viewports and input events.
-
-These need a manual pass on target hardware or a device farm. Native wrappers
-and store builds are outside this repository; only their detection and
-native-back hooks live here.
+- Physical Android/iOS/tablet hardware, notch/cutout insets and a real hybrid
+  touch laptop. Emulation reports zero safe-area insets; the CSS uses
+  `env(safe-area-inset-*)` regardless.
+- Vehicle controls with a live city/transit nearby, and a live multiplayer
+  session with other players/collaborators.
+- Real fullscreen window behavior and the Windows EXE/iOS shells.
+- The dev preview has no game backend, so world entry/travel, permissions,
+  voice and save sync were not re-exercised; they are unchanged server-side.
+- Every screen size. Legacy 568×320 short landscape remains a known tight case.
+- Automated visual regression or pixel-by-pixel spacing on hardware.
 
 ## 6. Manual verification checklist
 
-1. Desktop browser: play in a 500 px-wide window — the desktop HUD must remain,
-   and no stick/look area may appear.
+1. Desktop browser: play in a 500 px-wide window — desktop HUD only, no
+   joystick, and the game menu stays usable.
 2. Touch laptop: use the mouse (desktop HUD), tap the canvas (touch HUD), then
    move the mouse (desktop HUD). Camera must not jump or reset.
-3. Android/iOS browser: sign in, walk to the hotel door, use Action to open the
-   keycard terminal, enter the lobby and ride the elevator.
+3. Android/iOS browser: enter a world, walk with the joystick, drag the world
+   to orbit, walk to the hotel door and use the primary action to open the
+   keycard terminal.
 4. Same on the APK; hardware back should close the menu/modal or, with nothing
    open, minimize the app rather than losing the session.
-5. Tablet in portrait and landscape: controls stay inside safe areas; the Look
-   strip does not cover actions, and the canvas still receives taps.
-6. Enter a private world you own and a friends-only world you are entitled to;
+5. Tablet portrait and landscape: controls stay inside safe areas; opening the
+   menu or chat hides movement/actions and closing restores them.
+6. Open Settings → Controls: change size and handedness and confirm the stick
+   and action cluster swap sides without overlapping.
+7. Enter a private world you own and a friends-only world you are entitled to;
    confirm a world you lack access to is still refused by the API.
-7. Landscape phone: check the HUD clear of the notch/safe area in the installed
+8. Landscape phone: check the HUD clear of the notch/safe area in the installed
    APK and in Safari standalone mode.

@@ -36,7 +36,6 @@ interface RoomSettingsModalProps {
   /** False on mobile browsers and unsupported runtimes: editor only. */
   gameplayAllowed: boolean;
   platformLabel: string;
-  isPortrait: boolean;
   /** One shared snapshot drives desktop, mobile and this panel. */
   voice: VoiceSnapshot;
   onEnableVoice: () => Promise<VoiceStatus>;
@@ -61,7 +60,7 @@ const RowLabel: React.FC<{ icon: React.ReactNode; label: string; detail: string 
   detail,
 }) => (
   <div className="flex items-start gap-2.5 min-w-0">
-    <span className="w-7 h-7 rounded-lg bg-white/8 text-[#39ff14] flex items-center justify-center shrink-0">
+    <span className="w-7 h-7 rounded-lg bg-white/8 text-white flex items-center justify-center shrink-0">
       {icon}
     </span>
     <div className="min-w-0">
@@ -90,7 +89,7 @@ const STATUS_TONE: Record<VoiceSnapshot['indicator'], string> = {
   requesting: 'text-amber-300',
   'range-off': 'text-slate-400',
   idle: 'text-sky-300',
-  transmitting: 'text-[#39ff14]',
+  transmitting: 'text-white',
   muted: 'text-amber-300',
   suspended: 'text-amber-300',
 };
@@ -104,7 +103,6 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
   touchDevice,
   gameplayAllowed,
   platformLabel,
-  isPortrait,
   voice,
   onEnableVoice,
   onDisableVoice,
@@ -141,11 +139,6 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
   const micInfo = MIC_MODE_INFO[voice.micMode];
   const statusText = STATUS_TEXT[voice.indicator];
 
-  const segment = (active: boolean) =>
-    `px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${
-      active ? 'bg-[#39ff14] text-[#051205]' : 'text-slate-300 hover:bg-white/10'
-    }`;
-
   const enable = async () => {
     sfx.playClick();
     setRequesting(true);
@@ -177,8 +170,8 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
         className="absolute inset-0 bg-black/60 backdrop-blur-sm cursor-default"
       />
 
-      <div className="relative pointer-events-auto w-full max-w-[440px] max-h-[88vh] flex flex-col bg-[#0b100d] text-slate-100 rounded-2xl border border-[#39ff14]/40 neon-panel-glow overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#39ff14]/15 bg-[#0f1612]">
+      <div className="relative pointer-events-auto w-full max-w-[440px] max-h-[88vh] flex flex-col bg-[#15181c] text-slate-100 rounded-2xl border border-white/25 overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 bg-[#1a1e23]">
           <div>
             <h2 className="font-display text-lg font-semibold tracking-tight text-white">Settings</h2>
             <p className="text-xs text-slate-400">
@@ -230,7 +223,7 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
                   sfx.playClick();
                   onEnterEdit();
                 }}
-                className="w-full px-4 py-3 rounded-xl bg-[#39ff14] text-[#051205] text-xs font-bold flex items-center justify-center gap-2 hover:bg-[#5bff3b] transition-colors neon-btn-glow"
+                className="w-full px-4 py-3 rounded-xl bg-white text-[#15181b] text-xs font-bold flex items-center justify-center gap-2 hover:bg-white/90 transition-colors"
               >
                 <PencilRuler className="w-4 h-4" />
                 Edit this suite
@@ -239,18 +232,18 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
           </div>
         ) : (
           <div className="mx-5 mt-4 px-3 py-2.5 rounded-lg border border-white/10 bg-white/5 text-[11px] leading-snug text-slate-400 flex items-center gap-2">
-            <Eye className="w-3.5 h-3.5 text-[#39ff14] shrink-0" />
+            <Eye className="w-3.5 h-3.5 text-white shrink-0" />
             Visiting · only the owner can furnish this suite
           </div>
         )}
 
         <div className="px-5 py-4 space-y-5 overflow-y-auto">
           <section className="space-y-2">
-            <h3 className="text-[11px] font-bold uppercase tracking-widest text-[#39ff14]/70">
+            <h3 className="text-[11px] font-bold uppercase tracking-widest text-white/45">
               Audio &amp; Voice
             </h3>
 
-            <div className="rounded-xl border border-white/10 bg-[#101713] divide-y divide-white/8">
+            <div className="rounded-xl border border-white/10 bg-white/[0.05] divide-y divide-white/8">
               {/* Microphone transmission mode */}
               <div className="px-3.5 py-3 space-y-2">
                 <div className="flex items-center justify-between gap-2">
@@ -277,8 +270,8 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
                         }}
                         className={`px-2.5 py-2 rounded-lg border text-[11px] font-semibold text-left transition-colors ${
                           active
-                            ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]'
-                            : 'bg-black/25 border-white/10 text-slate-200 hover:border-[#39ff14]/45'
+                            ? 'bg-white text-[#15181b] border-white'
+                            : 'bg-black/25 border-white/10 text-slate-200 hover:border-white/30'
                         }`}
                       >
                         {MIC_MODE_INFO[entry].label}
@@ -308,7 +301,7 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
                     onChange={(event) => onVoiceSensitivityChange(Number(event.target.value) / 100)}
                     aria-label="Voice activation sensitivity"
                     disabled={voice.micMode !== 'voice-activation'}
-                    className="flex-1 accent-[#39ff14] disabled:opacity-40"
+                    className="flex-1 accent-white disabled:opacity-40"
                   />
                   <span className="w-9 text-right text-[11px] font-mono-tabular text-slate-300">
                     {Math.round(voice.sensitivity * 100)}%
@@ -352,7 +345,7 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
                         }}
                         className={`py-2 text-[11px] font-semibold transition-colors ${
                           active
-                            ? 'bg-[#39ff14] text-[#051205]'
+                            ? 'bg-white text-[#15181b]'
                             : 'text-slate-300 hover:bg-white/10'
                         }`}
                       >
@@ -398,7 +391,7 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
                       type="button"
                       onClick={enable}
                       disabled={requesting || voice.status === 'requesting'}
-                      className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-[#39ff14] text-[#051205] hover:bg-[#5bff3b] disabled:opacity-50 flex items-center gap-1.5"
+                      className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-white text-[#15181b] hover:bg-white/90 disabled:opacity-50 flex items-center gap-1.5"
                     >
                       <Mic className="w-3.5 h-3.5" />
                       {requesting || voice.status === 'requesting' ? 'Asking…' : 'Turn voice on'}
@@ -416,7 +409,7 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
                     </span>
                     <div className="h-2 w-full rounded-full bg-black/50 overflow-hidden">
                       <div
-                        className="h-full rounded-full bg-gradient-to-r from-sky-500 via-[#39ff14] to-amber-300 transition-[width] duration-100"
+                        className="h-full rounded-full bg-gradient-to-r from-sky-500 via-white to-amber-300 transition-[width] duration-100"
                         style={{ width: `${Math.min(100, Math.round(level * 160))}%` }}
                         role="meter"
                         aria-label="Microphone input level"
@@ -462,11 +455,11 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
           </section>
 
           <section className="space-y-2">
-            <h3 className="text-[11px] font-bold uppercase tracking-widest text-[#39ff14]/70">
+            <h3 className="text-[11px] font-bold uppercase tracking-widest text-white/45">
               Controls
             </h3>
 
-            <div className="rounded-xl border border-white/10 bg-[#101713] divide-y divide-white/8">
+            <div className="rounded-xl border border-white/10 bg-white/[0.05] divide-y divide-white/8">
               <div className={rowClass}>
                 <RowLabel
                   icon={<Lock className="w-3.5 h-3.5" />}
@@ -479,7 +472,7 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
                 />
                 <span
                   className={`text-[11px] font-mono-tabular shrink-0 ${
-                    gameplayAllowed ? 'text-[#39ff14]' : 'text-amber-300'
+                    gameplayAllowed ? 'text-white' : 'text-amber-300'
                   }`}
                 >
                   {gameplayAllowed ? 'Play' : 'Limited'}
@@ -541,7 +534,7 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
                 />
                 <span
                   className={`text-[11px] font-semibold shrink-0 ${
-                    canEdit ? 'text-[#39ff14]' : 'text-slate-500'
+                    canEdit ? 'text-white' : 'text-slate-500'
                   }`}
                 >
                   {canEdit ? (editing ? 'Editing' : 'Owner') : 'Visiting'}
@@ -557,14 +550,14 @@ export const RoomSettingsModal: React.FC<RoomSettingsModalProps> = ({
           </p>
         </div>
 
-        <div className="px-5 py-3 border-t border-[#39ff14]/15 bg-[#0f1612] flex justify-end">
+        <div className="px-5 py-3 border-t border-white/10 bg-[#1a1e23] flex justify-end">
           <button
             type="button"
             onClick={() => {
               sfx.playClick();
               onClose();
             }}
-            className="px-4 py-2 text-xs font-bold bg-[#39ff14] text-[#051205] rounded-lg hover:bg-[#5bff3b] transition-colors neon-btn-glow"
+            className="px-4 py-2 text-xs font-bold bg-white text-[#15181b] rounded-lg hover:bg-white/90 transition-colors"
           >
             Done
           </button>

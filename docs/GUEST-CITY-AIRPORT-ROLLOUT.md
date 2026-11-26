@@ -13,6 +13,11 @@ This document records the implementation state of issue #8. It distinguishes cod
 - Guests can use city chat and nearby chat. Realtime server handlers reject guest DMs, party actions, private voice signalling, and entry into private worlds. Account-only HTTP APIs still require a registered account session.
 - Guest sessions are distinct from account sessions and are not silently converted into accounts. Leaving the airport departure flow revokes the guest session.
 
+### HUD integration
+- The gameplay HUD reads guest state from the session instead of duplicating it: the menu hides Friends and Messages, the social sheet hides People, party, DMs, wallet, shop, worlds and daily rewards, and the shop is read-only. Guests keep city and nearby chat under their `Guest · [name]` identity.
+- The menu keeps travel physical. It no longer offers city/suite teleports or a leave-city button; suite and hallway doors lead through the hotel, and departure is the airport desk, matching the rules below.
+- Registered players see the server-allocated suite number and floor in the HUD, hotel terminal, elevator and game map.
+
 ### Guest personal room
 - Guests can enter their own isolated local room through the hotel's guest entrance; the room is not allocated a public hotel door and does not appear in the resident directory.
 - Guest room furniture, surfaces, mood, and avatar changes are saved in a separate browser-local storage key. They are not sent to account suite APIs or exposed as a visitable room.
@@ -37,6 +42,7 @@ This document records the implementation state of issue #8. It distinguishes cod
 - Apply and verify migration `0007_hotel_room_allocations.sql` against the target Neon database before deploying the Worker.
 - Run end-to-end checks against the actual Cloudflare Worker, Neon database, and Durable Object binding. CI passing does not prove production secrets, migrations, or bindings are configured.
 - Verify airport arrival/departure and hotel paths in the supported desktop, installed-app, and Android runtimes, including reconnect and save recovery.
+- Run the live guest flow against the Worker. The local Node API does not implement `/api/guest/session`, so the merged HUD's guest gating is currently covered by unit tests and static Worker validation only.
 - Implement the paid foundational facial-feature makeover service; those features are not exposed in the free bathroom/salon editor.
 - Saved outfit presets are device-local today. Account-synced outfits across devices are not implemented yet.
 - Replace the existing sample hotel resident/intercom directory with live account-backed resident availability and invitation permissions.
