@@ -69,7 +69,9 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld, gameplayAllo
 
   const listRef = useRef<HTMLDivElement>(null);
 
-  const online = status === 'online';
+  const online = status === 'online' || status === 'guest';
+  const accountOnline = status === 'online';
+  const isGuest = status === 'guest';
 
   const visible = messages.filter((message) => {
     if (chatTab === 'local') return message.scope === 'local';
@@ -79,17 +81,21 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld, gameplayAllo
   });
 
   useEffect(() => {
+    if (isGuest) { setPanelTab('chat'); setChatTab('city'); setFriends([]); }
+  }, [isGuest]);
+
+  useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [visible.length, open, chatTab]);
 
   const loadFriends = useCallback(async () => {
-    if (!online) return;
+    if (!accountOnline) return;
     try {
       setFriends(await api.friends());
     } catch {
       // The list simply stays empty when offline.
     }
-  }, [online]);
+  }, [accountOnline]);
 
   useEffect(() => {
     if (open && panelTab === 'people') loadFriends();
@@ -186,12 +192,10 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld, gameplayAllo
                 {presenceOnline} online
               </span>
               <div className="ml-auto flex items-center gap-1">
-                <span className="px-1.5 py-0.5 rounded bg-black/40 text-[10px] font-mono-tabular text-[#39ff14]">
-                  元 {wallet.yuanzi}
-                </span>
-                <span className="px-1.5 py-0.5 rounded bg-black/40 text-[10px] font-mono-tabular text-amber-300">
-                  宝 {wallet.tongbao}
-                </span>
+                {!isGuest && <>
+                  <span className="px-1.5 py-0.5 rounded bg-black/40 text-[10px] font-mono-tabular text-[#39ff14]">元 {wallet.yuanzi}</span>
+                  <span className="px-1.5 py-0.5 rounded bg-black/40 text-[10px] font-mono-tabular text-amber-300">宝 {wallet.tongbao}</span>
+                </>}
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
@@ -204,7 +208,7 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld, gameplayAllo
             </div>
 
             {/* Shop / worlds / daily */}
-            <div className="px-2 py-1.5 border-b border-white/8 flex items-center gap-1">
+            {!isGuest && <div className="px-2 py-1.5 border-b border-white/8 flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => setShopOpen(true)}
@@ -243,7 +247,7 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld, gameplayAllo
               {(
                 [
                   { id: 'chat' as PanelTab, label: 'Chat', icon: <MessageCircle className="w-3 h-3" /> },
-                  { id: 'people' as PanelTab, label: 'People', icon: <Users className="w-3 h-3" /> },
+                  ...(!isGuest ? [{ id: 'people' as PanelTab, label: 'People', icon: <Users className="w-3 h-3" /> }] : []),
                 ] as const
               ).map((tab) => (
                 <button
@@ -267,8 +271,7 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld, gameplayAllo
                     [
                       { id: 'local' as ChatTab, label: 'Nearby' },
                       { id: 'city' as ChatTab, label: 'City' },
-                      { id: 'party' as ChatTab, label: 'Party' },
-                      { id: 'dm' as ChatTab, label: 'Direct' },
+                      ...(!isGuest ? [{ id: 'party' as ChatTab, label: 'Party' }, { id: 'dm' as ChatTab, label: 'Direct' }] : []),
                     ] as const
                   ).map((tab) => (
                     <button
@@ -297,10 +300,8 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld, gameplayAllo
                       <option value="shout">Shout 35m</option>
                     </select>
                   )}
-                  {chatTab === 'city' && (
-                    <span className="ml-auto text-[10px] text-slate-500 font-mono-tabular">
-                      voice {voice.range} · {voice.status === 'ready' ? 'on' : 'off'}
-                    </span>
+                  {chatTab === 'city' && !isGuest && (
+                    <span className="ml-auto text-[10px] text-slate-500 font-mono-tabular">voice {voice.range} · {voice.status === 'ready' ? 'on' : 'off'}</span>
                   )}
                 </div>
 
@@ -357,7 +358,7 @@ export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld, gameplayAllo
                   <input
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
-                    placeholder={online ? 'Say something…' : 'Sign in to chat'}
+                    placeholder={online ? (isGuest ? 'Chat as Guest…' : 'Say something…') : 'Sign in to chat'}
                     maxLength={240}
                     className="flex-1 px-2.5 py-1.5 rounded-lg bg-black/40 border border-white/12 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-[#39ff14]/60"
                   />

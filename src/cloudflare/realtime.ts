@@ -274,7 +274,7 @@ export class LoftLifeRealtime {
         return;
       }
       ws.serializeAttachment(player);
-      send(ws, { t: 'ready', instance: { id: instanceId, kind: 'city', worldId: null, capacity: MAX_PLAYERS, count: active.length + 1 }, you: publicPlayer(player), players: active });
+      send(ws, { t: 'ready', instance: { id: instanceId, kind: 'city', worldId: null, capacity: MAX_PLAYERS, count: active.length + 1 }, you: publicPlayer(player), players: active.map(publicPlayer) });
       this.broadcast(instanceId, { t: 'join', player: publicPlayer(player) }, ws);
       this.broadcastSnapshot(instanceId, true);
       return;

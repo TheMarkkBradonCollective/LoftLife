@@ -111,6 +111,7 @@ import type {
 } from './game/types';
 
 const STORAGE_KEY = 'loftlife_room_state_v1';
+const GUEST_STORAGE_KEY = 'loftlife_guest_room_state_v1';
 const LEGACY_STORAGE_KEY = 'loftline_room_state_v1';
 // Copies kept when a device/account conflict is settled, so the losing side is
 // never destroyed. Local only; never uploaded.
@@ -128,10 +129,10 @@ interface SavedState {
   roomName: string;
 }
 
-function loadSavedState(): SavedState {
+function loadSavedState(storageKey = STORAGE_KEY): SavedState {
   try {
     const raw =
-      localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
+      localStorage.getItem(storageKey) ?? (storageKey === STORAGE_KEY ? localStorage.getItem(LEGACY_STORAGE_KEY) : null);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<SavedState>;
       if (Array.isArray(parsed.items) && parsed.surfaces && parsed.avatar) {
@@ -326,7 +327,11 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         roomName: session.suite.name,
       };
     }
-    return loadSavedState();
+    const saved = session.status === 'guest' ? loadSavedState(GUEST_STORAGE_KEY) : loadSavedState();
+    if (session.status === 'guest' && session.guestName) {
+      return { ...saved, avatar: { ...saved.avatar, name: `Guest · ${session.guestName}` } };
+    }
+    return saved;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -469,7 +474,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
           avatar: avatarConfig,
           roomName,
         };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        localStorage.setItem(session.status === 'guest' ? GUEST_STORAGE_KEY : STORAGE_KEY, JSON.stringify(payload));
       }
     } catch {
       // Ignore storage quota errors

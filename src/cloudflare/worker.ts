@@ -420,7 +420,7 @@ async function handleGuestSession(request: Request, env: CloudflareEnv): Promise
   if (request.method === 'POST') {
     const body = await readJson(request);
     const rawName = typeof body.displayName === 'string'
-      ? body.displayName.replace(/[\\u0000-\\u001f\\u007f]/g, '').replace(/\\s+/g, ' ').trim()
+      ? body.displayName.replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim()
       : '';
     if (rawName.length < 2 || rawName.length > 32) {
       return fail('Choose a display name between 2 and 32 characters.', 400, 'invalid_input');
@@ -589,7 +589,7 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
   if (path === '/api/profile' && request.method === 'PATCH' && sql && account) {
     const body = await readJson(request);
     const displayName = validateDisplayName(body.displayName ?? account.display_name, account.handle);
-    const bio = typeof body.bio === 'string' ? body.bio.replace(/[\\u0000-\\u001f\\u007f]/g,'').trim().slice(0,160) : undefined;
+    const bio = typeof body.bio === 'string' ? body.bio.replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,160) : undefined;
     const rows = await sql.query('SELECT avatar_json,bio,voice_json FROM ll_profiles WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
     const avatar = body.avatar === undefined ? parseJsonField(rows[0]?.avatar_json,safeAvatar(undefined,displayName)) : safeAvatar(body.avatar,displayName);
     // Voice preferences are only written when the client sends them, so an

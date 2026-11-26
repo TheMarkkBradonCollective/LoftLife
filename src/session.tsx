@@ -642,6 +642,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setAuthBusy(true); setAuthError(null);
     try {
       const result = await api.createGuestSession(displayName);
+      setToken(null);
       writeGuestSession(result.token, result.guest.displayName);
       setGuestToken(result.token); setGuestName(result.guest.displayName);
       setUser(null); setProfile(null); setWallet(EMPTY_WALLET); setInventory([]); setSuite(null);
@@ -686,6 +687,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setAuthError(null);
       try {
         const result = await api.register({ ...payload, avatar: payload.avatar ?? DEFAULT_AVATAR });
+        writeGuestSession(null, null); setGuestToken(null); setGuestName(null);
         setToken(result.token);
         await loadSession();
         setJustRegistered(true);
@@ -954,6 +956,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
    * player action), then applies the selected mode's semantics.
    */
   const pressMicrophone = useCallback<SessionValue['pressMicrophone']>(async () => {
+    if (status === 'guest') return;
     const controls = voiceControlsRef.current!;
     // Range Off blocks voice in every mode, so do not even ask for the mic.
     if (controls.range === 'off') {
@@ -966,7 +969,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       await voiceRef.current?.enable();
       applyVoice();
     }
-  }, [applyVoice, publishVoice]);
+  }, [applyVoice, publishVoice, status]);
 
   const releaseMicrophone = useCallback(() => {
     voiceControlsRef.current?.releaseMicrophone();
