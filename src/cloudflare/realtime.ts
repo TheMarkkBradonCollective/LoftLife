@@ -460,13 +460,27 @@ export class LoftLifeRealtime {
       return;
     }
     const scope = String(message.scope ?? 'city');
-    if (!['city', 'world', 'local'].includes(scope)) {
-      error(ws, 'unsupported_scope', 'Direct and party chat are not migrated to edge yet');
+    if (!['city', 'world', 'local', 'party'].includes(scope)) {
+      error(ws, 'unsupported_scope', 'Direct messages are not migrated to edge yet');
       return;
     }
     const world = player.instanceId.startsWith('world:');
-    const dbScope = world ? 'world' : 'city';
-    const scopeId = world ? player.instanceId.slice(6) : 'main';
+    let dbScope = world ? 'world' : 'city';
+    let scopeId = world ? player.instanceId.slice(6) : 'main';
+    let partyMemberIds: string[] = [];
+    if (scope === 'party') {
+      const namespace = this.env.REALTIME;
+      if (!namespace) { error(ws,'party_unavailable','Party service is not configured'); return; }
+      const partyResponse = await namespace.get(namespace.idFromName('party:global')).fetch(new Request('https://loftlife-internal/internal/party/state',{
+        method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({userId:player.userId}),
+      }));
+      const partyState = await partyResponse.json() as {party?:{id:string;members:Array<{userId:string}>}};
+      if (!partyState.party) { error(ws,'not_in_party','Join a party before using party chat'); return; }
+      if (message.scopeId && message.scopeId !== partyState.party.id) { error(ws,'forbidden','You are not in that party'); return; }
+      dbScope = 'party';
+      scopeId = partyState.party.id;
+      partyMemberIds = partyState.party.members.map(member=>member.userId);
+    }
     const id = crypto.randomUUID();
     await this.database().query(
       'INSERT INTO ll_chat_messages (id, scope, scope_id, user_id, body, created_at) VALUES ($1,$2,$3,$4,$5,$6)',
@@ -477,6 +491,11 @@ export class LoftLifeRealtime {
       for (const peer of this.ctx.getWebSockets()) {
         const other = peer.deserializeAttachment() as Player | undefined;
         if (other?.instanceId === player.instanceId && Math.hypot(other.x-player.x, other.z-player.z) <= 24) send(peer, event);
+      }
+    } else if (scope === 'party') {
+      for (const peer of this.ctx.getWebSockets()) {
+        const other = peer.deserializeAttachment() as Player | undefined;
+        if (other?.userId && partyMemberIds.includes(other.userId)) send(peer,event);
       }
     } else this.broadcast(player.instanceId, event);
     ws.serializeAttachment({ ...player, lastChatAt: now });
