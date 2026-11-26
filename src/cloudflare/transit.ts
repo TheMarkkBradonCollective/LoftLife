@@ -1,4 +1,4 @@
-const lines = [
+export const TRANSIT_LINES = [
  {id:'loftline-15',label:'15th Street LoftLine',kind:'bus',stops:[
   {id:'15-l',name:'15th & L St',x:-36,z:5.85},{id:'15-m',name:'15th & M St',x:0,z:5.85},
   {id:'15-n',name:'15th & N St',x:36,z:5.85},{id:'15-o',name:'15th & O St',x:72.98,z:5.85},
@@ -10,5 +10,5 @@ const lines = [
 ];
 export function handleTransitRoute(request:Request):Response|null {
  if(new URL(request.url).pathname!=='/api/transit'||request.method!=='GET')return null;
- return new Response(JSON.stringify({lines}),{headers:{'content-type':'application/json','cache-control':'public,max-age=300'}});
+ return new Response(JSON.stringify({lines:TRANSIT_LINES}),{headers:{'content-type':'application/json','cache-control':'public,max-age=300'}});
 }
