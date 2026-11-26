@@ -1,4 +1,5 @@
 import { neon } from '@neondatabase/serverless';
+import type { LoftLifeRealtime } from './realtime';
 import {
   hashPassword,
   sha256Hex,
@@ -31,6 +32,7 @@ export interface CloudflareEnv {
   DATABASE_URL?: string;
   LOFTLIFE_SESSION_SECRET?: string;
   GAME_ORIGIN?: string;
+  REALTIME?: { idFromName(name: string): unknown; get(id: unknown): { fetch(request: Request): Promise<Response> } };
   ASSETS?: WorkerFetcher;
 }
 
@@ -317,7 +319,8 @@ async function handleHealth(env: CloudflareEnv): Promise<Response> {
     runtime: 'cloudflare-worker',
     storageEngine,
     edgeAuth: Boolean(secretFor(env)),
-    proxying: Boolean(env.GAME_ORIGIN),
+    realtime: Boolean(env.REALTIME),
+    gameApi: env.GAME_ORIGIN ? 'legacy-proxy' : 'not-yet-migrated',
   });
 }
 
@@ -348,7 +351,16 @@ export default {
         return await handleLogout(request, env);
       }
 
-      if (url.pathname.startsWith('/api/') || url.pathname === '/ws') {
+      if (url.pathname === '/ws') {
+        if (request.method !== 'GET' || request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
+          return fail('A WebSocket upgrade is required.', 426, 'upgrade_required');
+        }
+        if (!env.REALTIME) return fail('Realtime Durable Object binding is not configured.', 503, 'realtime_unconfigured');
+        const instance = url.searchParams.get('instance') ?? 'city:main';
+        return env.REALTIME.get(env.REALTIME.idFromName(instance)).fetch(request);
+      }
+
+      if (url.pathname.startsWith('/api/')) {
         return await proxyToGame(request, env, url);
       }
 
