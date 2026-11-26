@@ -1,4 +1,5 @@
 name = "loftlife"
+workers_dev = true
 main = "src/cloudflare/worker.ts"
 compatibility_date = "2026-11-25"
 compatibility_flags = ["nodejs_compat"]
