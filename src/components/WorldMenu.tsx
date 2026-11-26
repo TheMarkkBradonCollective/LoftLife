@@ -71,8 +71,6 @@ interface WorldMenuProps {
   onLeaveWorld: () => Promise<void>;
   onOpenCityMap: () => void;
   onEditRoom: () => void;
-  guestMode?: boolean;
-  onEnterGuestRoom?: () => void;
 }
 
 const panel = 'bg-[#0b100d] text-slate-100 border-[#39ff14]/30';
@@ -274,8 +272,6 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
   onLeaveWorld,
   onOpenCityMap,
   onEditRoom,
-  guestMode = false,
-  onEnterGuestRoom,
 }) => {
   const [tab, setTab] = useState<MenuTab>('map');
   const [confirmLeave, setConfirmLeave] = useState(false);
@@ -559,11 +555,6 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                   </p>
                 </div>
                 <div className="flex flex-wrap items-start gap-2 sm:justify-end">
-                  {guestMode && location === 'world' && onEnterGuestRoom && (
-                    <button type="button" onClick={() => { onEnterGuestRoom(); onClose(); }} className="px-3 py-2 rounded-lg text-xs font-bold bg-[#39ff14] text-[#051205] flex items-center gap-1.5">
-                      <Home className="w-3.5 h-3.5" /> My Guest Room
-                    </button>
-                  )}
                   {location === 'world' && (
                     <button
                       type="button"

@@ -168,6 +168,9 @@ interface RoomViewportProps {
   onOpenDoorTerminal: () => void;
   onOpenAirportDeparture: () => void;
   onOpenAirportShop: () => void;
+  onEnterGuestRoom: () => void;
+  onOpenCloset: () => void;
+  onOpenBathroomMirror: () => void;
   onOpenElevator: () => void;
   onUnlockRoomDoor: () => void;
   onUnlockHallwayDoor: (roomNumber: string) => void;
@@ -278,6 +281,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   onOpenDoorTerminal,
   onOpenAirportDeparture,
   onOpenAirportShop,
+  onEnterGuestRoom,
+  onOpenCloset,
+  onOpenBathroomMirror,
   onOpenElevator,
   onUnlockRoomDoor,
   onUnlockHallwayDoor,
@@ -347,6 +353,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onOpenDoorTerminal,
     onOpenAirportDeparture,
     onOpenAirportShop,
+    onEnterGuestRoom,
+    onOpenCloset,
+    onOpenBathroomMirror,
     onOpenElevator,
     onUnlockRoomDoor,
     onUnlockHallwayDoor,
@@ -400,6 +409,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onOpenDoorTerminal,
     onOpenAirportDeparture,
     onOpenAirportShop,
+    onEnterGuestRoom,
+    onOpenCloset,
+    onOpenBathroomMirror,
     onOpenElevator,
     onUnlockRoomDoor,
     onUnlockHallwayDoor,
@@ -959,8 +971,14 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         };
       }
 
-      // 1. Inside Player Suite (402) or Resident Suite
+      // 1. Inside Player Suite, Guest Room, or Resident Suite
       if (loc === 'room' || loc === 'resident_room') {
+        if (loc === 'room' && Math.hypot(av.x - 4.8, av.z + 5.35) < 1.75) {
+          return { label: actionLabel('Use Bathroom Mirror'), execute: () => { releaseCursorForModal(); propsRef.current.onOpenBathroomMirror(); } };
+        }
+        if (loc === 'room' && Math.hypot(av.x - 4.8, av.z - 5.35) < 1.75) {
+          return { label: actionLabel('Open Closet'), execute: () => { releaseCursorForModal(); propsRef.current.onOpenCloset(); } };
+        }
         if (loc === 'room' && propsRef.current.guestMode && Math.hypot(av.x + 6.4, av.z - SUITE_DOOR_Z) < 1.75) {
           return { label: actionLabel('Leave Guest Room'), execute: () => { sfx.playToggle(true); propsRef.current.onChangeLocation('world'); } };
         }
@@ -1197,7 +1215,10 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       if (Math.hypot(av.x - CITY_LAYOUT.airportDeparturePos.x, av.z - CITY_LAYOUT.airportDeparturePos.z) < 2.25) {
         return { label: actionLabel('Take a flight'), execute: () => { releaseCursorForModal(); propsRef.current.onOpenAirportDeparture(); } };
       }
-      if (!propsRef.current.guestMode && Math.hypot(av.x - mainWorld.loftDoorEntryPos.x, av.z - mainWorld.loftDoorEntryPos.z) < 2.5) {
+      if (Math.hypot(av.x - mainWorld.loftDoorEntryPos.x, av.z - mainWorld.loftDoorEntryPos.z) < 2.5) {
+        if (propsRef.current.guestMode) {
+          return { label: actionLabel('Enter Private Guest Room'), execute: () => { releaseCursorForModal(); sfx.playClick(); propsRef.current.onEnterGuestRoom(); } };
+        }
         return {
           label: hotelDoorUnlocked
             ? actionLabel('Enter Main Lobby')

@@ -353,6 +353,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [elevatorModalOpen, setElevatorModalOpen] = useState(false);
   const [airportDepartureOpen, setAirportDepartureOpen] = useState(false);
   const [airportShopOpen, setAirportShopOpen] = useState(false);
+  const [avatarStudioMode, setAvatarStudioMode] = useState<'hair' | 'closet'>('hair');
 
   // Runtime environment decides controls and gameplay access. Width is never
   // used: a narrow desktop window stays a desktop, and a mobile PWA is still a
@@ -1513,6 +1514,9 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onOpenDoorTerminal={() => setDoorTerminalOpen(true)}
         onOpenAirportDeparture={() => setAirportDepartureOpen(true)}
         onOpenAirportShop={() => setAirportShopOpen(true)}
+        onEnterGuestRoom={handleEnterGuestRoom}
+        onOpenCloset={() => { setAvatarStudioMode('closet'); setAvatarModalOpen(true); }}
+        onOpenBathroomMirror={() => { setAvatarStudioMode('hair'); setAvatarModalOpen(true); }}
         onOpenElevator={() => setElevatorModalOpen(true)}
         onUnlockRoomDoor={handleUnlockRoomDoor}
         onUnlockHallwayDoor={handleUnlockHallwayDoor}
@@ -2528,6 +2532,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       {/* Avatar Character Studio Modal */}
       <AvatarModal
         open={avatarModalOpen}
+        mode={avatarStudioMode}
         config={avatarConfig}
         ownedClothing={session.inventory
           .filter((entry) => entry.kind === 'clothing')

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { X, Check, Lock } from 'lucide-react';
-import { HAIR_COLORS, OUTFIT_COLORS, SKIN_TONES } from '../game/catalog';
+import { HAIR_COLORS, OUTFIT_COLORS } from '../game/catalog';
 import { sfx } from '../game/audio';
 import { api, type ShopEntry } from '../net/api';
 import type { AccessoryId, AvatarConfig, HairStyleId, TopStyleId } from '../game/types';
@@ -8,6 +8,7 @@ import type { AccessoryId, AvatarConfig, HairStyleId, TopStyleId } from '../game
 interface AvatarModalProps {
   open: boolean;
   config: AvatarConfig;
+  mode: 'hair' | 'closet';
   /** Clothing ids the account owns; unowned pieces are locked in the studio. */
   ownedClothing?: string[];
   onChange: (next: AvatarConfig) => void;
@@ -43,6 +44,7 @@ const ACCESSORIES: { id: AccessoryId; label: string }[] = [
 export const AvatarModal: React.FC<AvatarModalProps> = ({
   open,
   config,
+  mode,
   ownedClothing = [],
   onChange,
   onClose,
@@ -83,9 +85,9 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#39ff14]/15 bg-[#0f1612]">
           <div>
             <h2 className="font-display text-lg font-semibold tracking-tight text-white">
-              Character Studio
+              {mode === 'hair' ? 'Bathroom Mirror' : 'Bedroom Closet'}
             </h2>
-            <p className="text-xs text-slate-400">Live updates in LoftLife</p>
+            <p className="text-xs text-slate-400">{mode === 'hair' ? 'Change your hairstyle and hair color' : 'Change into clothing you already own'}</p>
           </div>
           <button
             type="button"
@@ -101,48 +103,8 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-          {/* Display Name */}
-          <div className="space-y-1.5">
-            <label htmlFor="avatar-name" className="block text-xs font-medium text-slate-300">
-              Display Name
-            </label>
-            <input
-              id="avatar-name"
-              type="text"
-              maxLength={18}
-              value={config.name}
-              onChange={(e) => onChange({ ...config, name: e.target.value })}
-              className="w-full px-3 py-2 text-sm bg-[#101713] text-white border border-white/15 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#39ff14]"
-              placeholder="Enter name"
-            />
-          </div>
-
-          {/* Skin Tone */}
-          <div className="space-y-2">
-            <span className="block text-xs font-medium text-slate-300">Skin Tone</span>
-            <div className="flex flex-wrap gap-2">
-              {SKIN_TONES.map((tone) => {
-                const active = config.skinTone === tone.hex;
-                return (
-                  <button
-                    key={tone.hex}
-                    type="button"
-                    title={tone.label}
-                    onClick={() => update({ skinTone: tone.hex })}
-                    className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-transform ${
-                      active
-                        ? 'border-[#39ff14] scale-110 ring-2 ring-[#39ff14]/35'
-                        : 'border-white/15 hover:scale-105'
-                    }`}
-                    style={{ backgroundColor: tone.hex }}
-                  >
-                    {active && <Check className="w-3.5 h-3.5 text-slate-900 drop-shadow-sm" />}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
+          {mode === 'hair' && (
+            <>
           {/* Hairstyle */}
           <div className="space-y-2">
             <span className="block text-xs font-medium text-slate-300">Hairstyle</span>
@@ -193,6 +155,11 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
             </div>
           </div>
 
+            </>
+          )}
+
+          {mode === 'closet' && (
+            <>
           {/* Top Outfit Style */}
           <div className="space-y-2">
             <span className="block text-xs font-medium text-slate-300">Top Style</span>
@@ -349,6 +316,8 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
               })}
             </div>
           </div>
+            </>
+          )}
         </div>
 
         <div className="px-5 py-3 border-t border-[#39ff14]/15 bg-[#0f1612] flex justify-end">
