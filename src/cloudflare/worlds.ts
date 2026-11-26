@@ -93,6 +93,8 @@ async function view(sql: Sql, world: World, user: User | null, state = false) {
     result.items = parse(world.items_json, []);
     result.surfaces = parse(world.surfaces_json, {});
     result.mood = world.mood;
+  }
+  if (access.canManageStatus) {
     const collaborators = await sql.query(
       'SELECT c.user_id,a.handle,c.role FROM ll_world_collaborators c JOIN ll_accounts a ON a.id=c.user_id WHERE c.world_id=$1',
       [world.id]
