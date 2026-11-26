@@ -30,6 +30,7 @@ interface SocialHudProps {
 export const SocialHud: React.FC<SocialHudProps> = ({ onEnterWorld, gameplayAllowed }) => {
   const {
     status,
+    guestName,
     connection,
     instance,
     presenceOnline,
