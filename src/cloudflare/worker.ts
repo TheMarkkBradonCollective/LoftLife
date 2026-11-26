@@ -1,6 +1,7 @@
 import { neon } from '@neondatabase/serverless';
 import { handleWorldRoute } from './worlds';
 import { handleSocialRoute } from './social';
+import { handleEconomyRoute } from './economy';
 export { LoftLifeRealtime } from './realtime';
 import {
   hashPassword,
@@ -595,6 +596,14 @@ export default {
       if (url.pathname.startsWith('/api/')) {
         const gameResponse = await handleGameRead(request, env, url);
         if (gameResponse) return gameResponse;
+      }
+
+      if (url.pathname === '/api/economy/purchase' || url.pathname === '/api/economy/daily') {
+        const auth = await currentAccount(request, env);
+        const sql = auth?.sql ?? await database(env);
+        if (!sql) return fail('DATABASE_URL is not configured.', 503, 'unconfigured');
+        const economyResponse = await handleEconomyRoute(request, sql, auth?.account ?? null);
+        if (economyResponse) return economyResponse;
       }
 
       if (url.pathname === '/api/worlds' || url.pathname.startsWith('/api/worlds/')) {
