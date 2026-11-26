@@ -108,7 +108,7 @@ async function provisionGameAccount(sql: Sql, account: AccountRow, avatarInput?:
   ) as Array<{ user_id: string }>;
   if (createdWallet.length) {
     await sql.query(
-      'INSERT INTO ll_ledger (id,user_id,currency,delta,balance_after,reason,ref,idempotency_key,created_at) VALUES ($1,$2,$3,$4,$5,$6,NULL,$7,$8),($9,$2,$10,$11,$12,$6,NULL,$13,$8) ON CONFLICT (idempotency_key) DO NOTHING',
+      'INSERT INTO ll_ledger (id,user_id,currency,delta,balance_after,reason,ref,idempotency_key,created_at) VALUES ($1,$2,$3,$4,$5,$6,NULL,$7,$8),($9,$2,$10,$11,$12,$6,NULL,$13,$8) ON CONFLICT DO NOTHING',
       [crypto.randomUUID(), account.id, 'yuanzi', 500, 500, 'welcome_grant', `welcome:${account.id}:yuanzi`, at, crypto.randomUUID(), 'tongbao', 25, 25, `welcome:${account.id}:tongbao`]
     );
   }
