@@ -15,7 +15,7 @@ import { useSession } from '../session';
 import { ShopModal } from './ShopModal';
 import { WorldsModal } from './WorldsModal';
 
-const panel = 'bg-[#0b100d]/95 text-slate-100 border-[#39ff14]/30 neon-panel-glow';
+const panel = 'bg-slate-950/80 text-slate-100 border-white/15 shadow-2xl backdrop-blur-xl';
 
 type ChatTab = 'local' | 'city' | 'party' | 'dm';
 type PanelTab = 'chat' | 'people';

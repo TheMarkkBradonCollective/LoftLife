@@ -248,7 +248,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         <div
           role="application"
           aria-label="Camera look area — drag to rotate the camera"
-          className="fixed z-30 left-2 top-[14%] h-[20%] w-14 rounded-2xl border border-[#39ff14]/30 bg-[#0b100d]/55 backdrop-blur-sm touch-none select-none"
+          className="fixed z-30 left-2 top-[14%] h-[20%] w-14 rounded-2xl border border-white/25 bg-slate-950/35 backdrop-blur-sm touch-none select-none"
           style={{
             left: 'calc(8px + env(safe-area-inset-left, 0px))',
             opacity: layout.opacity / 100,
@@ -276,7 +276,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             lookPointer.current = null;
           }}
         >
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 pointer-events-none text-[#39ff14]/80">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 pointer-events-none text-white/85">
             <Camera className="w-4 h-4" />
             <span className="text-[9px] font-bold uppercase tracking-widest">Look</span>
           </div>
@@ -286,7 +286,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       {/* Virtual stick */}
       <div
         ref={stickRef}
-        className="fixed bottom-24 z-40 rounded-full border border-[#39ff14]/40 bg-[#0b100d]/70 backdrop-blur-sm touch-none select-none"
+        className="fixed bottom-24 z-40 rounded-full border border-white/30 bg-slate-950/35 backdrop-blur-sm touch-none select-none"
         style={{
           width: stickSize,
           height: stickSize,
@@ -311,12 +311,12 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         aria-valuetext={viewMode === 'play' ? 'Movement' : 'Camera pan'}
       >
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <span className="text-[9px] uppercase tracking-widest text-[#39ff14]/45">
+          <span className="text-[9px] uppercase tracking-widest text-white/55">
             {viewMode === 'play' ? 'Move' : 'Pan'}
           </span>
         </div>
         <div
-          className="absolute left-1/2 top-1/2 rounded-full bg-[#39ff14]/85 border border-[#8eff78] pointer-events-none"
+          className="absolute left-1/2 top-1/2 rounded-full bg-white/75 border border-white/65 pointer-events-none"
           style={{
             width: knobSize,
             height: knobSize,
@@ -336,7 +336,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
           transformOrigin: voiceOnLeft ? 'bottom left' : 'bottom right',
         }}
       >
-        <div className="flex items-stretch rounded-2xl border border-[#39ff14]/30 bg-[#0b100d]/90 backdrop-blur-sm overflow-hidden shadow-lg">
+        <div className="flex items-stretch rounded-2xl border border-white/25 bg-slate-950/65 backdrop-blur-sm overflow-hidden shadow-lg">
           <button
             type="button"
             onClick={onCycleRange}
@@ -378,7 +378,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             aria-pressed={voice.transmitting}
             className={`w-16 px-2 py-2 flex flex-col items-center justify-center gap-0.5 touch-none active:scale-[0.97] transition-colors ${
               voice.transmitting
-                ? 'bg-[#39ff14] text-[#051205]'
+                ? 'bg-white text-slate-950'
                 : voice.muted || voice.suspended
                 ? 'bg-amber-400/20 text-amber-200'
                 : voice.status === 'ready'
@@ -441,7 +441,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
           }}
           className={`h-10 px-2.5 rounded-xl border flex items-center gap-1.5 text-[10px] font-bold active:scale-95 transition-colors ${
             contextLabel
-              ? 'bg-[#39ff14] text-[#051205] border-[#8eff78]'
+              ? 'bg-[#39ff14] text-[#051205] border-white/65'
               : 'bg-[#0b100d]/85 text-slate-500 border-white/15'
           }`}
         >
@@ -457,8 +457,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             onClick={onToggleFollow}
             className={`h-10 px-2.5 rounded-xl border flex items-center gap-1.5 text-[10px] font-bold active:scale-95 transition-colors ${
               followCharacter
-                ? 'bg-[#39ff14] text-[#051205] border-[#8eff78]'
-                : 'bg-[#0b100d]/85 text-slate-200 border-[#39ff14]/40'
+                ? 'bg-[#39ff14] text-[#051205] border-white/65'
+                : 'bg-[#0b100d]/85 text-slate-200 border-white/30'
             }`}
           >
             {followCharacter ? <UserCheck className="w-3.5 h-3.5" /> : <UserX className="w-3.5 h-3.5" />}
@@ -469,7 +469,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
           type="button"
           aria-label="Map and world menu"
           onClick={onOpenMenu}
-          className="h-10 w-10 rounded-xl border bg-[#0b100d]/85 text-slate-200 border-[#39ff14]/40 flex items-center justify-center active:scale-95"
+          className="h-10 w-10 rounded-xl border bg-[#0b100d]/85 text-slate-200 border-white/30 flex items-center justify-center active:scale-95"
         >
           <MapIcon className="w-4 h-4" />
         </button>
@@ -480,8 +480,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
           onClick={onToggleZoom}
           className={`h-10 px-2.5 rounded-xl border flex items-center gap-1.5 text-[10px] font-bold active:scale-95 transition-colors ${
             closeZoom
-              ? 'bg-[#39ff14] text-[#051205] border-[#8eff78]'
-              : 'bg-[#0b100d]/85 text-slate-200 border-[#39ff14]/40'
+              ? 'bg-[#39ff14] text-[#051205] border-white/65'
+              : 'bg-[#0b100d]/85 text-slate-200 border-white/30'
           }`}
         >
           {closeZoom ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
@@ -508,8 +508,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             onClick={onToggleChat}
             className={`w-12 h-12 rounded-full border flex items-center justify-center active:scale-95 ${
               chatOpen
-                ? 'bg-[#39ff14] text-[#051205] border-[#8eff78]'
-                : 'bg-[#0b100d]/85 text-[#39ff14] border-[#39ff14]/40'
+                ? 'bg-[#39ff14] text-[#051205] border-white/65'
+                : 'bg-[#0b100d]/85 text-[#39ff14] border-white/30'
             }`}
           >
             <MessageCircle className="w-5 h-5" />
@@ -521,8 +521,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             onClick={toggleSprint}
             className={`w-12 h-12 rounded-full border flex items-center justify-center active:scale-95 ${
               sprint
-                ? 'bg-[#39ff14] text-[#051205] border-[#8eff78]'
-                : 'bg-[#0b100d]/85 text-[#39ff14] border-[#39ff14]/40'
+                ? 'bg-[#39ff14] text-[#051205] border-white/65'
+                : 'bg-[#0b100d]/85 text-[#39ff14] border-white/30'
             }`}
           >
             <FastForward className="w-5 h-5" />
@@ -530,7 +530,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
           <button
             type="button"
             aria-label="Jump"
-            className="w-12 h-12 rounded-full bg-[#0b100d]/85 text-[#39ff14] border border-[#39ff14]/40 flex items-center justify-center active:scale-95"
+            className="w-12 h-12 rounded-full bg-[#0b100d]/85 text-[#39ff14] border border-white/30 flex items-center justify-center active:scale-95"
             onClick={() => {
               touchInput.jump = true;
             }}
@@ -540,7 +540,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
           <button
             type="button"
             aria-label="Emote"
-            className="w-12 h-12 rounded-full bg-[#0b100d]/85 text-[#39ff14] border border-[#39ff14]/40 flex items-center justify-center active:scale-95"
+            className="w-12 h-12 rounded-full bg-[#0b100d]/85 text-[#39ff14] border border-white/30 flex items-center justify-center active:scale-95"
             onClick={onEmote}
           >
             <Sparkles className="w-5 h-5" />

@@ -114,3 +114,83 @@ main::-webkit-scrollbar-track,
     height: 0;
   }
 }
+
+
+/* -------------------------------------------------------------------------
+   Neutral game HUD skin
+   The game world stays visually dominant; LoftLife green is a brand accent,
+   not the surface color of controls, panels, or interactive chrome.
+   ------------------------------------------------------------------------- */
+:root {
+  --ll-hud-surface: rgba(24, 28, 34, 0.72);
+  --ll-hud-surface-strong: rgba(20, 24, 30, 0.9);
+  --ll-hud-border: rgba(255, 255, 255, 0.24);
+  --ll-hud-text: rgba(255, 255, 255, 0.94);
+  --ll-hud-muted: rgba(255, 255, 255, 0.66);
+}
+.ll-game-hud,
+.ll-community {
+  color: var(--ll-hud-text);
+}
+.ll-touch-stick,
+[class*="touch-stick"] {
+  background: radial-gradient(circle at 35% 25%, rgba(255,255,255,.22), rgba(25,29,35,.48)) !important;
+  border: 1px solid rgba(255,255,255,.48) !important;
+  box-shadow: 0 5px 22px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.24);
+  backdrop-filter: blur(10px) saturate(120%);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+}
+.ll-touch-stick__knob,
+.ll-touch-stick [class*="rounded-full"][class*="bg-"] {
+  background: rgba(245,247,250,.78) !important;
+  border: 1px solid rgba(255,255,255,.8) !important;
+  box-shadow: 0 2px 12px rgba(0,0,0,.25);
+}
+.ll-touch-stick__label,
+.ll-touch-stick [class*="uppercase"] {
+  color: rgba(255,255,255,.72) !important;
+}
+.ll-touch-look,
+.ll-touch-voice,
+.ll-touch-action,
+.ll-touch-button {
+  color: white;
+  background: var(--ll-hud-surface);
+  border: 1px solid var(--ll-hud-border);
+  box-shadow: 0 5px 18px rgba(0,0,0,.22);
+  backdrop-filter: blur(12px) saturate(120%);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+}
+.ll-touch-look:active,
+.ll-touch-action:active,
+.ll-touch-button:active {
+  background: rgba(255,255,255,.25);
+}
+.ll-community {
+  background: rgba(22,26,32,.94);
+  border: 1px solid rgba(255,255,255,.16);
+  box-shadow: 0 18px 48px rgba(0,0,0,.36);
+  backdrop-filter: blur(22px) saturate(125%);
+  -webkit-backdrop-filter: blur(22px) saturate(125%);
+}
+.ll-community button:focus-visible,
+.ll-touch-look:focus-visible,
+.ll-touch-action:focus-visible,
+.ll-touch-button:focus-visible {
+  outline: 2px solid rgba(255,255,255,.9);
+  outline-offset: 2px;
+}
+@media (max-width: 639px) {
+  .ll-community { max-height: calc(100dvh - env(safe-area-inset-top) - 8px); }
+}
+@media (orientation: landscape) and (max-height: 380px) {
+  .ll-community { max-height: calc(100dvh - 8px); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .ll-touch-stick, .ll-touch-look, .ll-touch-voice, .ll-touch-action,
+  .ll-touch-button, .ll-community {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background-color: rgba(20,24,30,.94);
+  }
+}
