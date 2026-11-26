@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { X, Check, Lock } from 'lucide-react';
-import { HAIR_COLORS, OUTFIT_COLORS, SKIN_TONES } from '../game/catalog';
+import { HAIR_COLORS, OUTFIT_COLORS } from '../game/catalog';
 import { sfx } from '../game/audio';
 import { api, type ShopEntry } from '../net/api';
-import type { AccessoryId, AvatarConfig, HairStyleId, TopStyleId } from '../game/types';
+import type { AccessoryId, AvatarConfig, HairStyleId, MakeupStyleId, TopStyleId } from '../game/types';
 
 interface AvatarModalProps {
   open: boolean;
   config: AvatarConfig;
+  mode: 'hair' | 'closet';
+  outfitStorageKey: string;
   /** Clothing ids the account owns; unowned pieces are locked in the studio. */
   ownedClothing?: string[];
   onChange: (next: AvatarConfig) => void;
@@ -43,11 +45,23 @@ const ACCESSORIES: { id: AccessoryId; label: string }[] = [
 export const AvatarModal: React.FC<AvatarModalProps> = ({
   open,
   config,
+  mode,
+  outfitStorageKey,
   ownedClothing = [],
   onChange,
   onClose,
 }) => {
   const [clothingShop, setClothingShop] = useState<ShopEntry[]>([]);
+  const [outfitName, setOutfitName] = useState('My Outfit');
+  const [savedOutfits, setSavedOutfits] = useState<Array<{ id: string; name: string; topStyle: TopStyleId; topColor: string; bottomColor: string; shoeColor: string; accessory: AccessoryId }>>([]);
+  useEffect(() => {
+    try { const raw = localStorage.getItem(`loftlife_outfits_${outfitStorageKey}`); setSavedOutfits(raw ? JSON.parse(raw) : []); }
+    catch { setSavedOutfits([]); }
+  }, [outfitStorageKey]);
+  const persistOutfits = (next: typeof savedOutfits) => {
+    setSavedOutfits(next);
+    try { localStorage.setItem(`loftlife_outfits_${outfitStorageKey}`, JSON.stringify(next)); } catch { /* Keep the current session usable if storage is full. */ }
+  };
 
   // Prices are server-owned; the studio only renders them.
   useEffect(() => {
@@ -83,9 +97,9 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#39ff14]/15 bg-[#0f1612]">
           <div>
             <h2 className="font-display text-lg font-semibold tracking-tight text-white">
-              Character Studio
+              {mode === 'hair' ? 'Bathroom Mirror' : 'Bedroom Closet'}
             </h2>
-            <p className="text-xs text-slate-400">Live updates in LoftLife</p>
+            <p className="text-xs text-slate-400">{mode === 'hair' ? 'Change your hairstyle and hair color' : 'Change into clothing you already own'}</p>
           </div>
           <button
             type="button"
@@ -101,48 +115,8 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-          {/* Display Name */}
-          <div className="space-y-1.5">
-            <label htmlFor="avatar-name" className="block text-xs font-medium text-slate-300">
-              Display Name
-            </label>
-            <input
-              id="avatar-name"
-              type="text"
-              maxLength={18}
-              value={config.name}
-              onChange={(e) => onChange({ ...config, name: e.target.value })}
-              className="w-full px-3 py-2 text-sm bg-[#101713] text-white border border-white/15 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#39ff14]"
-              placeholder="Enter name"
-            />
-          </div>
-
-          {/* Skin Tone */}
-          <div className="space-y-2">
-            <span className="block text-xs font-medium text-slate-300">Skin Tone</span>
-            <div className="flex flex-wrap gap-2">
-              {SKIN_TONES.map((tone) => {
-                const active = config.skinTone === tone.hex;
-                return (
-                  <button
-                    key={tone.hex}
-                    type="button"
-                    title={tone.label}
-                    onClick={() => update({ skinTone: tone.hex })}
-                    className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-transform ${
-                      active
-                        ? 'border-[#39ff14] scale-110 ring-2 ring-[#39ff14]/35'
-                        : 'border-white/15 hover:scale-105'
-                    }`}
-                    style={{ backgroundColor: tone.hex }}
-                  >
-                    {active && <Check className="w-3.5 h-3.5 text-slate-900 drop-shadow-sm" />}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
+          {mode === 'hair' && (
+            <>
           {/* Hairstyle */}
           <div className="space-y-2">
             <span className="block text-xs font-medium text-slate-300">Hairstyle</span>
@@ -193,6 +167,21 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
             </div>
           </div>
 
+          {/* Makeup is a cosmetic preset changed at the bathroom mirror. */}
+          <div className="space-y-2">
+            <span className="block text-xs font-medium text-slate-300">Makeup</span>
+            <div className="grid grid-cols-3 gap-2">
+              {([{id:'natural',label:'Natural'},{id:'soft',label:'Soft'},{id:'bold',label:'Bold'}] as {id:MakeupStyleId;label:string}[]).map((style) => (
+                <button key={style.id} type="button" onClick={() => update({ makeupStyle: style.id })} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${(config.makeupStyle ?? 'natural') === style.id ? 'border-[#39ff14] bg-[#39ff14] text-[#051205]' : 'border-white/12 bg-[#101713] text-slate-200'}`}>{style.label}</button>
+              ))}
+            </div>
+          </div>
+
+            </>
+          )}
+
+          {mode === 'closet' && (
+            <>
           {/* Top Outfit Style */}
           <div className="space-y-2">
             <span className="block text-xs font-medium text-slate-300">Top Style</span>
@@ -349,6 +338,23 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
               })}
             </div>
           </div>
+
+          <div className="space-y-2 border-t border-white/10 pt-4">
+            <div className="text-xs font-semibold text-slate-300">Saved Outfits</div>
+            <div className="flex gap-2">
+              <input value={outfitName} onChange={(event) => setOutfitName(event.target.value)} maxLength={32} aria-label="Outfit name" className="min-w-0 flex-1 rounded-lg border border-white/12 bg-black/30 px-3 py-2 text-xs text-white" />
+              <button type="button" onClick={() => { const name = outfitName.trim() || 'My Outfit'; persistOutfits([...savedOutfits, { id: crypto.randomUUID(), name, topStyle: config.topStyle, topColor: config.topColor, bottomColor: config.bottomColor, shoeColor: config.shoeColor, accessory: config.accessory }]); }} className="rounded-lg bg-[#39ff14] px-3 py-2 text-xs font-bold text-[#051205]">Save</button>
+            </div>
+            {savedOutfits.length === 0 ? <p className="text-[11px] text-slate-500">Save as many outfit combinations as you like on this device.</p> : savedOutfits.map((outfit) => (
+              <div key={outfit.id} className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 p-2">
+                <span className="min-w-0 flex-1 truncate text-xs text-slate-200">{outfit.name}</span>
+                <button type="button" onClick={() => update({ topStyle: outfit.topStyle, topColor: outfit.topColor, bottomColor: outfit.bottomColor, shoeColor: outfit.shoeColor, accessory: outfit.accessory })} className="rounded-md bg-white/10 px-2 py-1 text-[11px]">Wear</button>
+                <button type="button" aria-label={`Delete ${outfit.name}`} onClick={() => persistOutfits(savedOutfits.filter((item) => item.id !== outfit.id))} className="rounded-md bg-white/10 px-2 py-1 text-[11px] text-red-300">Delete</button>
+              </div>
+            ))}
+          </div>
+            </>
+          )}
         </div>
 
         <div className="px-5 py-3 border-t border-[#39ff14]/15 bg-[#0f1612] flex justify-end">

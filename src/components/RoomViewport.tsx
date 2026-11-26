@@ -8,7 +8,6 @@ import {
   getCatalogItem,
   GRID_SIZE,
   HOTEL_RESIDENTS,
-  PLAYER_SUITE_NUMBER,
 } from '../game/catalog';
 import { buildFurnitureGroup, updateFurnitureAnimations } from '../game/furniture';
 import {
@@ -110,7 +109,10 @@ function createNameTag(text: string): THREE.Sprite {
 
 interface RoomViewportProps {
   location: WorldLocation;
+  guestMode: boolean;
   hallwayFloor: number;
+  playerSuiteNumber: string;
+  playerSuiteFloor: number;
   unlockedRooms: string[];
   mainDoorUnlocked: boolean;
   roomDoorUnlocked: boolean;
@@ -164,6 +166,12 @@ interface RoomViewportProps {
   onProximityPrompt?: (label: string | null) => void;
   onCityStreetChange?: (label: string) => void;
   onOpenDoorTerminal: () => void;
+  onOpenAirportDeparture: () => void;
+  onOpenAirportShop: () => void;
+  onEnterGuestRoom: () => void;
+  onOpenCloset: () => void;
+  onOpenBathroomMirror: () => void;
+  onOpenSalon: () => void;
   onOpenElevator: () => void;
   onUnlockRoomDoor: () => void;
   onUnlockHallwayDoor: (roomNumber: string) => void;
@@ -225,7 +233,10 @@ function buildPlazaPath(
 
 export const RoomViewport: React.FC<RoomViewportProps> = ({
   location,
+  guestMode,
   hallwayFloor,
+  playerSuiteNumber,
+  playerSuiteFloor,
   unlockedRooms,
   mainDoorUnlocked,
   roomDoorUnlocked,
@@ -269,6 +280,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   onProximityPrompt,
   onCityStreetChange,
   onOpenDoorTerminal,
+  onOpenAirportDeparture,
+  onOpenAirportShop,
+  onEnterGuestRoom,
+  onOpenCloset,
+  onOpenBathroomMirror,
+  onOpenSalon,
   onOpenElevator,
   onUnlockRoomDoor,
   onUnlockHallwayDoor,
@@ -292,7 +309,10 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
   const propsRef = useRef({
     location,
+    guestMode,
     hallwayFloor,
+    playerSuiteNumber,
+    playerSuiteFloor,
     unlockedRooms,
     mainDoorUnlocked,
     roomDoorUnlocked,
@@ -333,6 +353,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onProximityPrompt,
     onCityStreetChange,
     onOpenDoorTerminal,
+    onOpenAirportDeparture,
+    onOpenAirportShop,
+    onEnterGuestRoom,
+    onOpenCloset,
+    onOpenBathroomMirror,
+    onOpenSalon,
     onOpenElevator,
     onUnlockRoomDoor,
     onUnlockHallwayDoor,
@@ -340,7 +366,10 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   });
   propsRef.current = {
     location,
+    guestMode,
     hallwayFloor,
+    playerSuiteNumber,
+    playerSuiteFloor,
     unlockedRooms,
     mainDoorUnlocked,
     roomDoorUnlocked,
@@ -381,6 +410,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onProximityPrompt,
     onCityStreetChange,
     onOpenDoorTerminal,
+    onOpenAirportDeparture,
+    onOpenAirportShop,
+    onEnterGuestRoom,
+    onOpenCloset,
+    onOpenBathroomMirror,
+    onOpenSalon,
     onOpenElevator,
     onUnlockRoomDoor,
     onUnlockHallwayDoor,
@@ -457,6 +492,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         | 'toLobby'
         | 'toHallway'
         | 'openDoorTerminal'
+        | 'openGuestRoom'
         | 'openElevator'
         | null;
       pendingHallDoor: string | null;
@@ -632,6 +668,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       new Set(propsRef.current.unlockedRooms),
       HOTEL_RESIDENTS,
       propsRef.current.avatarConfig.name,
+      propsRef.current.playerSuiteNumber,
+      propsRef.current.playerSuiteFloor,
       maxAnisotropy
     );
     hallwayContainer.add(hallwayHandles.hallwayGroup);
@@ -659,7 +697,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     // 5. Player Avatar
     const avatarRig = createAvatarRig(propsRef.current.avatarConfig);
-    avatarRig.root.position.set(0.5, 0, 1.8);
+    const initialCitySpawn = propsRef.current.location === 'world' ? CITY_LAYOUT.airportArrivalPos : { x: 0.5, z: 1.8 };
+    avatarRig.root.position.set(initialCitySpawn.x, 0, initialCitySpawn.z);
     scene.add(avatarRig.root);
 
     const rippleMesh = new THREE.Mesh(
@@ -720,8 +759,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         lastManualLookTime: 0,
       },
       avatarState: {
-        x: 0.5,
-        z: 1.8,
+        x: initialCitySpawn.x,
+        z: initialCitySpawn.z,
         y: 0,
         yaw: 0,
         path: [] as { x: number; z: number }[],
@@ -736,6 +775,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           | 'toLobby'
           | 'toHallway'
           | 'openDoorTerminal'
+          | 'openGuestRoom'
           | 'openElevator'
           | null,
         pendingHallDoor: null as string | null,
@@ -937,18 +977,27 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         };
       }
 
-      // 1. Inside Player Suite (402) or Resident Suite
+      // 1. Inside Player Suite, Guest Room, or Resident Suite
       if (loc === 'room' || loc === 'resident_room') {
+        if (loc === 'room' && Math.hypot(av.x - 4.8, av.z + 5.35) < 1.75) {
+          return { label: actionLabel('Use Bathroom Mirror'), execute: () => { releaseCursorForModal(); propsRef.current.onOpenBathroomMirror(); } };
+        }
+        if (loc === 'room' && Math.hypot(av.x - 4.8, av.z - 5.35) < 1.75) {
+          return { label: actionLabel('Open Closet'), execute: () => { releaseCursorForModal(); propsRef.current.onOpenCloset(); } };
+        }
+        if (loc === 'room' && propsRef.current.guestMode && Math.hypot(av.x + 6.4, av.z - SUITE_DOOR_Z) < 1.75) {
+          return { label: actionLabel('Leave Guest Room'), execute: () => { sfx.playToggle(true); propsRef.current.onChangeLocation('world'); } };
+        }
         if (Math.hypot(av.x - -6.4, av.z - SUITE_DOOR_Z) < 1.75) {
           if (loc === 'room' && !suiteUnlocked) {
             return {
-              label: actionLabel(`Enter Keycard (Suite ${PLAYER_SUITE_NUMBER})`),
+              label: actionLabel(`Enter Keycard (Suite ${propsRef.current.playerSuiteNumber})`),
               execute: () => {
                 sfx.playKeycardBeep();
                 av.doorSwingTimer = 2.0;
                 propsRef.current.onUnlockRoomDoor();
                 propsRef.current.onWalkHint?.(
-                  `Keycard accepted · Suite ${PLAYER_SUITE_NUMBER} door unlocked! Walk out to Hallway`
+                  `Keycard accepted · Suite ${propsRef.current.playerSuiteNumber} door unlocked! Walk out to Hallway`
                 );
               },
             };
@@ -1166,10 +1215,19 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       }
 
       // 4. Outdoor Main City ('world')
-      if (
-        Math.hypot(av.x - mainWorld.loftDoorEntryPos.x, av.z - mainWorld.loftDoorEntryPos.z) <
-        2.5
-      ) {
+      if (Math.hypot(av.x - CITY_LAYOUT.airportShopPos.x, av.z - CITY_LAYOUT.airportShopPos.z) < 2.25) {
+        return { label: actionLabel('Browse Airport Clothing Shop'), execute: () => { releaseCursorForModal(); propsRef.current.onOpenAirportShop(); } };
+      }
+      if (Math.hypot(av.x - CITY_LAYOUT.airportDeparturePos.x, av.z - CITY_LAYOUT.airportDeparturePos.z) < 2.25) {
+        return { label: actionLabel('Take a flight'), execute: () => { releaseCursorForModal(); propsRef.current.onOpenAirportDeparture(); } };
+      }
+      if (Math.hypot(av.x - CITY_LAYOUT.salonPos.x, av.z - CITY_LAYOUT.salonPos.z) < 3.0) {
+        return { label: actionLabel('Visit The Salon'), execute: () => { releaseCursorForModal(); propsRef.current.onOpenSalon(); } };
+      }
+      if (Math.hypot(av.x - mainWorld.loftDoorEntryPos.x, av.z - mainWorld.loftDoorEntryPos.z) < 2.5) {
+        if (propsRef.current.guestMode) {
+          return { label: actionLabel('Enter Private Guest Room'), execute: () => { releaseCursorForModal(); sfx.playClick(); propsRef.current.onEnterGuestRoom(); } };
+        }
         return {
           label: hotelDoorUnlocked
             ? actionLabel('Enter Main Lobby')
@@ -1649,11 +1707,11 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             Math.hypot(av.x - mainWorld.loftDoorEntryPos.x, av.z - mainWorld.loftDoorEntryPos.z) <
             2.6;
 
-          if (!unlocked && nearDoor) {
-            releaseCursorForModal();
-            sfx.playClick();
-            propsRef.current.onOpenDoorTerminal();
-            return;
+          if (!unlocked && nearDoor && propsRef.current.guestMode) {
+            releaseCursorForModal(); sfx.playClick(); propsRef.current.onEnterGuestRoom(); return;
+          }
+          if (!unlocked && nearDoor && !propsRef.current.guestMode) {
+            releaseCursorForModal(); sfx.playClick(); propsRef.current.onOpenDoorTerminal(); return;
           }
 
           if (unlocked) {
@@ -1665,13 +1723,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             );
             av.pendingPortal = 'toLobby';
             propsRef.current.onWalkHint?.('Walking through Hotel Main Doors...');
+          } else if (propsRef.current.guestMode) {
+            av.path = buildPlazaPath(av.x, av.z, mainWorld.loftDoorEntryPos.x, mainWorld.loftDoorEntryPos.z);
+            av.pendingPortal = 'openGuestRoom';
+            propsRef.current.onWalkHint?.('Walking to your private guest-room entrance...');
           } else {
-            av.path = buildPlazaPath(
-              av.x,
-              av.z,
-              mainWorld.loftDoorEntryPos.x,
-              mainWorld.loftDoorEntryPos.z
-            );
+            av.path = buildPlazaPath(av.x, av.z, mainWorld.loftDoorEntryPos.x, mainWorld.loftDoorEntryPos.z);
             av.pendingPortal = 'openDoorTerminal';
             propsRef.current.onWalkHint?.('Walking to Hotel Main Entrance Intercom...');
           }
@@ -1995,7 +2052,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           av.doorSwingTimer = 1.8;
           propsRef.current.onUnlockRoomDoor();
           propsRef.current.onWalkHint?.(
-            `Keycard entered · Suite ${PLAYER_SUITE_NUMBER} unlocked!`
+            `Keycard entered · Suite ${propsRef.current.playerSuiteNumber} unlocked!`
           );
           return;
         }
@@ -2425,7 +2482,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
                     av.doorSwingTimer = 1.6;
                     propsRef.current.onUnlockRoomDoor();
                     propsRef.current.onWalkHint?.(
-                      `Keycard tapped · Walk through Suite ${PLAYER_SUITE_NUMBER} door to Hallway`
+                      `Keycard tapped · Walk through Suite ${propsRef.current.playerSuiteNumber} door to Hallway`
                     );
                     propsRef.current.onEmoteChange('idle');
                   } else {
@@ -2438,6 +2495,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
                   sfx.playClick();
                   propsRef.current.onOpenDoorTerminal();
                   propsRef.current.onEmoteChange('idle');
+                } else if (av.pendingPortal === 'openGuestRoom') {
+                  av.pendingPortal = null; av.portalCooldown = 1.0; releaseCursorForModal(); sfx.playClick();
+                  propsRef.current.onEnterGuestRoom(); propsRef.current.onEmoteChange('idle');
                 } else if (av.pendingPortal === 'openElevator') {
                   av.pendingPortal = null;
                   av.portalCooldown = 1.4;
@@ -2578,7 +2638,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           av.path = [];
           av.pendingPortal = null;
           sfx.playToggle(true);
-          propsRef.current.onChangeLocation('hallway');
+          propsRef.current.onChangeLocation(currentLoc === 'room' && propsRef.current.guestMode ? 'world' : 'hallway');
         } else if (
           currentLoc === 'world' &&
           propsRef.current.mainDoorUnlocked &&
@@ -3135,7 +3195,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     } else if (location === 'hallway') {
       if (prev.loc === 'room') {
         // Stepped out of Suite 402
-        const slot = h.hallwayHandles.doors.find((d) => d.roomNumber === PLAYER_SUITE_NUMBER);
+        const slot = h.hallwayHandles.doors.find((d) => d.roomNumber === playerSuiteNumber);
         h.avatarState.x = slot ? slot.x : -2.0;
         h.avatarState.z = -2.0;
         h.avatarState.yaw = 0;
@@ -3219,9 +3279,11 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       new Set(unlockedRooms),
       HOTEL_RESIDENTS,
       avatarConfig.name,
+      playerSuiteNumber,
+      playerSuiteFloor,
       h.maxAnisotropy
     );
-  }, [hallwayFloor, unlockedRooms, avatarConfig.name]);
+  }, [hallwayFloor, unlockedRooms, avatarConfig.name, playerSuiteNumber, playerSuiteFloor]);
 
   // Sync Main Hotel Door Lock & Suite Door Lock
   useEffect(() => {
@@ -3236,7 +3298,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     const suiteBadge =
       location === 'resident_room' && activeResident
         ? activeResident.roomNumber
-        : PLAYER_SUITE_NUMBER;
+        : playerSuiteNumber;
     h.roomHandles.setRoomBadge(suiteBadge, h.maxAnisotropy);
     h.roomHandles.setDoorUnlocked(location === 'resident_room' ? true : roomDoorUnlocked);
   }, [location, activeResident, roomDoorUnlocked]);

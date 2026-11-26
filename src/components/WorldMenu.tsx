@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  Building2,
+  Home,
   Check,
   ChevronRight,
   Crown,
   Globe2,
-  Home,
   Keyboard,
   Loader2,
   Lock,
@@ -69,11 +68,10 @@ interface WorldMenuProps {
   onSetTouch: (patch: Partial<TouchLayoutPreferences>) => void;
   onResetTouch: () => void;
   onWorldUpdated: (world: WorldSummary) => void;
-  onTravelCity: () => void;
-  onTravelSuite: () => void;
   onLeaveWorld: () => Promise<void>;
   onOpenCityMap: () => void;
   onEditRoom: () => void;
+  guestMode?: boolean;
 }
 
 const panel = 'bg-[#0b100d] text-slate-100 border-[#39ff14]/30';
@@ -186,7 +184,7 @@ const CityMiniMap: React.FC<{
       if (!canvas || !ctx) return;
       const w = canvas.width;
       const h = canvas.height;
-      const { bounds, blocks, loftCenter, uLines, zLines } = CITY_LAYOUT;
+      const { bounds, blocks, uLines, zLines } = CITY_LAYOUT;
       const minU = bounds.uMin;
       const maxU = bounds.uMax;
       const minZ = bounds.zMin;
@@ -199,7 +197,7 @@ const CityMiniMap: React.FC<{
       ctx.fillStyle = '#090e0b';
       ctx.fillRect(0, 0, w, h);
       for (const block of blocks) {
-        ctx.fillStyle = block.kind === 'loft_plaza' ? '#39ff14' : block.kind === 'park' ? '#1d4d28' : '#1a231e';
+        ctx.fillStyle = block.kind === 'loft_plaza' ? '#39ff14' : block.kind === 'loft_hotel' ? '#9a784b' : block.kind === 'airport' ? '#477b99' : block.kind === 'park' ? '#1d4d28' : '#1a231e';
         ctx.beginPath();
         ctx.moveTo(toX(block.uMin), toY(block.zMin));
         ctx.lineTo(toX(block.uMax), toY(block.zMin));
@@ -235,7 +233,9 @@ const CityMiniMap: React.FC<{
       ctx.stroke();
       ctx.fillStyle = '#d9ffd0';
       ctx.font = 'bold 9px sans-serif';
-      ctx.fillText('HOTEL', toX(12) + 6, toY(loftCenter.z));
+      ctx.fillText('HOTEL', toX(worldToU(CITY_LAYOUT.loftDoorPos.x, CITY_LAYOUT.loftDoorPos.z)) + 6, toY(CITY_LAYOUT.loftDoorPos.z));
+      ctx.fillStyle = '#8fd4ff';
+      ctx.fillText('AIRPORT', toX(worldToU(CITY_LAYOUT.airportCenter.x, CITY_LAYOUT.airportCenter.z)) + 6, toY(CITY_LAYOUT.airportCenter.z));
       frame = requestAnimationFrame(draw);
     };
     frame = requestAnimationFrame(draw);
@@ -270,11 +270,10 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
   onSetTouch,
   onResetTouch,
   onWorldUpdated,
-  onTravelCity,
-  onTravelSuite,
   onLeaveWorld,
   onOpenCityMap,
   onEditRoom,
+  guestMode = false,
 }) => {
   const [tab, setTab] = useState<MenuTab>('map');
   const [confirmLeave, setConfirmLeave] = useState(false);
@@ -579,37 +578,13 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                   <p className="text-xs text-slate-400 flex items-center gap-1.5">
                     <MapPin className="w-3.5 h-3.5 text-[#39ff14]" />
                     {location === 'world'
-                      ? 'Main City · LoftLife Plaza grid'
+                      ? 'Main City · LoftLife grid'
                       : location === 'room'
-                      ? `Suite ${suite?.number ?? '402'} · Floor ${suite?.floor ?? 4}`
+                      ? guestMode ? 'Guest Room · Saved on this device' : `Suite ${suite?.number ?? '402'} · Floor ${suite?.floor ?? 4}`
                       : location.replace('_', ' ')}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-start gap-2 sm:justify-end">
-                  {location !== 'world' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onTravelCity();
-                        onClose();
-                      }}
-                      className="px-3 py-2 rounded-lg text-xs font-bold bg-[#39ff14] text-[#051205] flex items-center gap-1.5"
-                    >
-                      <Building2 className="w-3.5 h-3.5" /> Travel to Main City
-                    </button>
-                  )}
-                  {location !== 'room' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onTravelSuite();
-                        onClose();
-                      }}
-                      className="px-3 py-2 rounded-lg text-xs font-bold bg-white/10 text-slate-100 flex items-center gap-1.5"
-                    >
-                      <Home className="w-3.5 h-3.5" /> Return to Suite
-                    </button>
-                  )}
                   {location === 'world' && (
                     <button
                       type="button"

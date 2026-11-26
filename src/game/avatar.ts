@@ -165,7 +165,8 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
     clearGroup(rightLegPivot);
 
     const skinColor = new THREE.Color(cfg.skinTone);
-    const lipColor = skinColor.clone().lerp(new THREE.Color('#9e4c4c'), 0.36);
+    const makeupColors = { natural: '#9e4c4c', soft: '#c96f85', bold: '#8b254e' };
+    const lipColor = skinColor.clone().lerp(new THREE.Color(makeupColors[cfg.makeupStyle ?? 'natural']), cfg.makeupStyle === 'bold' ? 0.58 : cfg.makeupStyle === 'soft' ? 0.46 : 0.36);
 
     const skinMat = new THREE.MeshPhysicalMaterial({
       color: skinColor,
@@ -412,6 +413,7 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
 
     // Layered Realistic Eyes (Sclera + Iris + Pupil + Brow)
     const scleraMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.25 });
+    const eyelinerMat = new THREE.MeshStandardMaterial({ color: cfg.makeupStyle === 'bold' ? 0x21131e : 0x342a2b, roughness: 0.55 });
     const irisMat = new THREE.MeshStandardMaterial({ color: 0x3b5c49, roughness: 0.2 });
 
     const buildEye = (x: number): THREE.Mesh => {
@@ -433,7 +435,7 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
       pupil.position.z = 0.0095;
       eyeGroup.add(pupil);
 
-      const lash = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.0035, 0.008), darkMat);
+      const lash = new THREE.Mesh(new THREE.BoxGeometry(0.032, cfg.makeupStyle === 'bold' ? 0.006 : 0.0035, 0.008), eyelinerMat);
       lash.position.set(0, 0.009, 0.008);
       eyeGroup.add(lash);
 

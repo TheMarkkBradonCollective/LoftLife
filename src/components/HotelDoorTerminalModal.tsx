@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Bell, ChevronDown, ChevronUp, CreditCard, DoorOpen, KeyRound, X } from 'lucide-react';
 import { sfx } from '../game/audio';
-import { HOTEL_RESIDENTS, PLAYER_SUITE_FLOOR, PLAYER_SUITE_NUMBER } from '../game/catalog';
+import { HOTEL_RESIDENTS } from '../game/catalog';
 import type { ActiveResident } from '../game/types';
 
 interface HotelDoorTerminalModalProps {
   open: boolean;
   playerName: string;
+  playerSuiteNumber: string;
+  playerSuiteFloor: number;
   mainDoorUnlocked: boolean;
   onUnlockWithKeycard: () => void;
   onUnlockFromResident: (resident: ActiveResident) => void;
@@ -16,6 +18,8 @@ interface HotelDoorTerminalModalProps {
 export const HotelDoorTerminalModal: React.FC<HotelDoorTerminalModalProps> = ({
   open,
   playerName,
+  playerSuiteNumber,
+  playerSuiteFloor,
   mainDoorUnlocked,
   onUnlockWithKeycard,
   onUnlockFromResident,
@@ -123,10 +127,10 @@ export const HotelDoorTerminalModal: React.FC<HotelDoorTerminalModalProps> = ({
               </div>
               <div>
                 <div className="text-sm font-semibold text-white">
-                  {playerName}&apos;s Keycard · Suite {PLAYER_SUITE_NUMBER}
+                  {playerName}&apos;s Keycard · Suite {playerSuiteNumber}
                 </div>
                 <div className="text-xs text-slate-400">
-                  Floor {PLAYER_SUITE_FLOOR} · Unlocks Main Lobby &amp; your suite door
+                  Floor {playerSuiteFloor} · Unlocks Main Lobby &amp; your suite door
                 </div>
               </div>
             </div>

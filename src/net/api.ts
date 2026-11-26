@@ -197,6 +197,7 @@ interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   auth?: boolean;
+  token?: string | null;
   signal?: AbortSignal;
 }
 
@@ -204,7 +205,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const { method = 'GET', body, auth = true, signal } = options;
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['content-type'] = 'application/json';
-  const token = getToken();
+  const token = options.token ?? getToken();
   if (auth && token) headers.authorization = `Bearer ${token}`;
 
   let response: Response;
@@ -253,6 +254,13 @@ export interface AuthResult {
 }
 
 export const api = {
+  createGuestSession: (displayName: string) =>
+    request<{ guest: { id: string; displayName: string }; token: string; expiresAt: number }>(
+      '/guest/session', { method: 'POST', body: { displayName }, auth: false }
+    ),
+  revokeGuestSession: (token: string) =>
+    request<{ ok: boolean }>('/guest/session', { method: 'DELETE', auth: true, token }),
+
   register: (body: {
     handle: string;
     email: string;
