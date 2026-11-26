@@ -381,14 +381,6 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
                       </select>
                       <button
                         type="button"
-                        onClick={() => patch(world, { published: !world.published })}
-                        disabled={busyId === world.id}
-                        className="px-2 py-1 rounded-lg border border-white/12 text-[11px] font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-50"
-                      >
-                        {world.published ? 'Unpublish' : 'Publish'}
-                      </button>
-                      <button
-                        type="button"
                         onClick={() => remove(world)}
                         disabled={busyId === world.id}
                         aria-label={`Delete ${world.name}`}
