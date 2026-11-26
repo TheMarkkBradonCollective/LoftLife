@@ -375,7 +375,7 @@ export function buildHotelLobby(maxAnisotropy: number): HotelLobbyHandles {
 
   const elevSignTex = createSignCanvasTexture(
     'ELEVATOR',
-    'FLOORS 2 · 3 · 4',
+    'RESIDENTIAL FLOORS 2+',
     '#0b100e',
     '#39ff14',
     maxAnisotropy
@@ -838,6 +838,8 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
     unlockedRooms: Set<string>,
     residents: ActiveResident[],
     playerName: string,
+    playerSuiteNumber: string,
+    playerSuiteFloor: number,
     anisotropy: number
   ) {
     const nextFloorTex = createSignCanvasTexture(
