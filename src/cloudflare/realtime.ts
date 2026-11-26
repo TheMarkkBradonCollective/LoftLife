@@ -1,4 +1,3 @@
-import { DurableObject } from 'cloudflare:workers';
 import { neon } from '@neondatabase/serverless';
 import { sha256Hex, verifyAuthToken } from '../../shared/auth-core.mjs';
 
@@ -30,8 +29,22 @@ function error(ws: WebSocket, code: string, message: string) {
   send(ws, { t: 'error', code, message });
 }
 
-export class LoftLifeRealtime extends DurableObject<Env> {
+interface HibernatableWebSocket extends WebSocket {
+  serializeAttachment(value: unknown): void;
+  deserializeAttachment(): unknown;
+}
+interface DurableObjectStateLike {
+  acceptWebSocket(socket: HibernatableWebSocket): void;
+  getWebSockets(): HibernatableWebSocket[];
+}
+declare class WebSocketPair {
+  0: WebSocket;
+  1: WebSocket;
+}
+
+export class LoftLifeRealtime {
   private sql: Sql | null = null;
+  constructor(private ctx: DurableObjectStateLike, private env: Env) {}
   private lastSnapshotAt = 0;
 
   private database(): Sql {
@@ -56,7 +69,7 @@ export class LoftLifeRealtime extends DurableObject<Env> {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
+  async webSocketMessage(ws: HibernatableWebSocket, raw: string | ArrayBuffer) {
     let message: Record<string, unknown>;
     try {
       const source = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
@@ -118,7 +131,7 @@ export class LoftLifeRealtime extends DurableObject<Env> {
     }
   }
 
-  private async join(ws: WebSocket, instanceId: string, token: string, place: unknown) {
+  private async join(ws: HibernatableWebSocket, instanceId: string, token: string, place: unknown) {
     const secret = this.env.LOFTLIFE_SESSION_SECRET ?? '';
     if (secret.length < 32 || !token) {
       error(ws, 'unauthorized', 'Sign in to play online');
@@ -197,7 +210,7 @@ export class LoftLifeRealtime extends DurableObject<Env> {
     return this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment() as Player | undefined)
       .filter((p): p is Player => Boolean(p && p.instanceId === instanceId && p.userId));
   }
-  private broadcast(instanceId: string, value: unknown, except?: WebSocket) {
+  private broadcast(instanceId: string, value: unknown, except?: HibernatableWebSocket) {
     for (const ws of this.ctx.getWebSockets()) {
       if (ws === except) continue;
       const player = ws.deserializeAttachment() as Player | undefined;
@@ -210,7 +223,7 @@ export class LoftLifeRealtime extends DurableObject<Env> {
     this.lastSnapshotAt = now;
     this.broadcast(instanceId, { t: 'snapshot', instanceId, at: now, players: this.players(instanceId).map(publicPlayer), vehicles: [] });
   }
-  private async chat(ws: WebSocket, player: Player, message: Record<string, unknown>) {
+  private async chat(ws: HibernatableWebSocket, player: Player, message: Record<string, unknown>) {
     const body = typeof message.body === 'string' ? message.body.trim().slice(0, MAX_CHAT_LENGTH) : '';
     if (!body) return;
     const now = Date.now();
