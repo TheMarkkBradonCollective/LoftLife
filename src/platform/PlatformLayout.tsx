@@ -1,4 +1,4 @@
-import React, { useState, type ReactNode } from 'react';
+import React, { useEffect, useState, type ReactNode } from 'react';
 import {
   Compass,
   DoorOpen,
@@ -19,7 +19,7 @@ import { AuthGate } from '../components/AuthGate';
 import { usePlatformData } from './data';
 import { useSettings } from './settings';
 import { useIdentity } from './identity';
-import type { GameEntry, PlatformPage } from './types';
+import { OPEN_AUTH_EVENT, type GameEntry, type PlatformPage } from './types';
 import { AvatarCircle, Badge, StatusDot, btnPrimary } from './ui';
 
 const primaryNav: { id: PlatformPage; label: string; icon: React.ReactNode }[] = [
@@ -68,6 +68,12 @@ export function PlatformLayout({
     onNavigate('home');
     setAuthOpen(true);
   };
+
+  useEffect(() => {
+    const openAuth = () => setAuthOpen(true);
+    window.addEventListener(OPEN_AUTH_EVENT, openAuth);
+    return () => window.removeEventListener(OPEN_AUTH_EVENT, openAuth);
+  }, []);
 
   const unread = settings.notifications.messages ? data.unreadMessages : 0;
   const requests = settings.notifications.friendRequests ? data.incomingRequests.length : 0;
@@ -149,9 +155,8 @@ export function PlatformLayout({
 
         <button
           type="button"
-          onClick={() => onEnter({ kind: 'city' })}
-          disabled={!online}
-          className="mb-4 flex items-center justify-between gap-2 rounded-xl border border-[#39ff14]/30 bg-[#39ff14]/8 px-3 py-2.5 text-left transition-colors hover:bg-[#39ff14]/14 disabled:opacity-50"
+          onClick={() => (online ? onEnter({ kind: 'city' }) : setAuthOpen(true))}
+          className="mb-4 flex items-center justify-between gap-2 rounded-xl border border-[#39ff14]/30 bg-[#39ff14]/8 px-3 py-2.5 text-left transition-colors hover:bg-[#39ff14]/14"
         >
           <span>
             <span className="block text-[10px] uppercase tracking-wide text-[#39ff14]/70">Main world</span>
@@ -237,9 +242,8 @@ export function PlatformLayout({
             )}
             <button
               type="button"
-              onClick={() => onEnter({ kind: 'city' })}
-              disabled={!online}
-              className={`${btnPrimary} hidden px-3 py-2 text-xs sm:inline-flex`}
+              onClick={() => (online ? onEnter({ kind: 'city' }) : setAuthOpen(true))}
+              className={`${btnPrimary} hidden px-3 py-2 text-xs disabled:opacity-50 sm:inline-flex`}
             >
               <DoorOpen className="h-3.5 w-3.5" />
               ENTER THECITY

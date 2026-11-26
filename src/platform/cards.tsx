@@ -12,7 +12,7 @@ import {
 import type { WorldSummary } from '../net/api';
 import { useSession } from '../session';
 import { usePlatformData } from './data';
-import type { GameEntry } from './types';
+import { OPEN_AUTH_EVENT, type GameEntry } from './types';
 import { Badge, StatusDot, btnPrimary, btnSecondary, panelClass } from './ui';
 import cityImage from '../assets/images/thecity.jpg';
 import suiteImage from '../assets/images/suite.jpg';
@@ -120,8 +120,10 @@ export function CityEntryCard({
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <button
             type="button"
-            disabled={!online}
-            onClick={() => onEnter({ kind: 'city' })}
+            onClick={() => {
+              if (online) onEnter({ kind: 'city' });
+              else window.dispatchEvent(new Event(OPEN_AUTH_EVENT));
+            }}
             className={`${btnPrimary} px-5 py-3 text-sm tracking-wide`}
           >
             <DoorOpen className="h-4 w-4" />

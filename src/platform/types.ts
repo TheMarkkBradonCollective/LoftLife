@@ -1,3 +1,6 @@
+/** Lets offline destination cards open the platform's existing sign-in dialog. */
+export const OPEN_AUTH_EVENT = 'loftlife:open-auth';
+
 export type PlatformPage =
   | 'home'
   | 'explore'
