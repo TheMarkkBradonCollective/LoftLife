@@ -63,10 +63,11 @@ export class LoftLifeRealtime {
       return new Response('Invalid instance', { status: 400 });
     }
     const pair = new WebSocketPair();
-    const [client, server] = Object.values(pair);
+    const client = pair[0];
+    const server = pair[1] as HibernatableWebSocket;
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({ instanceId, pending: true });
-    return new Response(null, { status: 101, webSocket: client });
+    return new Response(null, { status: 101, webSocket: client } as ResponseInit & { webSocket: WebSocket });
   }
 
   async webSocketMessage(ws: HibernatableWebSocket, raw: string | ArrayBuffer) {
@@ -96,11 +97,13 @@ export class LoftLifeRealtime {
     const player = current as Player;
     switch (message.t) {
       case 'pose': {
+        const now = Date.now();
+        if (now - (player.lastPoseAt ?? 0) < 70) return;
         const next = {
           ...player,
           x: Number(message.x), y: Number(message.y), z: Number(message.z),
           yaw: Number(message.yaw), emote: String(message.emote ?? 'idle').slice(0, 24),
-          location: String(message.location ?? 'world').slice(0, 24), lastSeen: Date.now(),
+          location: String(message.location ?? 'world').slice(0, 24), lastSeen: now, lastPoseAt: now,
         };
         if (![next.x, next.y, next.z, next.yaw].every(Number.isFinite) ||
             Math.abs(next.x) > 10000 || Math.abs(next.y) > 10000 || Math.abs(next.z) > 10000) return;
@@ -196,7 +199,7 @@ export class LoftLifeRealtime {
       connId: crypto.randomUUID(), userId: account.id, handle: account.handle,
       name: account.display_name || account.handle, avatar, instanceId,
       x: 0, y: 0, z: 0, yaw: 0, emote: 'idle', location: 'world',
-      lastSeen: Date.now(), lastChatAt: 0,
+      lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
     };
     ws.serializeAttachment(player);
     const players = this.players(instanceId);
@@ -254,14 +257,14 @@ export class LoftLifeRealtime {
     ws.serializeAttachment({ ...player, lastChatAt: now });
   }
 
-  async webSocketClose(ws: WebSocket) {
+  async webSocketClose(ws: HibernatableWebSocket) {
     const player = ws.deserializeAttachment() as Player | undefined;
     if (player?.userId) {
       this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
       this.broadcastSnapshot(player.instanceId, true);
     }
   }
-  async webSocketError(ws: WebSocket) {
+  async webSocketError(ws: HibernatableWebSocket) {
     const player = ws.deserializeAttachment() as Player | undefined;
     if (player?.userId) this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
   }
