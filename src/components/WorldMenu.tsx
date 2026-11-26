@@ -736,7 +736,7 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                     {canManage && world.status !== 'available' && (
                       <button type="button" disabled={memberBusy} onClick={() => void changeWorldStatus('available')} className="px-3 py-1.5 rounded-lg bg-white/10 text-xs font-semibold disabled:opacity-40">Set Available</button>
                     )}
-                    {canManage && !['offline','build_mode'].includes(world.status) && (
+                    {canManage && !['offline','build_mode','build_pending','maintenance'].includes(world.status) && (
                       <button type="button" disabled={memberBusy} onClick={() => void changeWorldStatus('offline')} className="px-3 py-1.5 rounded-lg bg-white/10 text-xs font-semibold disabled:opacity-40">Set Offline</button>
                     )}
                     {world.canBuild && world.status === 'offline' && (
