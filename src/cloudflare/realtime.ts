@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { sha256Hex, verifyAuthToken } from '../../shared/auth-core.mjs';
+import { TRANSIT_LINES } from './transit';
 
 interface Env {
   DATABASE_URL?: string;
@@ -10,9 +11,16 @@ type Player = {
   connId: string; userId: string; handle: string; name: string; avatar: unknown;
   instanceId: string; x: number; y: number; z: number; yaw: number;
   emote: string; location: string; lastSeen: number; lastChatAt: number; lastPoseAt?: number;
+  riding?: string | null; transitLineId?: string | null; transitSeat?: number | null;
+  transitStartStop?: number; transitStartedAt?: number;
 };
 const MAX_PLAYERS = 64;
 const MAX_CHAT_LENGTH = 280;
+const TRANSIT_SPEED = 9;
+const TRANSIT_DWELL_MS = 4500;
+const TRANSIT_SEATS = 6;
+const TRANSIT_BOARD_RADIUS = 10;
+const TRANSIT_MAX_RIDE_MS = 180000;
 const encoder = new TextEncoder();
 
 function send(ws: WebSocket, value: unknown) {
@@ -22,7 +30,7 @@ function publicPlayer(p: Player) {
   return {
     connId: p.connId, userId: p.userId, handle: p.handle, name: p.name,
     avatar: p.avatar, x: p.x, y: p.y, z: p.z, yaw: p.yaw,
-    emote: p.emote, location: p.location,
+    emote: p.emote, location: p.location, riding: p.riding ?? null,
   };
 }
 function error(ws: WebSocket, code: string, message: string) {
@@ -108,6 +116,16 @@ export class LoftLifeRealtime {
       case 'pose': {
         const now = Date.now();
         if (now - (player.lastPoseAt ?? 0) < 70) return;
+        if (player.riding) {
+          if (now - Number(player.transitStartedAt ?? now) > TRANSIT_MAX_RIDE_MS) {
+            this.transit(ws, player, { action: 'exit' });
+            return;
+          }
+          const next = this.riderPose(player, now);
+          ws.serializeAttachment({ ...next, lastSeen: now, lastPoseAt: now });
+          this.broadcastSnapshot(player.instanceId);
+          return;
+        }
         const next = {
           ...player,
           x: Number(message.x), y: Number(message.y), z: Number(message.z),
@@ -122,6 +140,9 @@ export class LoftLifeRealtime {
       }
       case 'chat':
         await this.chat(ws, player, message);
+        return;
+      case 'transit':
+        this.transit(ws, player, message);
         return;
       case 'ping':
         send(ws, { t: 'pong', at: Date.now() });
@@ -234,7 +255,93 @@ export class LoftLifeRealtime {
     const now = Date.now();
     if (!force && now - this.lastSnapshotAt < 100) return;
     this.lastSnapshotAt = now;
-    this.broadcast(instanceId, { t: 'snapshot', instanceId, at: now, players: this.players(instanceId).map(publicPlayer), vehicles: [] });
+    this.broadcast(instanceId, { t: 'snapshot', instanceId, at: now, players: this.players(instanceId).map(publicPlayer), vehicles: this.vehiclesFor(instanceId, now) });
+  }
+  private routePosition(line: typeof TRANSIT_LINES[number], startStop: number, elapsed: number) {
+    const stops=line.stops, n=stops.length;
+    const distance=(a:typeof stops[number],b:typeof stops[number])=>Math.hypot(b.x-a.x,b.z-a.z);
+    const duration=stops.length*TRANSIT_DWELL_MS+stops.reduce((sum,stop,index)=>sum+(distance(stop,stops[(index+1)%n])/TRANSIT_SPEED)*1000,0);
+    let remaining=Math.max(0,elapsed)%duration, heading=0;
+    const start=stops[startStop%n];
+    if(remaining<TRANSIT_DWELL_MS)return{x:start.x,z:start.z,heading,stopIndex:startStop%n,dwelling:true};
+    remaining-=TRANSIT_DWELL_MS;
+    for(let step=0;step<n;step++){
+      const from=stops[(startStop+step)%n],to=stops[(startStop+step+1)%n];
+      const dist=distance(from,to),segment=(dist/TRANSIT_SPEED)*1000;
+      heading=Math.atan2(to.x-from.x,to.z-from.z);
+      if(remaining<segment){
+        const progress=segment===0?1:remaining/segment;
+        return{x:from.x+(to.x-from.x)*progress,z:from.z+(to.z-from.z)*progress,heading,stopIndex:(startStop+step+1)%n,dwelling:false};
+      }
+      remaining-=segment;
+      const arrived=(startStop+step+1)%n;
+      if(remaining<TRANSIT_DWELL_MS)return{x:to.x,z:to.z,heading,stopIndex:arrived,dwelling:true};
+      remaining-=TRANSIT_DWELL_MS;
+    }
+    return{x:start.x,z:start.z,heading,stopIndex:startStop%n,dwelling:true};
+  }
+  private riderPose(player: Player, now: number): Player {
+    const line=TRANSIT_LINES.find(entry=>entry.id===player.transitLineId);
+    if(!line||player.transitSeat===undefined||player.transitStartStop===undefined||player.transitStartedAt===undefined)return player;
+    const route=this.routePosition(line,player.transitStartStop,now-player.transitStartedAt);
+    const side=player.transitSeat%2===0?-1:1,row=Math.floor(player.transitSeat/2);
+    const lateral=side*0.62,along=1.35-row*1.25;
+    const forwardX=Math.sin(route.heading),forwardZ=Math.cos(route.heading);
+    const rightX=Math.cos(route.heading),rightZ=-Math.sin(route.heading);
+    return {...player,x:route.x+rightX*lateral+forwardX*along,y:0.34,z:route.z+rightZ*lateral+forwardZ*along,yaw:route.heading,location:'transit'};
+  }
+  private vehiclesFor(instanceId: string, now: number) {
+    const riders=this.players(instanceId).filter(player=>Boolean(player.riding&&player.transitLineId));
+    const groups=new Map<string,Player[]>();
+    for(const rider of riders){
+      const key=String(rider.riding);
+      const group=groups.get(key)??[];
+      group.push(rider);groups.set(key,group);
+    }
+    return [...groups.entries()].map(([id,group])=>{
+      const first=group[0],line=TRANSIT_LINES.find(entry=>entry.id===first.transitLineId);
+      if(!line||first.transitStartStop===undefined||first.transitStartedAt===undefined)return null;
+      const route=this.routePosition(line,first.transitStartStop,now-first.transitStartedAt);
+      return {id,lineId:line.id,label:line.label,kind:'bus',x:Math.round(route.x*100)/100,z:Math.round(route.z*100)/100,heading:Math.round(route.heading*1000)/1000,stopIndex:route.stopIndex,dwelling:route.dwelling,seats:TRANSIT_SEATS,riders:group.map(r=>({userId:r.userId,handle:r.handle,seat:r.transitSeat}))};
+    }).filter(Boolean);
+  }
+  private transit(ws: HibernatableWebSocket, player: Player, message: Record<string, unknown>) {
+    const action=String(message.action??'');
+    if(action==='board'){
+      const line=TRANSIT_LINES.find(entry=>entry.id===String(message.lineId??''));
+      if(!line){error(ws,'not_found','Unknown transit line');return;}
+      const stopIndex=line.stops.findIndex(stop=>stop.id===String(message.stopId??''));
+      if(stopIndex<0){error(ws,'bad_request','Unknown transit stop');return;}
+      if(player.riding){error(ws,'conflict','You are already riding transit');return;}
+      if(player.location!=='world'){error(ws,'conflict','Walk to a transit stop first');return;}
+      const stop=line.stops[stopIndex];
+      if(Math.hypot(player.x-stop.x,player.z-stop.z)>TRANSIT_BOARD_RADIUS){error(ws,'bad_request','Walk closer to the stop to board');return;}
+      const existing=this.players(player.instanceId).filter(r=>r.transitLineId===line.id&&r.riding);
+      const startStop=existing[0]?.transitStartStop??stopIndex;
+      const startedAt=existing[0]?.transitStartedAt??Date.now();
+      const used=new Set(existing.map(r=>r.transitSeat));
+      let seat=-1;for(let i=0;i<TRANSIT_SEATS;i++){if(!used.has(i)){seat=i;break;}}
+      if(seat<0){error(ws,'conflict','This bus is full');return;}
+      const vehicleId=`bus_${line.id}_${startedAt}`;
+      const next=this.riderPose({...player,riding:vehicleId,transitLineId:line.id,transitSeat:seat,transitStartStop:startStop,transitStartedAt:startedAt},Date.now());
+      ws.serializeAttachment(next);
+      send(ws,{t:'transit',riding:{vehicleId,lineId:line.id,seat,label:line.label},vehicles:this.vehiclesFor(player.instanceId,Date.now())});
+      this.broadcastSnapshot(player.instanceId,true);
+      return;
+    }
+    if(action==='exit'){
+      if(!player.riding){send(ws,{t:'transit',riding:null,vehicles:this.vehiclesFor(player.instanceId)});return;}
+      const line=TRANSIT_LINES.find(entry=>entry.id===player.transitLineId);
+      const route=line&&player.transitStartStop!==undefined&&player.transitStartedAt!==undefined
+        ? this.routePosition(line,player.transitStartStop,Date.now()-player.transitStartedAt)
+        : {x:player.x,z:player.z,heading:player.yaw};
+      const next:Player={...player,x:route.x,y:0,z:route.z,yaw:route.heading,location:'world',riding:null,transitLineId:null,transitSeat:null,transitStartStop:undefined,transitStartedAt:undefined,lastSeen:Date.now()};
+      ws.serializeAttachment(next);
+      send(ws,{t:'transit',riding:null,exited:{x:route.x,z:route.z,lineId:line?.id??null,label:line?.label??null},vehicles:this.vehiclesFor(player.instanceId)});
+      this.broadcastSnapshot(player.instanceId,true);
+      return;
+    }
+    error(ws,'bad_request','Unknown transit action');
   }
   private async chat(ws: HibernatableWebSocket, player: Player, message: Record<string, unknown>) {
     const body = typeof message.body === 'string' ? message.body.trim().slice(0, MAX_CHAT_LENGTH) : '';
