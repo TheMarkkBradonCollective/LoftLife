@@ -124,7 +124,7 @@ export async function handleAdminRoute(request: Request, sql: Sql, user: User | 
     const existing = await staffFor(sql, accounts[0].id);
     if (existing?.role === 'founder') return fail('Founder appointments are immutable and cannot be changed through staff management.', 403, 'founder_protected');
     if (existing && !canManageRole(actor.role, existing.role)) return fail('You cannot modify this staff member.', 403, 'forbidden');
-    if (actor.role !== 'founder' && departments.some((department) => !actor.departments.includes(department))) {
+    if (actor.role !== 'founder' && (!departments.length || departments.some((department) => !actor.departments.includes(department)))) {
       return fail('You can only assign staff within your own departments.', 403, 'department_scope');
     }
     const now = Date.now();
@@ -168,8 +168,9 @@ export async function handleAdminRoute(request: Request, sql: Sql, user: User | 
     const body = safeDetail(await request.json().catch(() => ({})));
     const hours = Number(body.hours);
     if (!Number.isInteger(hours) || hours < 0 || hours > 720) return fail('Suspension must be between 0 and 720 hours.', 400, 'invalid_input');
-    const target = await sql.query('SELECT id,handle FROM ll_accounts WHERE id=$1 LIMIT 1', [targetId]) as Array<{id:string;handle:string}>;
+    const target = await sql.query(`SELECT a.id,a.handle,s.role AS staff_role FROM ll_accounts a LEFT JOIN ll_staff_assignments s ON s.user_id=a.id AND s.active=TRUE WHERE a.id=$1 LIMIT 1`, [targetId]) as Array<{id:string;handle:string;staff_role:string|null}>;
     if (!target.length) return fail('Player not found.', 404, 'not_found');
+    if (target[0].staff_role) return fail('Staff accounts cannot be suspended through player moderation.', 403, 'staff_protected');
     const until = hours === 0 ? 0 : Date.now() + hours * 60 * 60 * 1000;
     await sql.query('UPDATE ll_accounts SET suspended_until=$2 WHERE id=$1', [targetId, until]);
     await audit(sql, user.id, targetId, hours ? 'player.suspended' : 'player.unsuspended', { hours, until });
