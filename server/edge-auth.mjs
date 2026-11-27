@@ -9,10 +9,11 @@
  */
 import crypto from 'node:crypto';
 import { audit, db, newId, now, tx } from './db.mjs';
-import { DEFAULT_OWNED_CLOTHING } from './economy.mjs';
+import { DEFAULT_OWNED_CLOTHING, ensureBankAccount } from './economy.mjs';
 import { STARTER_SUITE } from './starter.mjs';
 import { DEFAULT_AVATAR, sanitizeAvatar } from './validate.mjs';
 import { firstFreeRoomNumber } from '../shared/hotel-layout.mjs';
+import { WELCOME_BALANCES } from '../shared/finance.mjs';
 
 export const EDGE_TOKEN_PREFIX = 'llt1.';
 const MIN_SECRET_LENGTH = 32;
@@ -107,17 +108,30 @@ export function ensureEdgeUser(payload) {
     ).run(payload.sub, displayName, avatarJson, createdAt);
 
     db.prepare(
-      'INSERT INTO wallets (user_id, yuanzi, tongbao) VALUES (?, 500, 25)'
-    ).run(payload.sub);
+      'INSERT INTO wallets (user_id, yuanzi, tongbao, cubits, cash) VALUES (?, ?, ?, ?, ?)'
+    ).run(
+      payload.sub,
+      WELCOME_BALANCES.yuanzi,
+      WELCOME_BALANCES.tongbao,
+      WELCOME_BALANCES.cubits,
+      WELCOME_BALANCES.cash
+    );
+    ensureBankAccount(payload.sub);
 
-    for (const [currency, amount] of [
-      ['yuanzi', 500],
-      ['tongbao', 25],
-    ]) {
+    for (const [currency, amount] of Object.entries(WELCOME_BALANCES)) {
       db.prepare(
-        `INSERT INTO ledger (id, user_id, currency, delta, balance_after, reason, ref, idempotency_key, created_at)
-         VALUES (?, ?, ?, ?, ?, 'welcome_grant', NULL, ?, ?)`
-      ).run(newId('led'), payload.sub, currency, amount, amount, `welcome:${payload.sub}:${currency}`, createdAt);
+        `INSERT INTO ledger (id, user_id, currency, account, delta, balance_after, reason, ref, idempotency_key, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'welcome_grant', NULL, ?, ?)`
+      ).run(
+        newId('led'),
+        payload.sub,
+        currency,
+        currency === 'cash' ? 'cash' : 'wallet',
+        amount,
+        amount,
+        `welcome:${payload.sub}:${currency}`,
+        createdAt
+      );
     }
 
     const usedRooms = db.prepare('SELECT number FROM suites').all().map((row) => row.number);

@@ -102,6 +102,8 @@ test('edge auth: a Cloudflare token signs into the game server and provisions an
   // New accounts still start with the welcome grant and the furnished suite.
   assert.equal(body.wallet.yuanzi, 500);
   assert.equal(body.wallet.tongbao, 25);
+  assert.equal(body.wallet.cubits, 250);
+  assert.equal(body.wallet.cash, 100);
   assert.equal(body.suite.number, '402');
   assert.ok(body.inventory.length >= 1);
 

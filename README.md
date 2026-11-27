@@ -27,7 +27,7 @@ Other scripts:
 | `npm run dev` | Vite only (no backend — the app falls back to offline mode) |
 | `npm run server` | API + realtime gateway on `:8787`; also serves `dist/` if built |
 | `npm run build` | Production build to `dist/` |
-| `npm test` | 124 integration/acceptance checks: HTTP API, permissions, economy, parties, voice signalling, transit seats, Cloudflare-issued identity, two-client city movement, 64-player capacity, and the shipping Worker/Durable Object path |
+| `npm test` | 161 integration/acceptance checks: HTTP API, permissions, CUBITS/TG-Banking/cash, parties, voice signalling, transit seats, Cloudflare-issued identity, two-client city movement, 64-player capacity, and the shipping Worker/Durable Object path |
 | `npm run lint` | `tsc --noEmit` |
 
 ### Environment variables
@@ -110,8 +110,11 @@ known gaps, priorities and long-term roadmap. The more implementation-specific s
 **Online (added in this build)**
 - Accounts, sessions, rate limiting; first account on a fresh database becomes admin.
 - Persistent character, wardrobe ownership, suite decoration, inventory, wallet.
-- Economy: **YUANZI (元子)** and **TONGBAO (通宝)**, append-only ledger, idempotent purchases,
-  a server-priced shop (23 furniture + 6 wardrobe pieces) and a daily reward.
+- Economy: **CUBITS** digital wallet, **TG-Banking** account + payment card, physical cash, ATMs
+  at Hotel Plaza and Market Hall, and a server-priced general store accepting wallet, card or cash.
+- Legacy **YUANZI (元子)** and **TONGBAO (通宝)** wallets, append-only ledger, idempotent purchases,
+  the furniture/wardrobe shop (23 furniture + 6 wardrobe pieces) and a daily reward remain intact.
+  No exchange rate or automatic conversion is applied.
 - Player-owned worlds: create, decorate, publish, five access modes
   (public / private / invite-only / friends-only / collaborative), collaborator build rights.
 - Friends, friend requests, blocking, player search, city chat, direct messages, proximity chat
@@ -154,7 +157,7 @@ testing.
 server/            API + realtime (plain ESM JavaScript, no build step)
   db.mjs           SQLite schema, transactions, audit log
   auth.mjs         scrypt passwords, sessions, rate limiting
-  economy.mjs      wallets, ledger, shop, purchases, daily reward
+  economy.mjs      wallets, ledger, TG-Banking, cash/ATMs, shops, daily reward
   worlds.mjs       suites + player worlds, access rules, collaborators
   social.mjs       profiles, friends, blocks, chat, reports
   parties.mjs      in-memory party object, invites, membership
