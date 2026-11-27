@@ -18,6 +18,7 @@ import {
 } from '../../shared/auth-core.mjs';
 import { normalizeVoicePreferences } from '../../shared/voice-controls.mjs';
 import { resolveInstance } from '../../shared/instance.mjs';
+import { roomForAllocationIndex } from '../../shared/hotel-layout.mjs';
 import { normalizeControlsPayload } from '../../shared/keybindings.mjs';
 
 /**
@@ -143,9 +144,13 @@ async function provisionGameAccount(sql: Sql, account: AccountRow, avatarInput?:
     [account.id]
   ) as Array<{ room_index: number | string }>;
   const roomIndex = Math.max(1, Number(allocationRows[0]?.room_index) || 1);
-  const suiteFloor = 5 + Math.floor((roomIndex - 1) / 10);
-  const suiteDoor = ((roomIndex - 1) % 10) + 1;
-  const suiteNumber = `${suiteFloor}${String(suiteDoor).padStart(2, '0')}`;
+  // The canonical hotel has 65 suites across floors 2–7 (eleven door slots per
+  // floor, with floor 7's end slot reserved for housekeeping). Allocating from
+  // a flat ten-per-floor index put rooms on floors 5–11 and skipped the east
+  // end rooms entirely, so it disagreed with the client and the elevator.
+  const allocation = roomForAllocationIndex(roomIndex);
+  const suiteFloor = allocation.floor;
+  const suiteNumber = allocation.number;
   await sql.query(
     'INSERT INTO ll_suites (id,owner_id,number,floor,name,items_json,surfaces_json,mood,is_public,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9) ON CONFLICT (owner_id) DO NOTHING',
     [crypto.randomUUID(), account.id, suiteNumber, suiteFloor, STARTER_SUITE.name, JSON.stringify(STARTER_SUITE.items), JSON.stringify(STARTER_SUITE.surfaces), STARTER_SUITE.mood, at]
@@ -697,7 +702,12 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
     const rows = await sql.query('UPDATE ll_suites SET name=$1,items_json=$2,surfaces_json=$3,mood=$4,updated_at=$5 WHERE owner_id=$6 RETURNING *',[name,JSON.stringify(items),JSON.stringify({floor:surfaces.floor,wall:surfaces.wall}),body.mood??'morning',at,account.id]) as Array<Record<string,unknown>>;
     let row=rows[0];
     if (!row) {
-      const created=await sql.query('INSERT INTO ll_suites (id,owner_id,number,floor,name,items_json,surfaces_json,mood,is_public,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9) RETURNING *',[crypto.randomUUID(),account.id,'402',4,name,JSON.stringify(items),JSON.stringify({floor:surfaces.floor,wall:surfaces.wall}),body.mood??'morning',at]) as Array<Record<string,unknown>>;
+      // Self-heal a missing suite without reusing Suite 402: allocate from the
+      // canonical hotel so this account still owns a unique room.
+      await sql.query('INSERT INTO ll_hotel_room_allocations (owner_id, created_at) VALUES ($1,$2) ON CONFLICT (owner_id) DO NOTHING',[account.id,at]);
+      const allocationRows = await sql.query('SELECT room_index FROM ll_hotel_room_allocations WHERE owner_id=$1 LIMIT 1',[account.id]) as Array<{room_index:number|string}>;
+      const allocation = roomForAllocationIndex(Math.max(1, Number(allocationRows[0]?.room_index) || 1));
+      const created=await sql.query('INSERT INTO ll_suites (id,owner_id,number,floor,name,items_json,surfaces_json,mood,is_public,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9) RETURNING *',[crypto.randomUUID(),account.id,allocation.number,allocation.floor,name,JSON.stringify(items),JSON.stringify({floor:surfaces.floor,wall:surfaces.wall}),body.mood??'morning',at]) as Array<Record<string,unknown>>;
       row=created[0];
     }
     return json(suiteView(row));

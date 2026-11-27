@@ -99,6 +99,59 @@ export const HOTEL_TOTAL_ROOMS = HOTEL_FLOORS.reduce(
   0
 );
 
+/**
+ * Every enterable suite in allocation order: floors 2–7, north then south,
+ * then the east-end room. Floor 7's end slot is housekeeping and is skipped,
+ * which is what makes the total exactly 65.
+ * @returns {{floor:number, slot:number, number:string}[]}
+ */
+export function hotelRoomSlots() {
+  /** @type {{floor:number, slot:number, number:string}[]} */
+  const slots = [];
+  for (const floor of HOTEL_FLOORS) {
+    for (let slot = 0; slot < ROOM_SLOTS_PER_FLOOR; slot++) {
+      const number = roomNumberForSlot(floor, slot);
+      if (number) slots.push({ floor, slot, number });
+    }
+  }
+  return slots;
+}
+
+/**
+ * Allocation order. Suite 402 is the signature suite the starter room and the
+ * existing tests assume, so it is handed out first; every other suite follows
+ * in hotel order. This keeps the first account on Floor 4 while guaranteeing
+ * that no two accounts ever receive the same room.
+ */
+export function hotelRoomAllocationOrder() {
+  const slots = hotelRoomSlots();
+  const signature = slots.find((slot) => slot.number === PLAYER_SUITE_NUMBER);
+  if (!signature) return slots;
+  return [signature, ...slots.filter((slot) => slot.number !== PLAYER_SUITE_NUMBER)];
+}
+
+/**
+ * Suite for a 1-based allocation index (1..65). The penthouse code is only
+ * used once every hotel suite is owned, so the 65-suite hotel is never
+ * over-allocated by a duplicate room number.
+ * @param {number} index
+ */
+export function roomForAllocationIndex(index) {
+  const slots = hotelRoomAllocationOrder();
+  const position = Math.floor(Number(index));
+  if (!Number.isFinite(position) || position < 1) return slots[0];
+  return slots[position - 1] ?? { floor: 7, slot: END_SLOT, number: 'PH1' };
+}
+
+/**
+ * First unowned suite in allocation order, or the penthouse overflow code.
+ * @param {Iterable<string>} usedNumbers
+ */
+export function firstFreeRoomNumber(usedNumbers) {
+  const used = new Set(usedNumbers);
+  return hotelRoomAllocationOrder().find((slot) => !used.has(slot.number)) ?? { floor: 7, slot: END_SLOT, number: 'PH1' };
+}
+
 /** Elevator stop list, highest floor first, then the lobby. */
 export function elevatorStops() {
   return [

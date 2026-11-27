@@ -12,6 +12,7 @@ import { audit, db, newId, now, tx } from './db.mjs';
 import { DEFAULT_OWNED_CLOTHING } from './economy.mjs';
 import { STARTER_SUITE } from './starter.mjs';
 import { DEFAULT_AVATAR, sanitizeAvatar } from './validate.mjs';
+import { firstFreeRoomNumber } from '../shared/hotel-layout.mjs';
 
 export const EDGE_TOKEN_PREFIX = 'llt1.';
 const MIN_SECRET_LENGTH = 32;
@@ -119,12 +120,16 @@ export function ensureEdgeUser(payload) {
       ).run(newId('led'), payload.sub, currency, amount, amount, `welcome:${payload.sub}:${currency}`, createdAt);
     }
 
+    const usedRooms = db.prepare('SELECT number FROM suites').all().map((row) => row.number);
+    const allocation = firstFreeRoomNumber(usedRooms);
     db.prepare(
       `INSERT INTO suites (id, owner_id, number, floor, name, items_json, surfaces_json, mood, is_public, updated_at)
-       VALUES (?, ?, '402', 4, ?, ?, ?, ?, 0, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`
     ).run(
       newId('ste'),
       payload.sub,
+      allocation.number,
+      allocation.floor,
       STARTER_SUITE.name,
       JSON.stringify(STARTER_SUITE.items),
       JSON.stringify(STARTER_SUITE.surfaces),

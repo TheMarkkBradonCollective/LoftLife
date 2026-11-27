@@ -37,6 +37,12 @@ import {
   stepTransit,
   vehiclesFor,
 } from './transit.mjs';
+import {
+  DOORBELL_REASON_TEXT,
+  DOORBELL_TIMEOUT_MS,
+  doorbellAvailability,
+  isDoorbellRoomNumber,
+} from '../shared/doorbell-rules.mjs';
 
 const TICK_MS = 100;
 const DEFAULT_CITY_CAPACITY = 64;
@@ -559,6 +565,198 @@ function handleVoice(player, instance, msg) {
   });
 }
 
+/**
+ * Hotel room doorbells.
+ *
+ * A visitor can only reach a suite whose owner is online *and* standing in
+ * their own room; the owner answers from inside the room and the visitor is
+ * handed a read-only copy of the suite. Pending requests never outlive the
+ * timeout, so a request cannot summon an owner who is offline.
+ */
+const doorbellRequests = new Map();
+
+function findOnlinePlayer(userId) {
+  for (const instance of instances.values()) {
+    for (const candidate of instance.members.values()) {
+      if (candidate.userId === userId) return candidate;
+    }
+  }
+  return null;
+}
+
+function suiteForHotelRoom(roomNumber) {
+  return db
+    .prepare(
+      `SELECT s.owner_id, s.number, s.floor, s.name, s.items_json, s.surfaces_json, s.mood,
+              p.display_name, p.avatar_json
+         FROM suites s
+         LEFT JOIN profiles p ON p.user_id = s.owner_id
+        WHERE s.number = ?
+        LIMIT 1`
+    )
+    .get(String(roomNumber));
+}
+
+function suiteVisitPayload(suite) {
+  return {
+    userId: suite.owner_id,
+    name: suite.display_name ?? 'Resident',
+    roomNumber: suite.number,
+    floor: Number(suite.floor),
+    avatar: suite.avatar_json ? JSON.parse(suite.avatar_json) : null,
+    items: JSON.parse(suite.items_json ?? '[]'),
+    surfaces: JSON.parse(suite.surfaces_json ?? '{}'),
+    mood: suite.mood ?? 'morning',
+  };
+}
+
+function closeDoorbell(requestId, payload) {
+  const request = doorbellRequests.get(requestId);
+  if (!request) return;
+  doorbellRequests.delete(requestId);
+  if (request.timer) clearTimeout(request.timer);
+  const visitor = findOnlinePlayer(request.visitorId);
+  const owner = findOnlinePlayer(request.ownerId);
+  if (visitor) send(visitor.ws, payload.visitor);
+  if (owner) send(owner.ws, payload.owner);
+}
+
+function handleHotel(player, msg) {
+  const action = String(msg.action ?? '');
+  if (action === 'respond') {
+    const requestId = String(msg.requestId ?? '');
+    const request = doorbellRequests.get(requestId);
+    if (!request) return;
+    if (request.ownerId !== player.userId) {
+      return fail(player.ws, 'forbidden', 'Only the suite owner can answer that doorbell');
+    }
+    const accept = msg.accept === true;
+    doorbellRequests.delete(requestId);
+    if (request.timer) clearTimeout(request.timer);
+    const visitor = findOnlinePlayer(request.visitorId);
+    if (!visitor) return;
+    if (!accept) {
+      send(visitor.ws, {
+        t: 'hotel',
+        action: 'declined',
+        requestId,
+        roomNumber: request.roomNumber,
+      });
+      send(player.ws, { t: 'hotel', action: 'resolved', requestId, accepted: false });
+      return;
+    }
+    const suite = suiteForHotelRoom(request.roomNumber);
+    if (!suite) {
+      send(visitor.ws, {
+        t: 'hotel',
+        action: 'unavailable',
+        roomNumber: request.roomNumber,
+        reason: 'not_found',
+      });
+      return;
+    }
+    send(visitor.ws, {
+      t: 'hotel',
+      action: 'granted',
+      requestId,
+      room: suiteVisitPayload(suite),
+    });
+    send(player.ws, { t: 'hotel', action: 'resolved', requestId, accepted: true });
+    return;
+  }
+
+  if (action === 'cancel') {
+    const requestId = String(msg.requestId ?? '');
+    const request = doorbellRequests.get(requestId);
+    if (!request || request.visitorId !== player.userId) return;
+    closeDoorbell(requestId, {
+      visitor: { t: 'hotel', action: 'cancelled', requestId },
+      owner: { t: 'hotel', action: 'cancelled', requestId },
+    });
+    return;
+  }
+
+  if (action !== 'ring') return fail(player.ws, 'bad_request', 'Unknown doorbell action');
+  const roomNumber = String(msg.roomNumber ?? '');
+  if (!isDoorbellRoomNumber(roomNumber)) {
+    return fail(player.ws, 'bad_request', 'That is not a hotel suite number');
+  }
+  if (player.isGuest) {
+    return send(player.ws, {
+      t: 'hotel',
+      action: 'unavailable',
+      roomNumber,
+      reason: 'guest',
+    });
+  }
+  const suite = suiteForHotelRoom(roomNumber);
+  const owner = suite ? findOnlinePlayer(suite.owner_id) : null;
+  const availability = doorbellAvailability({
+    suite,
+    requesterId: player.userId,
+    requesterIsGuest: player.isGuest,
+    ownerOnline: Boolean(owner),
+    ownerLocation: owner?.location ?? null,
+  });
+  if (!availability.ok) {
+    return send(player.ws, {
+      t: 'hotel',
+      action: 'unavailable',
+      roomNumber,
+      reason: availability.reason,
+      message: DOORBELL_REASON_TEXT[availability.reason] ?? '',
+    });
+  }
+  if (!owner) {
+    return send(player.ws, {
+      t: 'hotel',
+      action: 'unavailable',
+      roomNumber,
+      reason: 'offline',
+      message: DOORBELL_REASON_TEXT.offline,
+    });
+  }
+  // One pending request per visitor, so a player cannot spam every suite.
+  for (const [id, existing] of doorbellRequests) {
+    if (existing.visitorId === player.userId) {
+      closeDoorbell(id, {
+        visitor: { t: 'hotel', action: 'cancelled', requestId: id },
+        owner: { t: 'hotel', action: 'cancelled', requestId: id },
+      });
+    }
+  }
+  const requestId = crypto.randomUUID();
+  const expiresAt = now() + DOORBELL_TIMEOUT_MS;
+  const timer = setTimeout(() => {
+    closeDoorbell(requestId, {
+      visitor: { t: 'hotel', action: 'expired', requestId, roomNumber },
+      owner: { t: 'hotel', action: 'expired', requestId, roomNumber },
+    });
+  }, DOORBELL_TIMEOUT_MS);
+  timer.unref?.();
+  doorbellRequests.set(requestId, {
+    id: requestId,
+    ownerId: suite.owner_id,
+    visitorId: player.userId,
+    roomNumber,
+    expiresAt,
+    timer,
+  });
+  send(player.ws, { t: 'hotel', action: 'ringing', requestId, roomNumber, expiresAt });
+  send(owner.ws, {
+    t: 'hotel',
+    action: 'ring',
+    requestId,
+    roomNumber,
+    expiresAt,
+    from: {
+      userId: player.userId,
+      handle: player.handle,
+      name: player.isGuest ? `Guest User - ${player.name}` : player.name,
+    },
+  });
+}
+
 function handleTransit(player, msg) {
   if (msg.action === 'board') {
     try {
@@ -751,6 +949,8 @@ export function attachRealtime(httpServer) {
           return handleJoinFriend(player, msg);
         case 'party':
           return handleParty(player, msg);
+        case 'hotel':
+          return handleHotel(player, msg);
         case 'voice':
           return handleVoice(player, instances.get(player.instanceId), msg);
         case 'transit':

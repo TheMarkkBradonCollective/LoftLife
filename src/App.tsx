@@ -4,6 +4,7 @@ import { AvatarModal } from './components/AvatarModal';
 import { CityMapModal } from './components/CityMapModal';
 import { ElevatorPanelModal } from './components/ElevatorPanelModal';
 import { HotelDoorTerminalModal } from './components/HotelDoorTerminalModal';
+import { HotelDoorbellModal, type DoorbellRequest } from './components/HotelDoorbellModal';
 import { AirportTravelModal } from './components/AirportTravelModal';
 import { HOTEL_FLOOR_COUNT, roomRangeLabel } from '../shared/hotel-layout.mjs';
 import { RoomSettingsModal } from './components/RoomSettingsModal';
@@ -246,6 +247,13 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [activeResident, setActiveResident] = useState<ActiveResident | null>(null);
   const [targetVisitResident, setTargetVisitResident] = useState<ActiveResident | null>(null);
   const [doorTerminalOpen, setDoorTerminalOpen] = useState(false);
+  // Real hotel doorbell: an incoming ring from a visitor at this suite's door,
+  // and the visitor's own outgoing ring while waiting for an answer.
+  const [doorbellRequest, setDoorbellRequest] = useState<DoorbellRequest | null>(null);
+  const [doorbellOutgoing, setDoorbellOutgoing] = useState<{
+    requestId: string;
+    roomNumber: string;
+  } | null>(null);
   const [elevatorModalOpen, setElevatorModalOpen] = useState(false);
   const [airportDepartureOpen, setAirportDepartureOpen] = useState(false);
   const [clothingStoreOpen, setClothingStoreOpen] = useState(false);
@@ -690,27 +698,124 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     showHint(`Keycard accepted! Walk into Main Lobby & ride elevator to Floor ${playerSuiteFloor}`);
   }, [playerSuiteFloor, playerSuiteNumber, showHint]);
 
-  const handleUnlockMainFromResident = useCallback(
-    (resident: ActiveResident) => {
-      if (session.status === 'guest') { showHint('Guest visits do not include shared hotel rooms.'); return; }
-      setMainDoorUnlocked(true);
-      setTargetVisitResident(resident);
-      setUnlockedRooms((prev) =>
-        prev.includes(resident.roomNumber) ? prev : [...prev, resident.roomNumber]
-      );
-      window.setTimeout(() => {
-        setDoorTerminalOpen(false);
-        showHint(
-          `Approved by ${resident.name}! Walk into Main Lobby → Elevator → Floor ${resident.floor} → Suite ${resident.roomNumber}`
-        );
-        showNpcChat(
-          resident.name,
-          `I buzzed the lobby door open! Come up the elevator to Floor ${resident.floor}, Suite ${resident.roomNumber}.`
-        );
-      }, 650);
+  /** Ring a suite doorbell. The gateway only forwards the ring when the owner
+   * is online and standing inside that suite; there is no offline summon. */
+  const handleRingDoorbell = useCallback(
+    (roomNumber: string) => {
+      if (session.status === 'guest') {
+        showHint('Guest visits cannot ring resident suites. Create an account to visit players.');
+        return;
+      }
+      if (!gameplayAllowed) {
+        showHint(MOBILE_GAMEPLAY_MESSAGE);
+        return;
+      }
+      if (roomNumber === playerSuiteNumber) {
+        showHint('That is your own suite — use your keycard at the door.');
+        return;
+      }
+      sfx.playIntercomRing();
+      if (!session.ringDoorbell(roomNumber)) {
+        showHint('Connect to TheCity to ring a suite doorbell.');
+        return;
+      }
+      setDoorbellOutgoing({ requestId: '', roomNumber });
+      showHint(`Ringing Suite ${roomNumber}… the owner must be inside to answer.`);
     },
-    [showHint, showNpcChat]
+    [gameplayAllowed, playerSuiteNumber, session, showHint]
   );
+
+  const handleAnswerDoorbell = useCallback(
+    (accept: boolean) => {
+      const request = doorbellRequest;
+      if (!request) return;
+      session.answerDoorbell(request.requestId, accept);
+      setDoorbellRequest(null);
+      showHint(
+        accept
+          ? `Visit approved · ${request.from.name} is entering your suite as a guest.`
+          : 'Visit declined. Your door stays locked.'
+      );
+    },
+    [doorbellRequest, session, showHint]
+  );
+
+  // Doorbell traffic from the gateway: owner requests, visitor grants and
+  // outcomes. A grant carries a read-only snapshot of the owner's suite.
+  useEffect(() => {
+    const event = session.hotelEvent;
+    if (!event) return;
+    if (event.action === 'ring' && event.requestId && event.from) {
+      setDoorbellRequest({
+        requestId: event.requestId,
+        roomNumber: event.roomNumber ?? playerSuiteNumber,
+        from: event.from,
+      });
+      session.clearHotelEvent();
+      return;
+    }
+    if (event.action === 'ringing' && event.requestId && event.roomNumber) {
+      setDoorbellOutgoing({ requestId: event.requestId, roomNumber: event.roomNumber });
+      showHint(`Ringing Suite ${event.roomNumber}…`);
+      session.clearHotelEvent();
+      return;
+    }
+    if (event.action === 'granted' && event.room) {
+      const room = event.room;
+      const resident: ActiveResident = {
+        id: room.userId,
+        name: room.name,
+        roomNumber: room.roomNumber,
+        floor: room.floor,
+        status: 'Visitor access',
+        greeting: `Welcome to Suite ${room.roomNumber}. You can look around, but only ${room.name} can edit this room.`,
+        avatar: room.avatar ?? avatarConfig,
+        surfaces: room.surfaces,
+        mood: room.mood,
+        items: room.items,
+      };
+      setActiveResident(resident);
+      setTargetVisitResident(null);
+      setUnlockedRooms((prev) =>
+        prev.includes(room.roomNumber) ? prev : [...prev, room.roomNumber]
+      );
+      setDoorbellOutgoing(null);
+      setLocation('resident_room');
+      setMode('walk');
+      sfx.playKeycardBeep();
+      showHint(
+        `${room.name}'s Suite ${room.roomNumber} · Visitor access — furniture is read-only`
+      );
+      session.clearHotelEvent();
+      return;
+    }
+    if (
+      event.action === 'declined' ||
+      event.action === 'expired' ||
+      event.action === 'unavailable' ||
+      event.action === 'cancelled' ||
+      event.action === 'resolved'
+    ) {
+      if (event.action === 'resolved') {
+        setDoorbellRequest(null);
+        session.clearHotelEvent();
+        return;
+      }
+      setDoorbellOutgoing(null);
+      setDoorbellRequest(null);
+      const message =
+        event.message ??
+        (event.action === 'declined'
+          ? 'The owner declined the visit.'
+          : event.action === 'expired'
+          ? 'The doorbell timed out. Try again when the owner is home.'
+          : event.action === 'cancelled'
+          ? 'Doorbell cancelled.'
+          : 'Nobody answered the doorbell.');
+      showHint(message);
+      session.clearHotelEvent();
+    }
+  }, [session, avatarConfig, playerSuiteNumber, showHint]);
 
   const handleArriveFloor = useCallback(
     (floor: 'L' | number) => {
@@ -727,7 +832,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         setLocation('hallway');
         setActiveResident(null);
         setMode('walk');
-        showHint(`Arrived on Floor ${floor} · Walk down the hallway to Suites ${floor}01–${floor}10`);
+        showHint(`Arrived on Floor ${floor} · Walk down the hallway to Suites ${roomRangeLabel(floor)}`);
       }
     },
     [gameplayAllowed, handleChangeLocation, showHint]
@@ -857,6 +962,11 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const handleModeSwitch = (next: GameMode) => {
     if (next === 'walk' && !gameplayAllowed) {
       showHint(MOBILE_GAMEPLAY_MESSAGE);
+      return;
+    }
+    // Another player's suite is visitor-only: walking is fine, building is not.
+    if (next === 'edit' && location === 'resident_room') {
+      showHint('Only the owner can decorate and edit this room.');
       return;
     }
     sfx.playClick();
@@ -1385,6 +1495,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     avatarModalOpen ||
     cityMapOpen ||
     doorTerminalOpen ||
+    doorbellRequest !== null ||
     elevatorModalOpen ||
     airportDepartureOpen ||
     clothingStoreOpen ||
@@ -1671,6 +1782,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onUnlockRoomDoor={handleUnlockRoomDoor}
         onUnlockHallwayDoor={handleUnlockHallwayDoor}
         onEnterSuiteFromHallway={handleEnterSuiteFromHallway}
+        onRingDoorbell={handleRingDoorbell}
         graphicsQuality={settings.graphics.quality}
       />
       </Suspense>
@@ -1977,6 +2089,26 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       />
 
       {/* Hotel Main Door Keycard & Up/Down Active Resident Ring Terminal */}
+      {doorbellOutgoing && (
+        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-40 pointer-events-auto rounded-xl bg-[#0b100d]/95 border border-[#39ff14]/45 px-4 py-2.5 flex items-center gap-3 text-xs text-slate-100 shadow-lg">
+          <span className="w-2 h-2 rounded-full bg-[#39ff14] animate-pulse" />
+          <span>Ringing Suite {doorbellOutgoing.roomNumber}… waiting for the owner</span>
+          <button
+            type="button"
+            onClick={() => {
+              if (doorbellOutgoing.requestId) session.cancelDoorbell(doorbellOutgoing.requestId);
+              setDoorbellOutgoing(null);
+              showHint('Doorbell cancelled.');
+            }}
+            className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/15 font-semibold"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      <HotelDoorbellModal request={doorbellRequest} onAnswer={handleAnswerDoorbell} />
+
       <HotelDoorTerminalModal
         open={doorTerminalOpen}
         playerName={avatarConfig.name}
@@ -1984,7 +2116,6 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         playerSuiteFloor={playerSuiteFloor}
         mainDoorUnlocked={mainDoorUnlocked}
         onUnlockWithKeycard={handleUnlockMainWithKeycard}
-        onUnlockFromResident={handleUnlockMainFromResident}
         onClose={() => setDoorTerminalOpen(false)}
       />
 

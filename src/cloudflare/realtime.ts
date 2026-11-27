@@ -3,6 +3,12 @@ import { sha256Hex, verifyAuthToken } from '../../shared/auth-core.mjs';
 import { CITY_INSTANCE, resolveInstance } from '../../shared/instance.mjs';
 import { settingsFor } from './platform';
 import { TRANSIT_LINES } from './transit';
+import {
+  DOORBELL_REASON_TEXT,
+  DOORBELL_TIMEOUT_MS,
+  doorbellAvailability,
+  isDoorbellRoomNumber,
+} from '../../shared/doorbell-rules.mjs';
 
 interface Env {
   DATABASE_URL?: string;
@@ -343,6 +349,9 @@ export class LoftLifeRealtime {
       case 'party':
         await this.handleParty(ws, player, message);
         return;
+      case 'hotel':
+        await this.hotel(ws, player, message);
+        return;
       case 'joinFriend': {
         if (player.isGuest) { error(ws, 'forbidden', 'Guest visitors cannot join friends'); return; }
         const handle = String(message.handle ?? '').trim().replace(/^@/, '').toLowerCase();
@@ -531,6 +540,216 @@ export class LoftLifeRealtime {
     this.broadcastSnapshot(instanceId, true);
     this.scheduleSweep();
     if (instanceId.startsWith('world:')) await this.syncWorldStatus(instanceId.slice(6));
+  }
+
+  private hotelRequests = new Map<
+    string,
+    {
+      id: string;
+      ownerId: string;
+      visitorId: string;
+      roomNumber: string;
+      expiresAt: number;
+      timer?: ReturnType<typeof setTimeout>;
+    }
+  >();
+
+  private socketFor(userId: string): HibernatableWebSocket | null {
+    for (const socket of this.ctx.getWebSockets()) {
+      const state = socket.deserializeAttachment() as Player | undefined;
+      if (state?.userId === userId && !state.departed && socket.readyState === WebSocket.OPEN) {
+        return socket;
+      }
+    }
+    return null;
+  }
+
+  private async suiteRow(roomNumber: string) {
+    const rows = await this.database().query(
+      `SELECT s.owner_id, s.number, s.floor, s.name, s.items_json, s.surfaces_json, s.mood,
+              a.display_name, p.avatar_json
+         FROM ll_suites s
+         JOIN ll_accounts a ON a.id = s.owner_id
+         LEFT JOIN ll_profiles p ON p.user_id = s.owner_id
+        WHERE s.number = $1
+        LIMIT 1`,
+      [roomNumber]
+    ) as Array<{
+      owner_id: string;
+      number: string;
+      floor: number | string;
+      name: string;
+      items_json: string;
+      surfaces_json: string;
+      mood: string;
+      display_name: string | null;
+      avatar_json: string | null;
+    }>;
+    return rows[0] ?? null;
+  }
+
+  private suiteVisitPayload(suite: Awaited<ReturnType<LoftLifeRealtime['suiteRow']>>) {
+    if (!suite) return null;
+    let avatar: unknown = null;
+    try {
+      avatar = suite.avatar_json ? JSON.parse(suite.avatar_json) : null;
+    } catch {
+      avatar = null;
+    }
+    return {
+      userId: suite.owner_id,
+      name: suite.display_name ?? 'Resident',
+      roomNumber: suite.number,
+      floor: Number(suite.floor),
+      avatar,
+      items: JSON.parse(suite.items_json ?? '[]'),
+      surfaces: JSON.parse(suite.surfaces_json ?? '{}'),
+      mood: suite.mood ?? 'morning',
+    };
+  }
+
+  private closeDoorbell(
+    requestId: string,
+    visitorPayload: unknown,
+    ownerPayload: unknown
+  ) {
+    const request = this.hotelRequests.get(requestId);
+    if (!request) return;
+    this.hotelRequests.delete(requestId);
+    if (request.timer) clearTimeout(request.timer);
+    const visitor = this.socketFor(request.visitorId);
+    const owner = this.socketFor(request.ownerId);
+    if (visitor) send(visitor, visitorPayload);
+    if (owner) send(owner, ownerPayload);
+  }
+
+  /** Owner-gated suite doorbells; the owner must be online and in the suite. */
+  private async hotel(
+    ws: HibernatableWebSocket,
+    player: Player,
+    message: Record<string, unknown>
+  ) {
+    const action = String(message.action ?? '');
+    if (action === 'respond') {
+      const requestId = String(message.requestId ?? '');
+      const request = this.hotelRequests.get(requestId);
+      if (!request) return;
+      if (request.ownerId !== player.userId) {
+        error(ws, 'forbidden', 'Only the suite owner can answer that doorbell');
+        return;
+      }
+      const accept = message.accept === true;
+      this.hotelRequests.delete(requestId);
+      if (request.timer) clearTimeout(request.timer);
+      const visitor = this.socketFor(request.visitorId);
+      if (!visitor) return;
+      if (!accept) {
+        send(visitor, { t: 'hotel', action: 'declined', requestId, roomNumber: request.roomNumber });
+        send(ws, { t: 'hotel', action: 'resolved', requestId, accepted: false });
+        return;
+      }
+      const suite = await this.suiteRow(request.roomNumber);
+      const room = this.suiteVisitPayload(suite);
+      if (!room) {
+        send(visitor, {
+          t: 'hotel',
+          action: 'unavailable',
+          roomNumber: request.roomNumber,
+          reason: 'not_found',
+          message: DOORBELL_REASON_TEXT.not_found,
+        });
+        return;
+      }
+      send(visitor, { t: 'hotel', action: 'granted', requestId, room });
+      send(ws, { t: 'hotel', action: 'resolved', requestId, accepted: true });
+      return;
+    }
+
+    if (action === 'cancel') {
+      const requestId = String(message.requestId ?? '');
+      const request = this.hotelRequests.get(requestId);
+      if (!request || request.visitorId !== player.userId) return;
+      this.closeDoorbell(
+        requestId,
+        { t: 'hotel', action: 'cancelled', requestId },
+        { t: 'hotel', action: 'cancelled', requestId }
+      );
+      return;
+    }
+
+    if (action !== 'ring') {
+      error(ws, 'bad_request', 'Unknown doorbell action');
+      return;
+    }
+    const roomNumber = String(message.roomNumber ?? '');
+    if (!isDoorbellRoomNumber(roomNumber)) {
+      error(ws, 'bad_request', 'That is not a hotel suite number');
+      return;
+    }
+    if (player.isGuest) {
+      send(ws, { t: 'hotel', action: 'unavailable', roomNumber, reason: 'guest', message: DOORBELL_REASON_TEXT.guest });
+      return;
+    }
+    const suite = await this.suiteRow(roomNumber);
+    const ownerSocket = suite ? this.socketFor(suite.owner_id) : null;
+    const ownerState = ownerSocket?.deserializeAttachment() as Player | undefined;
+    const availability = doorbellAvailability({
+      suite,
+      requesterId: player.userId,
+      requesterIsGuest: player.isGuest,
+      ownerOnline: Boolean(ownerSocket),
+      ownerLocation: ownerState?.location ?? null,
+    });
+    if (!availability.ok || !ownerSocket) {
+      send(ws, {
+        t: 'hotel',
+        action: 'unavailable',
+        roomNumber,
+        reason: availability.reason === 'ok' ? 'offline' : availability.reason,
+        message: (DOORBELL_REASON_TEXT as Record<string, string>)[availability.reason] ?? '',
+      });
+      return;
+    }
+    // At most one pending ring per visitor.
+    for (const [id, existing] of this.hotelRequests) {
+      if (existing.visitorId === player.userId) {
+        this.closeDoorbell(
+          id,
+          { t: 'hotel', action: 'cancelled', requestId: id },
+          { t: 'hotel', action: 'cancelled', requestId: id }
+        );
+      }
+    }
+    const requestId = crypto.randomUUID();
+    const expiresAt = Date.now() + DOORBELL_TIMEOUT_MS;
+    const timer = setTimeout(() => {
+      this.closeDoorbell(
+        requestId,
+        { t: 'hotel', action: 'expired', requestId, roomNumber },
+        { t: 'hotel', action: 'expired', requestId, roomNumber }
+      );
+    }, DOORBELL_TIMEOUT_MS);
+    this.hotelRequests.set(requestId, {
+      id: requestId,
+      ownerId: suite!.owner_id,
+      visitorId: player.userId,
+      roomNumber,
+      expiresAt,
+      timer,
+    });
+    send(ws, { t: 'hotel', action: 'ringing', requestId, roomNumber, expiresAt });
+    send(ownerSocket, {
+      t: 'hotel',
+      action: 'ring',
+      requestId,
+      roomNumber,
+      expiresAt,
+      from: {
+        userId: player.userId,
+        handle: player.handle,
+        name: player.isGuest ? `Guest User - ${player.name}` : player.name,
+      },
+    });
   }
 
   private players(instanceId: string): Player[] {
