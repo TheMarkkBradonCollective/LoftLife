@@ -1,7 +1,7 @@
 # LoftLife World Upgrade — Implementation Report
 
-Branch: `freebuff/0756ec6a1031b32441466a6b`  
-Status: implemented locally, uncommitted, not merged, no pull request opened.
+Branch: `main`  
+Status: implemented, merged with the latest `main`, and pushed to `main`.
 
 This pass extends the existing React 19 + Three.js client and Node/SQLite server. It does not
 replace accounts, guest sessions, city hosting, room ownership, permissions, multiplayer,
@@ -147,11 +147,12 @@ marquee, suite plaque and airport/retail signage.
 | Command | Result |
 | --- | --- |
 | `npm run lint` (`tsc --noEmit`) | pass |
-| `npm test` (`node --test server/test/*.test.mjs`) | **116 pass, 0 fail** |
+| `npm test` (`node --test server/test/*.test.mjs`) | **128 pass, 0 fail** |
 | `npm run build` (`vite build`) | pass |
 
-The test suite includes the new `hotel-layout.test.mjs` (7 floors, 11/10 split, total 65,
-Suite 402 unchanged) and the worker two-guest city test.
+The post-merge test run includes the new `hotel-layout.test.mjs` (7 floors, 11/10 split,
+total 65, Suite 402 unchanged), the worker city/multiplayer suites, city capacity, session
+expiry and the existing economy, voice and avatar tests.
 
 ### Browser checks (Cloud preview, desktop and phone viewport)
 
@@ -215,5 +216,6 @@ geometry/draw-call counts, not an FPS claim. A real Android/desktop FPS pass rem
 
 ## Pull requests
 
-None. Per the request, nothing was committed, pushed, or merged into `main`. The complete
-change set is in the working tree on `freebuff/0756ec6a1031b32441466a6b` for review.
+None. At the user's explicit request this change set was committed and merged directly into
+`main` instead of being opened as a pull request. The feature branch
+`freebuff/0756ec6a1031b32441466a6b` is retained in history.
