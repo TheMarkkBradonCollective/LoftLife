@@ -368,7 +368,8 @@ export class LoftLifeRealtime {
       }
       ws.serializeAttachment(player);
       await this.replaceDuplicateConnections(ws, player);
-      send(ws, { t: 'ready', instance: { id: instanceId, kind: 'city', worldId: null, capacity: MAX_PLAYERS, count: active.length + 1 }, you: publicPlayer(player), players: active.map(publicPlayer) });
+      const existingPlayers = this.players(instanceId).filter((entry) => entry.connId !== player.connId);
+      send(ws, { t: 'ready', instance: { id: instanceId, kind: 'city', worldId: null, capacity: MAX_PLAYERS, count: existingPlayers.length + 1 }, you: publicPlayer(player), players: existingPlayers.map(publicPlayer) });
       this.broadcast(instanceId, { t: 'join', player: publicPlayer(player) }, ws);
       this.broadcastSnapshot(instanceId, true);
       return;
