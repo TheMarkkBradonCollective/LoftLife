@@ -5,6 +5,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createAvatarRig, type AvatarRig } from '../game/avatar';
 import { sfx } from '../game/audio';
 import {
+  DEFAULT_AVATAR,
   getCatalogItem,
   GRID_SIZE,
   HOTEL_RESIDENTS,
@@ -2565,6 +2566,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     let lastStreetLabel = '';
     let stairCooldown = 0;
+    // Outdoor ISO spring-arm compression is independent of the GTA-style chase camera.
+    let isoOcclusionScale = 1;
 
     /** Keep rendered buses/stops in sync with the latest server state. */
     function syncTransit() {
@@ -3353,6 +3356,30 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           camera.position.set(follow.camera.x, follow.camera.y, follow.camera.z);
           controls.target.set(follow.target.x, follow.target.y, follow.target.z);
         }
+        // In the outdoor city, ISO always keeps the active avatar as its focus.
+        // Compress the orbit arm before it crosses a building so façades cannot
+        // hide the player. This is deliberately separate from Play View's chase
+        // camera and does not alter room/lobby camera behavior.
+        if (currentLoc === 'world' && !handles.cameraAnim.active) {
+          const focusX = av.x;
+          const focusY = av.y + 1.0;
+          const focusZ = av.z;
+          const hitScale = resolveCityCameraScale(
+            focusX, focusY, focusZ,
+            camera.position.x, camera.position.y, camera.position.z,
+            mainWorld.cameraOccluders
+          );
+          const scaleRate = hitScale < isoOcclusionScale ? 24 : 4.5;
+          isoOcclusionScale = THREE.MathUtils.damp(isoOcclusionScale, hitScale, scaleRate, delta);
+          camera.position.set(
+            focusX + (camera.position.x - focusX) * isoOcclusionScale,
+            focusY + (camera.position.y - focusY) * isoOcclusionScale,
+            focusZ + (camera.position.z - focusZ) * isoOcclusionScale
+          );
+          controls.target.set(focusX, focusY, focusZ);
+        } else if (currentLoc !== 'world') {
+          isoOcclusionScale = 1;
+        }
         // Close zoom may sit inside the orbit's normal minimum; restore the
         // wide range once the camera is home and Z is off.
         if (!handles.cameraAnim.active && !propsRef.current.closeZoom && controls.minDistance !== 5.0) {
@@ -3984,7 +4011,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       const signature = JSON.stringify(player.avatar ?? null);
       let entry = h.remoteRigs.get(connId);
       if (!entry) {
-        const rig = createAvatarRig(player.avatar ?? propsRef.current.avatarConfig);
+        const rig = createAvatarRig(player.avatar ?? DEFAULT_AVATAR);
         rig.root.add(createNameTag(player.name || player.handle));
         rig.root.position.set(player.x, player.y, player.z);
         h.scene.add(rig.root);
