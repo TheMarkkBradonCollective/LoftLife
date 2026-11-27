@@ -632,7 +632,7 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                 <div className="rounded-lg bg-white/5 px-3 py-2">
                   <span className="text-[9px] uppercase tracking-widest text-slate-500">Camera</span>
                   <p className="text-xs font-semibold">
-                    {viewMode === 'play' ? 'Play View' : 'Isometric'}
+                    {viewMode === 'play' ? 'Third-Person' : 'Isometric'}
                   </p>
                 </div>
                 <div className="rounded-lg bg-white/5 px-3 py-2">
@@ -1036,7 +1036,7 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                           controlMode === mode ? 'bg-[#39ff14] text-[#051205]' : 'text-slate-300'
                         }`}
                       >
-                        {mode === 'isometric' ? 'Isometric' : 'Play View'}
+                        {mode === 'isometric' ? 'Isometric' : 'Third-Person'}
                       </button>
                     ))}
                   </div>
@@ -1145,7 +1145,7 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                   <RotateCcw className="w-3.5 h-3.5" /> Reset all controls
                 </button>
                 <span className="text-[10px] text-slate-500">
-                  Defaults: Isometric W/A/S/D pans camera, F follow, Z zoom, M menu. Play View
+                  Defaults: Isometric W/A/S/D moves your avatar, F toggles camera follow, Z zoom, M menu. Third-Person
                   W/A/S/D moves, mouse looks, Z zoom.
                 </span>
               </div>
