@@ -961,7 +961,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     [selectedItem, items, pushHistory]
   );
 
-  // Keyboard shortcuts (R to rotate, Esc to cancel, Delete to remove, H to toggle dock, V Play View, M City Map)
+  // Keyboard shortcuts (R to rotate, Esc to cancel, Delete to remove, H to toggle dock, V Third-Person, M City Map)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (
@@ -1136,8 +1136,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     setFollowCharacter(next);
     showHint(
       next
-        ? 'Following your avatar · WASD pans temporarily, F stops following'
-        : 'Camera free · WASD pans freely, F follows your avatar again'
+        ? 'Following your avatar · F stops following'
+        : 'Camera free · WASD still moves your avatar, F follows again'
     );
   }, [followCharacter, showHint, viewMode]);
 
@@ -1630,7 +1630,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       />
       </Suspense>
 
-      {/* Functional Aiming Reticle when Pointer-Locked in Play View */}
+      {/* Functional aiming reticle when pointer-locked in Third-Person */}
       {viewMode === 'play' && pointerLocked && (
         <div className="fixed inset-0 pointer-events-none z-20 flex items-center justify-center">
           <div className="w-1.5 h-1.5 rounded-full bg-[#39ff14] shadow-sm ring-2 ring-black/60" />
