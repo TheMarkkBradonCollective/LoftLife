@@ -292,6 +292,18 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   onEnterSuiteFromHallway,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Give each client a slightly different city arrival point. Without this,
+  // every player spawns on the exact same coordinates and avatars can overlap
+  // so completely that multiplayer appears not to be working.
+  const citySpawnOffsetRef = useRef<{ x: number; z: number } | null>(null);
+  if (!citySpawnOffsetRef.current) {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 2 + Math.random() * 1.5;
+    citySpawnOffsetRef.current = {
+      x: Math.cos(angle) * radius,
+      z: Math.sin(angle) * radius,
+    };
+  }
   const [webglError, setWebglError] = useState(false);
   // Camera distance/position captured the first time Z zoomed in, so the second
   // press returns to the exact previous view instead of a default.
@@ -3135,9 +3147,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     if (location === 'world') {
       const entry = h.mainWorld.loftDoorEntryPos;
-      h.avatarState.x = entry.x;
-      h.avatarState.z = entry.z;
-      h.avatarState.y = getCityGroundY(entry.x, entry.z);
+      const offset = citySpawnOffsetRef.current ?? { x: 0, z: 0 };
+      const spawnX = entry.x + offset.x;
+      const spawnZ = entry.z + offset.z;
+      h.avatarState.x = spawnX;
+      h.avatarState.z = spawnZ;
+      h.avatarState.y = getCityGroundY(spawnX, spawnZ);
       h.avatarState.yaw = 0;
       h.playCam.yaw = Math.PI;
       h.controls.minAzimuthAngle = -Infinity;
