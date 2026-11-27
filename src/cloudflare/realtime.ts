@@ -454,7 +454,7 @@ export class LoftLifeRealtime {
       connId: crypto.randomUUID(), userId: account.id, handle: account.handle,
       name: account.display_name || account.handle, avatar, instanceId,
       x: 0, y: 0, z: 0, yaw: 0, emote: 'idle', location: 'world', voice: false, voiceMode: 'say',
-      lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
+      connectedAt: Date.now(), lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
     };
     ws.serializeAttachment(player);
     await this.replaceDuplicateConnections(ws, player);
