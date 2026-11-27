@@ -1,9 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { buildPreviewModel } from '../game/modelPreview';
-import { preloadKenneyAsset, subscribeKenneyAssets } from '../game/assets/kenneyRuntime';
-import { getCatalogItem } from '../game/catalog';
-import { assetUrl } from '../game/assets/assetUrl';
+import { preloadImportedFurniture } from '../game/importedFurniture';
 
 interface ModelInspectorProps {
   catalogId: string;
@@ -30,16 +28,17 @@ export const ModelInspector: React.FC<ModelInspectorProps> = ({
 }) => {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [failed, setFailed] = useState(false);
-  const [assetRevision, setAssetRevision] = useState(0);
-
-  // Imported models are fetched on demand and rendered as soon as they land;
-  // the transparent catalog render stays visible in the meantime.
-  useEffect(() => subscribeKenneyAssets(() => setAssetRevision((value) => value + 1)), []);
+  const [importedFurnitureRevision, setImportedFurnitureRevision] = useState(0);
 
   useEffect(() => {
-    const entry = getCatalogItem(catalogId);
-    if (entry?.asset) void preloadKenneyAsset(entry);
-  }, [catalogId]);
+    let cancelled = false;
+    void preloadImportedFurniture().then((revision) => {
+      if (!cancelled) setImportedFurnitureRevision(revision);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -171,16 +170,12 @@ export const ModelInspector: React.FC<ModelInspectorProps> = ({
       renderer.dispose();
       if (renderer.domElement.parentNode === host) host.removeChild(renderer.domElement);
     };
-  }, [catalogId, colour, active, assetRevision]);
+  }, [catalogId, colour, active, importedFurnitureRevision]);
 
   if (failed && fallbackSrc) {
     return (
       <div className={`flex items-center justify-center ${className ?? ''}`}>
-        <img
-          src={assetUrl(fallbackSrc)}
-          alt={label ?? 'Catalog preview'}
-          className="max-h-full max-w-full object-contain"
-        />
+        <img src={fallbackSrc} alt={label ?? 'Catalog preview'} className="max-h-full max-w-full object-contain" />
       </div>
     );
   }

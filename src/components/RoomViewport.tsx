@@ -10,6 +10,7 @@ import {
   HOTEL_RESIDENTS,
 } from '../game/catalog';
 import { buildFurnitureGroup, updateFurnitureAnimations } from '../game/furniture';
+import { preloadImportedFurniture } from '../game/importedFurniture';
 import {
   findPath,
   getEffectiveSize,
@@ -31,7 +32,6 @@ import { buildHotelHallway, buildHotelLobby } from '../game/hotelBuilder';
 import { buildAirportTerminal } from '../game/airportBuilder';
 import { buildClothingStore } from '../game/clothingStoreBuilder';
 import { buildRoomArchitecture, SUITE_DOOR_Z } from '../game/roomBuilder';
-import { preloadKenneyAssets, subscribeKenneyAssets } from '../game/assets/kenneyRuntime';
 import {
   buildMainWorld,
   getCityGroundY,
@@ -84,25 +84,10 @@ interface RemoteRigEntry {
   target: { x: number; y: number; z: number; yaw: number };
   emote: EmoteType;
   moving: boolean;
-  speed: number;
   phase: number;
 }
 
-const EMOTE_SET = new Set<string>([
-  'idle',
-  'walk',
-  'run',
-  'stand',
-  'sit',
-  'wave',
-  'dance',
-  'cheer',
-  'talk',
-  'gesture',
-  'jump',
-  'enter_vehicle',
-  'exit_vehicle',
-]);
+const EMOTE_SET = new Set<string>(['idle', 'walk', 'sit', 'wave', 'dance', 'cheer', 'jump']);
 
 /** Floating name label above a remote player. */
 function createNameTag(text: string): THREE.Sprite {
@@ -353,10 +338,17 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   // The airport faces north; the hotel and clothing store face south.
   const cityArrivalViewRef = useRef<'hotel' | 'airport' | 'store'>('hotel');
   const [webglError, setWebglError] = useState(false);
-  // Bumped whenever an imported GLB finishes loading. Rebuilding is scoped to
-  // groups that were marked pending, so untouched furniture keeps its state.
-  const [kenneyRevision, setKenneyRevision] = useState(0);
-  useEffect(() => subscribeKenneyAssets(() => setKenneyRevision((value) => value + 1)), []);
+  const [importedFurnitureRevision, setImportedFurnitureRevision] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    void preloadImportedFurniture().then((revision) => {
+      if (!cancelled && revision > 0) setImportedFurnitureRevision(revision);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // Camera distance/position captured the first time Z zoomed in, so the second
   // press returns to the exact previous view instead of a default.
   const zoomStateRef = useRef<{
@@ -370,15 +362,6 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     location === 'resident_room' && activeResident ? activeResident.surfaces : surfaces;
   const activeMood =
     location === 'resident_room' && activeResident ? activeResident.mood : mood;
-
-  // Preload only the GLBs this room actually contains. Downloads are shared
-  // and deduplicated, so walking between rooms never refetches a model.
-  useEffect(() => {
-    const imported = activeItems
-      .map((item) => getCatalogItem(item.catalogId))
-      .filter((item): item is NonNullable<typeof item> => Boolean(item?.asset));
-    if (imported.length) void preloadKenneyAssets(imported);
-  }, [activeItems]);
 
   const propsRef = useRef({
     location,
@@ -811,11 +794,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     // 4. Main City Outdoor Container
     const worldContainer = new THREE.Group();
-    const mainWorld = buildMainWorld(
-      maxAnisotropy,
-      isSoftwareGl,
-      isSoftwareGl ? 'low' : effectiveQuality === 'low' ? 'low' : effectiveQuality === 'medium' ? 'medium' : 'high'
-    );
+    const mainWorld = buildMainWorld(maxAnisotropy, isSoftwareGl);
     worldContainer.add(mainWorld.worldGroup);
     scene.add(worldContainer);
 
@@ -3455,25 +3434,13 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       avatarRig.shadowPlane.visible = !av.seatedUid;
 
       const effectiveEmote: EmoteType = isMoving
-        ? sprinting
-          ? 'run'
-          : 'walk'
+        ? 'walk'
         : av.seatedUid
         ? 'sit'
         : propsRef.current.activeEmote;
-      const groundSpeed = isMoving
-        ? sprinting
-          ? currentLoc === 'world'
-            ? 10.5
-            : 4.4
-          : currentLoc === 'world'
-          ? 4.4
-          : 2.85
-        : 0;
 
-      avatarRig.updateAnimation(effectiveEmote, isMoving, elapsed, delta, av.jumpY, {
-        speed: groundSpeed,
-      });
+      const animElapsed = isMoving && sprinting ? elapsed * 1.35 : elapsed;
+      avatarRig.updateAnimation(effectiveEmote, isMoving, animElapsed, delta, av.jumpY);
 
       // Remote players: interpolate toward their last server position.
       for (const entry of handles.remoteRigs.values()) {
@@ -3486,18 +3453,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         entry.rig.root.rotation.y +=
           shortestAngleDiff(entry.rig.root.rotation.y, entry.target.yaw) *
           (1 - Math.exp(-10 * delta));
-        const measuredSpeed = entry.moving ? remaining / Math.max(delta, 0.001) : 0;
-        entry.speed = THREE.MathUtils.lerp(entry.speed, Math.min(measuredSpeed, 12), 1 - Math.exp(-10 * delta));
-        const remoteEmote: EmoteType = entry.moving
-          ? entry.emote === 'run' || entry.speed > 4.6
-            ? 'run'
-            : 'walk'
-          : entry.emote === 'walk' || entry.emote === 'run'
-          ? 'idle'
-          : entry.emote;
-        entry.rig.updateAnimation(remoteEmote, entry.moving, elapsed + entry.phase, delta, 0, {
-          speed: entry.speed,
-        });
+        entry.rig.updateAnimation(entry.emote, entry.moving, elapsed + entry.phase, delta, 0);
       }
 
       if (rippleLife > 0) {
@@ -3929,16 +3885,6 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     h.mainWorld.setMainDoorUnlocked(mainDoorUnlocked);
   }, [mainDoorUnlocked]);
 
-  // Graphics quality caps the crowd LOD immediately; renderer resolution and
-  // shadows still settle on the next world entry (they need a new renderer).
-  useEffect(() => {
-    const h = sceneHandlesRef.current;
-    if (!h) return;
-    const effectiveQuality =
-      lowPowerGraphics && graphicsQuality === 'high' ? 'medium' : graphicsQuality;
-    h.mainWorld.cityCrowd.setQuality(effectiveQuality);
-  }, [graphicsQuality, lowPowerGraphics]);
-
   useEffect(() => {
     const h = sceneHandlesRef.current;
     if (!h) return;
@@ -4048,7 +3994,6 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           target: { x: player.x, y: player.y, z: player.z, yaw: player.yaw },
           emote: 'idle',
           moving: false,
-          speed: 0,
           phase: Math.random() * 6,
         };
         h.remoteRigs.set(connId, entry);
@@ -4063,12 +4008,10 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       const moved = Math.hypot(player.x - entry.target.x, player.z - entry.target.z) > 0.03;
       entry.target = { x: player.x, y: player.y, z: player.z, yaw: player.yaw };
       entry.moving = moved;
-      entry.emote = (player.emote === 'walk' || player.emote === 'run'
-        ? moved
-          ? (player.emote as EmoteType)
-          : 'idle'
+      entry.emote = (player.emote === 'walk'
+        ? (moved ? 'walk' : 'idle')
         : EMOTE_SET.has(player.emote)
-        ? (player.emote as EmoteType)
+        ? player.emote
         : moved
         ? 'walk'
         : 'idle') as EmoteType;
@@ -4117,8 +4060,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     for (const item of activeItems) {
       const prevGrp = h.furnitureMap.get(item.uid);
-      const sig = `${item.catalogId}|${item.color}|${item.active ? 1 : 0}`;
-      const needsRebuild = !prevGrp || prevGrp.userData.sig !== sig || Boolean(prevGrp.userData.assetPending);
+      const sig = `${item.catalogId}|${item.color}|${item.active ? 1 : 0}|${importedFurnitureRevision}`;
+      const needsRebuild = !prevGrp || prevGrp.userData.sig !== sig;
 
       if (needsRebuild) {
         if (prevGrp) h.furnitureRoot.remove(prevGrp);
@@ -4141,7 +4084,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         prevGrp.visible = !(location === 'room' && item.uid === movingUid);
       }
     }
-  }, [activeItems, movingUid, location, kenneyRevision]);
+  }, [activeItems, movingUid, location, importedFurnitureRevision]);
 
   // Rebuild stacked storeys when the stack changes, and show at most the active
   // storey plus the ones below it (upper floors never occlude the build view).
@@ -4170,7 +4113,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       return;
     }
 
-    if (h.ghostKey !== activeCatalogId || h.ghostGroup?.userData.assetPending) {
+    const nextGhostKey = `${activeCatalogId}|${importedFurnitureRevision}`;
+    if (h.ghostKey !== nextGhostKey) {
       if (h.ghostGroup) h.scene.remove(h.ghostGroup);
       const g = buildFurnitureGroup(
         {
@@ -4186,11 +4130,11 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       g.visible = false;
       h.scene.add(g);
       h.ghostGroup = g;
-      h.ghostKey = activeCatalogId;
+      h.ghostKey = nextGhostKey;
     } else if (h.ghostGroup) {
       h.ghostGroup.rotation.y = (placingRotation * Math.PI) / 2;
     }
-  }, [location, mode, placingCatalogId, movingUid, placingRotation, placingColor, activeItems, kenneyRevision]);
+  }, [location, mode, placingCatalogId, movingUid, placingRotation, placingColor, activeItems, importedFurnitureRevision]);
 
   // Sync Selection Outline Box
   useEffect(() => {
