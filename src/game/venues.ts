@@ -18,17 +18,18 @@ export type VenueId =
 
 export type DoorSide = 'north' | 'south' | 'east' | 'west';
 
-export type VenueInteractionKind = 'shop_furniture' | 'inspect';
+export type VenueInteractionKind = 'shop_furniture' | 'atm' | 'inspect';
 
 export interface VenueInteractionPoint {
   id: string;
-  venueId: VenueId;
+  venueId?: VenueId;
   /** World position of the counter / rack the player presses E at. */
   x: number;
   z: number;
   radius: number;
   label: string;
   kind: VenueInteractionKind;
+  atmId?: string;
   hint?: string;
 }
 

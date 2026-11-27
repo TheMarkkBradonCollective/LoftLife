@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Loader2, ShoppingBag, Shirt, Sofa, X } from 'lucide-react';
+import { Banknote, CreditCard, Loader2, ShoppingBag, Shirt, Sofa, Store, Wallet, X } from 'lucide-react';
 import { api, ApiError, type ShopEntry } from '../net/api';
 import { useSession } from '../session';
 import { DEFAULT_AVATAR } from '../game/catalog';
@@ -14,21 +14,24 @@ const CARRY_IDS = new Set<CarryId>(['none', 'backpack', 'purse', 'tote']);
 
 const panel = 'bg-[#15181c]/97 text-slate-100 border-white/20';
 
-const currencyLabel = (currency: 'yuanzi' | 'tongbao') => (currency === 'yuanzi' ? '元' : '宝');
+const currencyLabel = (currency: ShopEntry['currency']) =>
+  currency === 'yuanzi' ? '元' : currency === 'tongbao' ? '宝' : '₡';
 
 interface ShopModalProps {
   open: boolean;
   onClose: () => void;
-  initialTab?: 'furniture' | 'clothing';
+  initialTab?: 'furniture' | 'clothing' | 'general';
   readOnly?: boolean;
 }
 
 /** Buy furniture and wardrobe pieces with the server-owned price list. */
 export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab = 'furniture', readOnly = false }) => {
-  const { wallet, inventory, buy, status, profile } = useSession();
+  const { wallet, bank, inventory, buy, status, profile } = useSession();
   const [furniture, setFurniture] = useState<ShopEntry[]>([]);
   const [clothing, setClothing] = useState<ShopEntry[]>([]);
-  const [tab, setTab] = useState<'furniture' | 'clothing'>(initialTab);
+  const [general, setGeneral] = useState<ShopEntry[]>([]);
+  const [tab, setTab] = useState<'furniture' | 'clothing' | 'general'>(initialTab);
+  const [payment, setPayment] = useState<'wallet' | 'card' | 'cash'>('wallet');
   useEffect(() => { if (open) setTab(initialTab); }, [open, initialTab]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +47,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
         if (cancelled) return;
         setFurniture(payload.furniture);
         setClothing(payload.clothing);
+        setGeneral(payload.general ?? []);
       })
       .catch(() => {
         if (!cancelled) setError('Could not load the shop.');
@@ -61,7 +65,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
 
   if (!open) return null;
 
-  const items = tab === 'furniture' ? furniture : clothing;
+  const items = tab === 'furniture' ? furniture : tab === 'clothing' ? clothing : general;
   const previewConfig = useMemo(() => {
     const base = profile?.avatar ?? DEFAULT_AVATAR;
     if (!preview) return base;
@@ -82,14 +86,27 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
     setBusyId(item.id);
     setError(null);
     try {
-      await buy(item.id);
-      setFlash(`Added ${item.label ?? item.id} to your collection`);
+      await buy(item.id, item.kind === 'general' ? payment : 'wallet');
+      setFlash(
+        item.kind === 'general'
+          ? `Paid ${currencyLabel(item.currency)}${item.price} for ${item.label ?? item.id} (${payment})`
+          : `Added ${item.label ?? item.id} to your collection`
+      );
       window.setTimeout(() => setFlash(null), 2500);
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'Purchase failed');
     } finally {
       setBusyId(null);
     }
+  };
+
+  const affordable = (item: ShopEntry) => {
+    if (item.currency === 'cubits') {
+      if (payment === 'card') return (bank?.account.balance ?? 0) >= item.price;
+      if (payment === 'cash') return wallet.cash >= item.price;
+      return wallet.cubits >= item.price;
+    }
+    return item.currency === 'yuanzi' ? wallet.yuanzi >= item.price : wallet.tongbao >= item.price;
   };
 
   const label = (item: ShopEntry) =>
@@ -111,6 +128,12 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
             </span>
             <span className="px-2 py-0.5 rounded bg-black/45 text-[11px] font-mono-tabular text-amber-300">
               宝 {wallet.tongbao}
+            </span>
+            <span className="px-2 py-0.5 rounded bg-black/45 text-[11px] font-mono-tabular text-cyan-300">
+              ₡ {wallet.cubits}
+            </span>
+            <span className="px-2 py-0.5 rounded bg-black/45 text-[11px] font-mono-tabular text-lime-300">
+              Cash {wallet.cash}
             </span>
             <button
               type="button"
@@ -142,7 +165,43 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
           >
             <Shirt className="w-3.5 h-3.5" /> Wardrobe
           </button>
+          <button
+            type="button"
+            onClick={() => { setTab('general'); setPreview(null); }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 ${
+              tab === 'general' ? 'bg-white text-[#15181b]' : 'text-slate-300 hover:bg-white/10'
+            }`}
+          >
+            <Store className="w-3.5 h-3.5" /> General Store
+          </button>
         </div>
+
+        {tab === 'general' && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-white/8 px-4 py-2">
+            <span className="mr-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
+              Pay with
+            </span>
+            {([
+              ['wallet', 'Wallet CUBITS', Wallet],
+              ['card', 'TG-Bank card', CreditCard],
+              ['cash', 'Cash', Banknote],
+            ] as const).map(([method, label, Icon]) => (
+              <button
+                key={method}
+                type="button"
+                onClick={() => setPayment(method)}
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-semibold ${
+                  payment === method
+                    ? 'bg-cyan-300 text-[#10171a]'
+                    : 'bg-white/8 text-slate-300 hover:bg-white/15'
+                }`}
+              >
+                <Icon className="h-3 w-3" />
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {(error || flash) && (
           <div
@@ -182,8 +241,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
           {items.length === 0 && <p className="text-xs text-slate-500">Loading the catalog…</p>}
           {items.map((item) => {
             const count = owned.get(item.id) ?? 0;
-            const affordable =
-              item.currency === 'yuanzi' ? wallet.yuanzi >= item.price : wallet.tongbao >= item.price;
+            const canPay = affordable(item);
             const clothingOwned = tab === 'clothing' && count > 0;
             return (
               <div
@@ -196,6 +254,12 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
                 } ${tab === 'clothing' ? 'cursor-pointer' : ''}`}
               >
                 <div className="text-xs font-semibold text-slate-100 leading-tight">{label(item)}</div>
+                {item.kind === 'general' && (
+                  <p className="text-[10px] leading-snug text-slate-400">
+                    {item.description}
+                    {item.merchant ? ` · ${item.merchant}` : ''}
+                  </p>
+                )}
                 <div className="flex items-center justify-between">
                   <span className="font-mono-tabular text-[11px] text-slate-300">
                     {currencyLabel(item.currency)} {item.price}
@@ -206,12 +270,12 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
                 </div>
                 <button
                   type="button"
-                  disabled={readOnly || busyId === item.id || clothingOwned || !affordable}
+                  disabled={readOnly || busyId === item.id || clothingOwned || !canPay}
                   onClick={() => purchase(item)}
                   className="mt-auto px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 bg-white text-[#15181b] hover:bg-white/90 disabled:opacity-40"
                 >
                   {busyId === item.id && <Loader2 className="w-3 h-3 animate-spin" />}
-                  {readOnly ? 'Sign in to purchase' : clothingOwned ? 'Owned' : affordable ? 'Buy' : 'Not enough'}
+                  {readOnly ? 'Sign in to purchase' : clothingOwned ? 'Owned' : canPay ? 'Buy' : 'Not enough'}
                 </button>
               </div>
             );
@@ -219,8 +283,9 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
         </div>
 
         <p className="px-4 py-2 border-t border-white/8 text-[11px] text-slate-500">
-          Bought furniture is placed from Edit Room → Furniture. Bought clothing enters your account
-          inventory and unlocks at your home closet, including on other devices.
+          General-store prices are set by the server and paid in CUBITS from your wallet, TG-Bank card
+          or physical cash. Bought furniture is placed from Edit Room → Furniture; clothing unlocks at
+          your home closet on every device.
         </p>
       </div>
     </div>

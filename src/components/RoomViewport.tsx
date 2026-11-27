@@ -181,6 +181,8 @@ interface RoomViewportProps {
   onOpenClothingStore: () => void;
   /** Market Hall furniture counter. */
   onOpenFurnitureShop?: () => void;
+  /** TG-Bank ATM; the id tells the bank which machine validated a cash move. */
+  onOpenBank?: (atmId?: string) => void;
   /** One-shot request to walk to a public destination's entrance. */
   travelRequest?: { x: number; z: number; label: string; yaw?: number; at: number } | null;
   onEnterGuestRoom: () => void;
@@ -304,6 +306,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   onOpenAirportDeparture,
   onOpenClothingStore,
   onOpenFurnitureShop,
+  onOpenBank,
   travelRequest,
   onEnterGuestRoom,
   onOpenCloset,
@@ -390,6 +393,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onOpenAirportDeparture,
     onOpenClothingStore,
     onOpenFurnitureShop,
+    onOpenBank,
     travelRequest,
     onEnterGuestRoom,
     onOpenCloset,
@@ -453,6 +457,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onOpenAirportDeparture,
     onOpenClothingStore,
     onOpenFurnitureShop,
+    onOpenBank,
     travelRequest,
     onEnterGuestRoom,
     onOpenCloset,
@@ -1425,6 +1430,16 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
                 releaseCursorForModal();
                 sfx.playClick();
                 propsRef.current.onOpenFurnitureShop?.();
+              },
+            };
+          }
+          if (spot.kind === 'atm') {
+            return {
+              label: actionLabel(spot.label),
+              execute: () => {
+                releaseCursorForModal();
+                sfx.playClick();
+                propsRef.current.onOpenBank?.(spot.atmId);
               },
             };
           }

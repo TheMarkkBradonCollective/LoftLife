@@ -14,7 +14,7 @@ Status legend: **Done** (implemented and verified) · **Partial** (real function
 | 5 | Social: friends, messaging, presence, synchronised interaction | **Done** — friends, DMs, city/world/party chat, proximity text, proximity voice, presence, movement sync |
 | 6 | Building, ownership, permissions, collaboration, publishing | **Partial** — create/decorate/publish/5 access modes/collaborators. Advanced piece-level construction and custom assets not started |
 | 7 | Main City, transportation, vehicles, interactive locations | **Done** — city, ambient traffic, two rideable LoftLine routes with server-assigned seats |
-| 8 | Economy: Yuanzi, Tongbao, wallets, transactions, shops | **Partial** — wallets, ledger, purchases, daily reward. No earned income loop from activities, no player trading |
+| 8 | Economy: CUBITS, TG-Banking, cash, wallets, transactions, shops | **Partial** — CUBITS wallet, immutable ledger, TG-Bank account/card, ATM cash, general-store payments, legacy Yuanzi/Tongbao shops, daily reward. No earned income loop from activities, no player trading, no legacy-currency conversion policy |
 | 9 | Cross-platform (browser / Windows / Android, Unity 6) | **Partial** — the web client is responsive with dedicated touch controls; the protocol is documented for a Unity client, which is not started |
 | 10 | Testing and launch preparation | **Partial** — 112 tests, CI checks and Cloudflare deployment workflow are active; commit `262e285` is deployed. Live two-client guest validation against Neon/Durable Objects, migration verification and load testing remain open |
 
@@ -24,8 +24,9 @@ These affect money or player trust, so they are proposed rather than implemented
 
 1. **Earning rates and prices.** The current 元500 starting balance and prices (元35–340) are
    placeholders chosen for a sensible first session. Real balance tuning needs playtesting data.
-2. **Any exchange rate between Yuanzi and Tongbao.** None exists. Do not invent one casually — a
-   wrong rate either trivialises the premium currency or gates progress.
+2. **Any exchange rate between Yuanzi, Tongbao, CUBITS or cash.** None exists. Legacy balances and
+   ledger rows are preserved until a conversion policy is explicitly approved; do not invent one
+   casually — a wrong rate either trivialises a currency or gates progress.
 3. **Real-money purchase or monetisation rules.** Not implemented, not designed. This needs an
    explicit product decision plus regional legal review before any code is written.
 4. **Custom asset support.** Uploaded models/materials need a validation pipeline (poly budget,

@@ -2345,6 +2345,16 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     }
   }
 
+  const plazaAtm = {
+    id: 'hotel_plaza_atm',
+    x: loftDoorPos.x + 3.2,
+    z: loftDoorPos.z + 2.0,
+    radius: 2.2,
+    label: 'Use TG-Bank ATM',
+    kind: 'atm' as const,
+    atmId: 'hotel_plaza',
+  };
+
   return {
     worldGroup,
     groundRaycastPlane,
@@ -2357,7 +2367,7 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     djDeckGroup,
     seats,
     npcs,
-    venueInteractions: cityVenues.interactions,
+    venueInteractions: [...cityVenues.interactions, plazaAtm],
     venueFootprints: cityVenues.occluders,
     obstacles,
     cameraOccluders,
