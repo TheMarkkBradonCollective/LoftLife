@@ -94,6 +94,7 @@ export interface GameInterfaceProps {
   onRangeChange: (range: VoiceSnapshot['range']) => void;
   onMicPress: () => void;
   onMicRelease: () => void;
+  onMicModeChange: (mode: VoiceSnapshot['micMode']) => void;
   onOpenVoiceSettings: () => void;
   onInteract: () => void;
   onJump: () => void;
@@ -144,6 +145,7 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
   onRangeChange,
   onMicPress,
   onMicRelease,
+  onMicModeChange,
   onOpenVoiceSettings,
   onInteract,
   onJump,
@@ -192,6 +194,7 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
     onRangeChange,
     onMicPress,
     onMicRelease,
+    onMicModeChange,
     onOpenVoiceSettings,
   };
 
