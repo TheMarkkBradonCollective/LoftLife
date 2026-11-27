@@ -332,7 +332,9 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [closeZoom, setCloseZoom] = useState(false);
   // F toggles Follow Character in Isometric Mode; Third-Person always follows.
   const [followCharacter, setFollowCharacter] = useState(true);
-  const playerPoseRef = useRef({ x: 0, z: 0, yaw: 0 });
+  // `known` stays false until the 3D scene has reported a real position, so the
+  // gateway never receives the placeholder origin as a spawn claim.
+  const playerPoseRef = useRef({ x: 0, z: 0, yaw: 0, known: false });
 
   // Dev-only probe so each runtime can be exercised without guessing from CSS.
   useEffect(() => {
@@ -506,6 +508,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     if (session.status !== 'online' && session.status !== 'guest') return;
     const timer = window.setInterval(() => {
       const pose = playerPoseRef.current;
+      if (!pose.known) return;
       session.setPose({
         x: pose.x,
         y: 0,
@@ -797,6 +800,16 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     session.enterCity();
     showHint('Back in your suite');
   }, [session, showHint, conflict]);
+
+  // A server-requested move (join friend / join party leader) goes through the
+  // normal world-entry checks instead of a raw socket swap.
+  useEffect(() => {
+    session.setRelocateHandler((worldId) => {
+      if (worldId) void handleEnterWorld(worldId);
+      else handleLeaveWorld();
+    });
+    return () => session.setRelocateHandler(null);
+  }, [session.setRelocateHandler, handleEnterWorld, handleLeaveWorld]);
 
   const handleWorldUpdated = useCallback((updated: WorldSummary) => {
     setActiveWorld((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));

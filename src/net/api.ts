@@ -6,6 +6,24 @@ import type { AvatarConfig, LightingMood, PlacedItem, RoomSurfaceConfig } from '
 
 const TOKEN_KEY = 'loftlife_session_token_v1';
 
+export interface LivePlayerPresence {
+  userId: string;
+  handle: string;
+  name: string;
+  isGuest: boolean;
+  instanceId: string;
+  location: string;
+  connectedAt: number;
+  lastSeen: number;
+}
+
+export interface LiveGameMonitoring {
+  online: number;
+  updatedAt: number;
+  cityCapacity: number;
+  instances: { id: string; kind: string; worldId: string | null; count: number; capacity: number }[];
+  players: LivePlayerPresence[];
+}
 export interface SessionUser {
   id: string;
   handle: string;
@@ -421,6 +439,7 @@ export const api = {
   report: (body: { handle: string; reason: string; details?: string }) =>
     request<{ id: string; status: string }>('/reports', { method: 'POST', body }),
 
+  monitoring: () => request<LiveGameMonitoring>('/admin/monitoring'),
   presence: () =>
     request<{
       online: number;

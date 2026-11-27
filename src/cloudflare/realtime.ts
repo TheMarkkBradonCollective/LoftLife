@@ -14,11 +14,24 @@ type Player = {
   connId: string; userId: string; handle: string; name: string; avatar: unknown; isGuest?: boolean;
   instanceId: string; x: number; y: number; z: number; yaw: number;
   emote: string; location: string; lastSeen: number; lastChatAt: number; lastPoseAt?: number;
+  positioned?: boolean; teleportStrikes?: number; sessionExpiresAt?: number; joinedAt?: number;
+  voice?: boolean; voiceMode?: 'whisper' | 'say' | 'shout'; voiceBudget?: number[];
+  connectedAt?: number; departed?: boolean;
   riding?: string | null; transitLineId?: string | null; transitSeat?: number | null;
   transitStartStop?: number; transitStartedAt?: number;
 };
 const MAX_PLAYERS = 64;
 const MAX_CHAT_LENGTH = 280;
+// The walkable city reaches x≈632 / z≈447 at the airport.
+const MAX_CITY_COORD = 1500;
+const MAX_SPEED = 12; // m/s; sprint is 10.5, the remainder is lag slack
+const MAX_STEP = 2.5; // metres of slack for one pose message
+// Placement is accepted without the speed check right after joining, because
+// the client scene reports its spawn a moment after the socket connects.
+const SPAWN_GRACE_MS = 5_000;
+const IDLE_TIMEOUT_MS = 90_000;
+const SESSION_SWEEP_MS = 15_000;
+const PENDING_CONNECTION_MS = 15_000;
 const TRANSIT_SPEED = 9;
 const TRANSIT_DWELL_MS = 4500;
 const TRANSIT_SEATS = 6;
@@ -35,6 +48,7 @@ function publicPlayer(p: Player) {
     name: p.isGuest ? `Guest User - ${p.name}` : p.name, displayName: p.name, isGuest: Boolean(p.isGuest),
     avatar: p.avatar, x: p.x, y: p.y, z: p.z, yaw: p.yaw,
     emote: p.emote, location: p.location, riding: p.riding ?? null,
+    voice: Boolean(p.voice), voiceMode: p.voiceMode ?? 'say',
   };
 }
 function error(ws: WebSocket, code: string, message: string) {
@@ -48,7 +62,12 @@ interface HibernatableWebSocket extends WebSocket {
 interface DurableObjectStateLike {
   acceptWebSocket(socket: HibernatableWebSocket): void;
   getWebSockets(): HibernatableWebSocket[];
-  storage: { get<T>(key: string): Promise<T | undefined>; put(key: string, value: unknown): Promise<void> };
+  storage: {
+    get<T>(key: string): Promise<T | undefined>;
+    put(key: string, value: unknown): Promise<void>;
+    setAlarm?(scheduledTime: number): Promise<void> | void;
+    getAlarm?(): Promise<number | null> | number | null;
+  };
 }
 declare class WebSocketPair {
   0: WebSocket;
@@ -130,11 +149,41 @@ export class LoftLifeRealtime {
       return Response.json({ok:true});
     }
     if (requestUrl.pathname === '/internal/party/presence-snapshot' && request.method === 'GET') {
+      if (!this.env.REALTIME) return Response.json({ online: 0, instances: [], cityCapacity: MAX_PLAYERS });
       const state = await this.partyData();
-      const counts = new Map<string,number>();
-      for (const instanceId of Object.values(state.userInstances)) counts.set(instanceId,(counts.get(instanceId)??0)+1);
-      const instances = [...counts.entries()].map(([id,count])=>({id,kind:id.startsWith('world:')?'world':'city',worldId:id.startsWith('world:')?id.slice(6):null,capacity:MAX_PLAYERS,count}));
-      return Response.json({online:Object.values(state.userInstances).length,instances,cityCapacity:MAX_PLAYERS});
+      const url = new URL(request.url);
+      const includeDetails = url.searchParams.get('details') === '1';
+      const instanceIds = [...new Set(['city:main', ...Object.values(state.userInstances)])].filter(id => id !== 'party:global');
+      const snapshots = await Promise.all(instanceIds.map(async (instanceId) => {
+        const target = new URL('https://loftlife-internal/internal/presence');
+        target.searchParams.set('instanceId', instanceId);
+        if (includeDetails) target.searchParams.set('details', '1');
+        const response = await this.env.REALTIME!.get(this.env.REALTIME!.idFromName(instanceId)).fetch(new Request(target));
+        if (!response.ok) return null;
+        return await response.json() as { online: number; instances: Array<{id:string;kind:string;worldId:string|null;capacity:number;count:number}>; userIds: string[]; players?: Array<Record<string,unknown>> };
+      }));
+      const active = snapshots.filter((snapshot): snapshot is NonNullable<typeof snapshot> => Boolean(snapshot));
+      const actualPresence: Record<string,string> = {};
+      for (const snapshot of active) for (const userId of snapshot.userIds) {
+        const instance = snapshot.instances[0];
+        if (instance) actualPresence[userId] = instance.id;
+      }
+      const liveInstances = active.flatMap(snapshot => snapshot.instances).map((instance) => ({
+        ...instance, count: Object.values(actualPresence).filter((id) => id === instance.id).length,
+      })).filter((instance) => instance.count > 0);
+      state.userInstances = actualPresence;
+      await this.ctx.storage.put('party_state', state);
+      const uniquePlayers = new Map<string,Record<string,unknown>>();
+      if (includeDetails) for (const snapshot of active) for (const player of snapshot.players ?? []) uniquePlayers.set(String(player.userId), player);
+      const result: Record<string,unknown> = { online: Object.keys(actualPresence).length, instances: liveInstances, cityCapacity: MAX_PLAYERS, updatedAt: Date.now() };
+      if (includeDetails) result.players = [...uniquePlayers.values()];
+      return Response.json(result, { headers: { 'cache-control': 'no-store' } });
+    }
+    if (requestUrl.pathname === '/internal/party/instance-of' && request.method === 'POST') {
+      const body = await request.json().catch(() => ({})) as { userId?: string };
+      if (!body.userId) return new Response('userId required',{status:400});
+      const state = await this.partyData();
+      return Response.json({ instanceId: state.userInstances[body.userId] ?? null });
     }
     if (requestUrl.pathname === '/internal/party/state' && request.method === 'POST') {
       const body = await request.json().catch(() => ({})) as { userId?: string };
@@ -149,30 +198,41 @@ export class LoftLifeRealtime {
       return Response.json(result);
     }
     if (requestUrl.pathname === '/internal/party/presence' && request.method === 'POST') {
-      const body = await request.json().catch(() => ({})) as { userId?: string; instanceId?: string | null };
+      const body = await request.json().catch(() => ({})) as { userId?: string; instanceId?: string | null; expectedInstanceId?: string };
       if (!body.userId) return new Response('userId required',{status:400});
       const state = await this.partyData();
       if (body.instanceId) state.userInstances[body.userId] = body.instanceId;
-      else delete state.userInstances[body.userId];
+      else if (!body.expectedInstanceId || state.userInstances[body.userId] === body.expectedInstanceId) delete state.userInstances[body.userId];
       await this.ctx.storage.put('party_state',state);
       return Response.json({ok:true});
     }
     if (requestUrl.pathname === '/internal/party/broadcast' && request.method === 'POST') {
-      const body = await request.json().catch(() => ({})) as { notifyUserIds?: string[]; party?: unknown; invites?: unknown[] };
-      const notify = new Set(body.notifyUserIds ?? []);
+      // Each recipient gets their *own* party view: an invitee must see the
+      // invitation, not the inviter's current party.
+      const body = await request.json().catch(() => ({})) as { updates?: Array<{ userId?: string; party?: unknown; invites?: unknown[] }> };
+      const updates = new Map((body.updates ?? []).filter((entry) => entry?.userId).map((entry) => [String(entry.userId), entry]));
       for (const socket of this.ctx.getWebSockets()) {
         const player = socket.deserializeAttachment() as Player | undefined;
-        if (player?.userId && notify.has(player.userId)) send(socket,{t:'party',party:body.party??null,invites:body.invites??[]});
+        const update = player?.userId ? updates.get(player.userId) : undefined;
+        if (update) send(socket, { t: 'party', party: update.party ?? null, invites: update.invites ?? [] });
       }
       return Response.json({ok:true});
     }
     if (requestUrl.pathname === '/internal/presence') {
-      const players = this.players('city:main');
-      return new Response(JSON.stringify({
+      const url = new URL(request.url);
+      const instanceId = url.searchParams.get('instanceId') ?? 'city:main';
+      const players = this.players(instanceId);
+      const result: Record<string, unknown> = {
         online: players.length,
-        instances: [{ id: 'city:main', kind: 'city', worldId: null, capacity: MAX_PLAYERS, count: players.length }],
-        cityCapacity: MAX_PLAYERS,
-      }), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+        instances: [{ id: instanceId, kind: instanceId.startsWith('world:') ? 'world' : 'city', worldId: instanceId.startsWith('world:') ? instanceId.slice(6) : null, capacity: MAX_PLAYERS, count: players.length }],
+        cityCapacity: MAX_PLAYERS, userIds: players.map((player) => player.userId),
+      };
+      if (url.searchParams.get('details') === '1') result.players = players.map((player) => ({
+        userId: player.userId, handle: player.handle, name: player.isGuest ? 'Guest User - ' + player.name : player.name,
+        isGuest: Boolean(player.isGuest), instanceId: player.instanceId, location: player.location,
+        connectedAt: Number(player.connectedAt ?? player.lastSeen), lastSeen: Number(player.lastSeen),
+      }));
+      return new Response(JSON.stringify(result), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
     }
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return new Response('Expected WebSocket upgrade', { status: 426 });
@@ -184,7 +244,8 @@ export class LoftLifeRealtime {
     const client = pair[0];
     const server = pair[1] as HibernatableWebSocket;
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ instanceId, pending: true });
+    server.serializeAttachment({ instanceId, pending: true, pendingSince: Date.now() });
+    this.scheduleSweep();
     return new Response(null, { status: 101, webSocket: client } as ResponseInit & { webSocket: WebSocket });
   }
 
@@ -213,6 +274,9 @@ export class LoftLifeRealtime {
     }
 
     const player = current as Player;
+    // Any traffic keeps presence alive; the idle sweep reads this value.
+    player.lastSeen = Date.now();
+    ws.serializeAttachment(player);
     switch (message.t) {
       case 'pose': {
         const now = Date.now();
@@ -227,14 +291,45 @@ export class LoftLifeRealtime {
           this.broadcastSnapshot(player.instanceId);
           return;
         }
-        const next = {
-          ...player,
-          x: Number(message.x), y: Number(message.y), z: Number(message.z),
-          yaw: Number(message.yaw), emote: String(message.emote ?? 'idle').slice(0, 24),
-          location: String(message.location ?? 'world').slice(0, 24), lastSeen: now, lastPoseAt: now,
+        const raw = {
+          x: Number(message.x), y: Number(message.y), z: Number(message.z), yaw: Number(message.yaw),
         };
-        if (![next.x, next.y, next.z, next.yaw].every(Number.isFinite) ||
-            Math.abs(next.x) > 10000 || Math.abs(next.y) > 10000 || Math.abs(next.z) > 10000) return;
+        if (![raw.x, raw.y, raw.z, raw.yaw].every(Number.isFinite)) return;
+        const next: Player = {
+          ...player,
+          x: Math.max(-MAX_CITY_COORD, Math.min(MAX_CITY_COORD, raw.x)),
+          y: Math.max(-3, Math.min(3, raw.y)),
+          z: Math.max(-MAX_CITY_COORD, Math.min(MAX_CITY_COORD, raw.z)),
+          yaw: raw.yaw,
+          emote: String(message.emote ?? 'idle').slice(0, 24),
+          location: String(message.location ?? 'world').slice(0, 24),
+          lastSeen: now, lastPoseAt: now,
+          voice: !player.isGuest && message.voice === true,
+          voiceMode: message.voiceMode === 'whisper' || message.voiceMode === 'shout' || message.voiceMode === 'say'
+            ? message.voiceMode
+            : (player.voiceMode ?? 'say'),
+        };
+        if (!player.positioned || now - Number(player.joinedAt ?? 0) < SPAWN_GRACE_MS) {
+          // The client owns its spawn point (TheCity arrival is at the airport,
+          // far from the origin); placement only has to be inside the map.
+          next.positioned = true;
+          next.teleportStrikes = 0;
+        } else {
+          const elapsed = Math.max(1, Math.min(2_000, now - Number(player.lastPoseAt ?? now)));
+          const allowed = Math.max(MAX_STEP, (MAX_SPEED * elapsed) / 1_000 + 0.75);
+          const jump = Math.hypot(next.x - player.x, next.z - player.z);
+          if (jump > allowed) {
+            const strikes = Number(player.teleportStrikes ?? 0) + 1;
+            if (strikes > 12) {
+              error(ws, 'kicked', 'Movement rejected by the server');
+              ws.close(4002, 'movement');
+              return;
+            }
+            ws.serializeAttachment({ ...player, teleportStrikes: strikes, lastPoseAt: now, lastSeen: now });
+            return;
+          }
+          next.teleportStrikes = Math.max(0, Number(player.teleportStrikes ?? 0) - 1);
+        }
         ws.serializeAttachment(next);
         this.broadcastSnapshot(next.instanceId);
         return;
@@ -248,6 +343,15 @@ export class LoftLifeRealtime {
       case 'party':
         await this.handleParty(ws, player, message);
         return;
+      case 'joinFriend': {
+        if (player.isGuest) { error(ws, 'forbidden', 'Guest visitors cannot join friends'); return; }
+        const handle = String(message.handle ?? '').trim().replace(/^@/, '').toLowerCase();
+        if (!handle) { error(ws, 'bad_request', 'A player handle is required'); return; }
+        const rows = await this.database().query('SELECT id FROM ll_accounts WHERE handle=$1 LIMIT 1', [handle]) as Array<{ id: string }>;
+        if (!rows[0]) { error(ws, 'not_found', 'No player with that handle'); return; }
+        await this.relocateToUser(ws, player, rows[0].id);
+        return;
+      }
       case 'ping':
         send(ws, { t: 'pong', at: Date.now() });
         return;
@@ -256,12 +360,22 @@ export class LoftLifeRealtime {
         return;
       case 'voice': {
         if (player.isGuest) { error(ws, 'forbidden', 'Guest visitors cannot use private voice signalling'); return; }
+        if (!player.voice) return;
+        const kind = String(message.kind ?? '');
+        if (!['offer', 'answer', 'ice'].includes(kind)) { error(ws, 'bad_request', 'Unknown voice signal'); return; }
+        const now = Date.now();
+        const budget = (player.voiceBudget ?? []).filter((at) => now - at < 10_000);
+        if (budget.length >= 250) { error(ws, 'rate_limited', 'Voice signalling rate limited'); return; }
+        budget.push(now);
         const target = String(message.to ?? '');
         const peer = this.ctx.getWebSockets().find((candidate) => {
           const state = candidate.deserializeAttachment() as Player | undefined;
-          return state?.connId === target && state.instanceId === player.instanceId;
+          return state?.connId === target && state.instanceId === player.instanceId &&
+            state.userId !== player.userId && state.voice === true && !state.isGuest;
         });
-        if (peer) send(peer, { t: 'voice', from: { connId: player.connId, userId: player.userId, handle: player.handle, name: player.name }, kind: message.kind, data: message.data });
+        if (!peer) return;
+        ws.serializeAttachment({ ...player, voiceBudget: budget });
+        send(peer, { t: 'voice', from: { connId: player.connId, userId: player.userId, handle: player.handle, name: player.name }, kind, data: message.data ?? null });
         return;
       }
       default:
@@ -302,19 +416,24 @@ export class LoftLifeRealtime {
       const player: Player = {
         connId: crypto.randomUUID(), userId: guest.guest_id, handle: 'guest',
         name: guest.display_name, avatar: null, isGuest: true, instanceId,
-        x: 0, y: 0, z: 0, yaw: 0, emote: 'idle', location: 'world',
-        lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
+        x: 0, y: 0, z: 0, yaw: 0, emote: 'idle', location: 'world', voice: false, voiceMode: 'say',
+        connectedAt: Date.now(), lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
+        positioned: false, teleportStrikes: 0, sessionExpiresAt: Number(payload.exp) * 1000,
+        joinedAt: Date.now(),
       };
       const active = this.players(instanceId);
-      if (active.length >= MAX_PLAYERS) {
+      if (active.length >= MAX_PLAYERS && !active.some((entry) => entry.userId === player.userId)) {
         error(ws, 'instance_full', 'TheCity is full');
         ws.close(1013, 'instance_full');
         return;
       }
+      const existingPlayers = active.filter((entry) => entry.userId !== player.userId);
       ws.serializeAttachment(player);
-      send(ws, { t: 'ready', instance: { id: instanceId, kind: 'city', worldId: null, capacity: MAX_PLAYERS, count: active.length + 1 }, you: publicPlayer(player), players: active.map(publicPlayer) });
+      await this.replaceDuplicateConnections(ws, player);
+      send(ws, { t: 'ready', instance: { id: instanceId, kind: 'city', worldId: null, capacity: MAX_PLAYERS, count: existingPlayers.length + 1 }, you: publicPlayer(player), players: existingPlayers.map(publicPlayer) });
       this.broadcast(instanceId, { t: 'join', player: publicPlayer(player) }, ws);
       this.broadcastSnapshot(instanceId, true);
+      this.scheduleSweep();
       return;
     }
     const sessionRows = await sql.query(
@@ -385,9 +504,8 @@ export class LoftLifeRealtime {
       }
     }
 
-    const peers = this.ctx.getWebSockets();
-    const active = peers.map((peer) => peer.deserializeAttachment() as Player | undefined).filter((p): p is Player => Boolean(p && p.instanceId === instanceId && !('pending' in (p as object))));
-    if (active.length >= capacity) {
+    const active = this.players(instanceId);
+    if (active.length >= capacity && !active.some((entry) => entry.userId === account.id)) {
       error(ws, 'instance_full', 'This instance is full');
       ws.close(1013, 'instance_full');
       return;
@@ -398,23 +516,131 @@ export class LoftLifeRealtime {
     const player: Player = {
       connId: crypto.randomUUID(), userId: account.id, handle: account.handle,
       name: account.display_name || account.handle, avatar, instanceId,
-      x: 0, y: 0, z: 0, yaw: 0, emote: 'idle', location: 'world',
+      x: 0, y: 0, z: 0, yaw: 0, emote: 'idle', location: 'world', voice: false, voiceMode: 'say',
       lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
+      positioned: false, teleportStrikes: 0, sessionExpiresAt: Number(payload.exp) * 1000,
+      joinedAt: Date.now(),
     };
     ws.serializeAttachment(player);
+    await this.replaceDuplicateConnections(ws, player);
     await this.updatePartyPresence(account.id, instanceId);
     const players = this.players(instanceId);
     const existingPlayers = players.filter((entry) => entry.connId !== player.connId);
     send(ws, { t: 'ready', instance: { id: instanceId, kind: instanceId.startsWith('world:') ? 'world' : 'city', worldId: instanceId.startsWith('world:') ? instanceId.slice(6) : null, capacity, count: existingPlayers.length + 1 }, you: publicPlayer(player), players: existingPlayers });
     this.broadcast(instanceId, { t: 'join', player: publicPlayer(player) }, ws);
     this.broadcastSnapshot(instanceId, true);
+    this.scheduleSweep();
     if (instanceId.startsWith('world:')) await this.syncWorldStatus(instanceId.slice(6));
   }
 
   private players(instanceId: string): Player[] {
-    return this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment() as Player | undefined)
-      .filter((p): p is Player => Boolean(p && p.instanceId === instanceId && p.userId));
+    const now = Date.now();
+    const unique = new Map<string, Player>();
+    for (const socket of this.ctx.getWebSockets()) {
+      if (socket.readyState !== WebSocket.OPEN) continue;
+      const player = socket.deserializeAttachment() as (Player & { pending?: boolean }) | undefined;
+      if (!player?.userId || player.pending || player.departed || player.instanceId !== instanceId) continue;
+      if (now - Number(player.lastSeen ?? 0) > IDLE_TIMEOUT_MS) continue;
+      const previous = unique.get(player.userId);
+      if (!previous || Number(player.lastSeen ?? 0) > Number(previous.lastSeen ?? 0)) unique.set(player.userId, player);
+    }
+    return [...unique.values()];
   }
+
+  private async replaceDuplicateConnections(current: HibernatableWebSocket, player: Player) {
+    if (player.isGuest) return;
+    for (const socket of this.ctx.getWebSockets()) {
+      if (socket === current) continue;
+      const existing = socket.deserializeAttachment() as Player | undefined;
+      if (!existing?.userId || existing.departed || existing.userId !== player.userId || existing.instanceId !== player.instanceId) continue;
+      socket.serializeAttachment({ ...existing, departed: true });
+      send(socket, { t: 'replaced', reason: 'This account connected from another session' });
+      socket.close(4003, 'replaced');
+      this.broadcast(existing.instanceId, { t: 'leave', connId: existing.connId }, socket);
+    }
+  }
+
+  private async disconnectPlayer(ws: HibernatableWebSocket) {
+    const player = ws.deserializeAttachment() as Player | undefined;
+    if (!player?.userId || player.departed) return;
+    ws.serializeAttachment({ ...player, departed: true, voice: false });
+    const stillConnected = this.ctx.getWebSockets().some((socket) => {
+      if (socket === ws || socket.readyState !== WebSocket.OPEN) return false;
+      const other = socket.deserializeAttachment() as Player | undefined;
+      return Boolean(other?.userId === player.userId && other.instanceId === player.instanceId && !other.departed);
+    });
+    if (!player.isGuest && !stillConnected) await this.updatePartyPresence(player.userId, null, player.instanceId);
+    this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
+    this.broadcastSnapshot(player.instanceId, true);
+    if (player.instanceId.startsWith('world:')) await this.syncWorldStatus(player.instanceId.slice(6), player.connId);
+  }
+
+  /** Which instance a signed-in player is currently connected to, if any. */
+  private async instanceOf(userId: string): Promise<string | null> {
+    const namespace = this.env.REALTIME;
+    if (!namespace) return null;
+    const response = await namespace.get(namespace.idFromName('party:global')).fetch(new Request(
+      'https://loftlife-internal/internal/party/instance-of', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      }
+    ));
+    if (!response.ok) return null;
+    const body = await response.json() as { instanceId?: string | null };
+    return body.instanceId ?? null;
+  }
+
+  /**
+   * A WebSocket is pinned to the Durable Object that accepted it, so joining a
+   * player elsewhere means telling the client to reconnect to that instance.
+   */
+  private async relocateToUser(ws: HibernatableWebSocket, player: Player, targetUserId: string) {
+    if (targetUserId === player.userId) { error(ws, 'bad_request', 'That is you'); return; }
+    const target = await this.instanceOf(targetUserId);
+    if (!target) { error(ws, 'offline', 'That player is not online right now'); return; }
+    if (target === player.instanceId) {
+      send(ws, { t: 'instance', instance: { id: target, kind: 'city', worldId: null, capacity: MAX_PLAYERS, count: this.players(target).length } });
+      return;
+    }
+    const kind = target.startsWith('world:') ? 'world' : 'city';
+    send(ws, { t: 'relocate', instance: { id: target, kind, worldId: kind === 'world' ? target.slice(6) : null } });
+  }
+
+  private scheduleSweep() {
+    const storage = this.ctx.storage;
+    if (typeof storage.setAlarm !== 'function') return;
+    try {
+      void storage.setAlarm(Date.now() + SESSION_SWEEP_MS);
+    } catch {
+      // Alarm support is optional in the test harness.
+    }
+  }
+
+  /** Close sockets whose signed session expired or whose client went silent. */
+  async alarm(): Promise<void> {
+    const now = Date.now();
+    for (const ws of this.ctx.getWebSockets()) {
+      const state = ws.deserializeAttachment() as (Player & { pending?: boolean; pendingSince?: number }) | undefined;
+      if (!state || state.departed) continue;
+      if (!state.userId) {
+        if (state.pending && now - Number(state.pendingSince ?? now) > PENDING_CONNECTION_MS) ws.close(4001, 'hello required');
+        continue;
+      }
+      if (Number(state.sessionExpiresAt ?? 0) > 0 && now > Number(state.sessionExpiresAt)) {
+        error(ws, 'unauthorized', 'Session expired');
+        await this.disconnectPlayer(ws);
+        ws.close(1008, 'session_expired');
+        continue;
+      }
+      if (now - Number(state.lastSeen ?? 0) > IDLE_TIMEOUT_MS) {
+        await this.disconnectPlayer(ws);
+        ws.close(4001, 'idle');
+      }
+    }
+    if (this.ctx.getWebSockets().some((socket) => socket.readyState === WebSocket.OPEN)) this.scheduleSweep();
+  }
+
   private async syncWorldStatus(worldId: string, leavingConnId?: string) {
     const instanceId = `world:${worldId}`;
     const active = this.players(instanceId).filter(player => player.connId !== leavingConnId);
@@ -544,11 +770,11 @@ export class LoftLifeRealtime {
       method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({userIds,message}),
     }))));
   }
-  private async updatePartyPresence(userId:string,instanceId:string|null) {
+  private async updatePartyPresence(userId:string,instanceId:string|null,expectedInstanceId?:string) {
     const namespace=this.env.REALTIME;
     if(!namespace)return;
     await namespace.get(namespace.idFromName('party:global')).fetch(new Request('https://loftlife-internal/internal/party/presence',{
-      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({userId,instanceId}),
+      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({userId,instanceId,expectedInstanceId}),
     }));
   }
     private async partyData(): Promise<{ parties: Record<string,{id:string;leaderId:string;members:string[];invites:string[];createdAt:number}>; memberParty: Record<string,string>; userInstances: Record<string,string> }> {
@@ -624,20 +850,33 @@ export class LoftLifeRealtime {
     for(const id of snapshot.party?.members.map(member=>member?.userId).filter((id):id is string=>Boolean(id))??[])notify.add(id);
     for(const party of snapshot.invites)for(const member of party?.invites??[])if(member?.userId)notify.add(member.userId);
     const notifyUserIds=[...notify];
-    const payload={...snapshot,notifyUserIds};
     if(this.env.REALTIME){
+      const updates=await Promise.all(notifyUserIds.map(async id=>({userId:id,...await this.partyState(id)})));
       const targets=[...new Set(notifyUserIds.map(id=>state.userInstances[id]).filter((value):value is string=>Boolean(value)))];
       await Promise.all(targets.map(instanceId=>this.env.REALTIME!.get(this.env.REALTIME!.idFromName(instanceId)).fetch(new Request('https://loftlife-internal/internal/party/broadcast',{
-        method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload),
+        method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({updates}),
       }))));
     }
-    return payload;
+    return {...snapshot,notifyUserIds};
   }
   private async handleParty(ws:HibernatableWebSocket,player:Player,message:Record<string,unknown>) {
     if (player.isGuest) { error(ws, 'forbidden', 'Guest visitors cannot use parties'); return; }
     const namespace=this.env.REALTIME;
     if(!namespace){error(ws,'party_unavailable','Party service is not configured');return;}
     const id=namespace.idFromName('party:global');
+    if (String(message.action ?? '') === 'join') {
+      // "Join leader" travels to the leader's instance; it is not an invitation
+      // accept (the client sends `accept` for that).
+      const stateResponse=await namespace.get(id).fetch(new Request('https://loftlife-internal/internal/party/state',{
+        method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({userId:player.userId}),
+      }));
+      const state=await stateResponse.json() as {party?:{leaderId?:string}|null};
+      const leaderId=state.party?.leaderId;
+      if(!leaderId){error(ws,'not_in_party','Join or create a party first');return;}
+      if(leaderId===player.userId){error(ws,'party_leader','You are the leader — your party joins you');return;}
+      await this.relocateToUser(ws,player,leaderId);
+      return;
+    }
     const response=await namespace.get(id).fetch(new Request('https://loftlife-internal/internal/party/action',{
       method:'POST',headers:{'content-type':'application/json'},
       body:JSON.stringify({userId:player.userId,action:String(message.action??''),handle:message.handle,targetUserId:message.userId}),
@@ -736,23 +975,10 @@ export class LoftLifeRealtime {
     ws.serializeAttachment({...player,lastChatAt:now});
   }
 
-  async webSocketClose(ws: HibernatableWebSocket, code: number, reason: string) {
-    if (code >= 1000 && code < 5000 && ![1004, 1005, 1006, 1015].includes(code)) ws.close(code, reason);
-    else ws.close();
-    const player = ws.deserializeAttachment() as Player | undefined;
-    if (player?.userId) {
-      if (!player.isGuest) await this.updatePartyPresence(player.userId, null);
-      this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
-      this.broadcastSnapshot(player.instanceId, true);
-      if (player.instanceId.startsWith('world:')) await this.syncWorldStatus(player.instanceId.slice(6),player.connId);
-    }
+  async webSocketClose(ws: HibernatableWebSocket) {
+    await this.disconnectPlayer(ws);
   }
   async webSocketError(ws: HibernatableWebSocket) {
-    const player = ws.deserializeAttachment() as Player | undefined;
-    if (player?.userId) {
-      if (!player.isGuest) await this.updatePartyPresence(player.userId, null);
-      this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
-      if (player.instanceId.startsWith('world:')) await this.syncWorldStatus(player.instanceId.slice(6),player.connId);
-    }
+    await this.disconnectPlayer(ws);
   }
 }

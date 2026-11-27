@@ -155,6 +155,8 @@ interface SessionValue {
   enterCity: () => void;
   exitCity: () => void;
   enterWorld: (worldId: string) => Promise<void>;
+  /** App-level handler for a server-requested instance move (friend/party join). */
+  setRelocateHandler: (handler: ((worldId: string | null) => void) | null) => void;
   clearChatError: () => void;
   partyAction: (
     action: 'create' | 'invite' | 'accept' | 'leave' | 'kick' | 'join',
@@ -271,6 +273,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const realtimeRef = useRef<RealtimeClient | null>(null);
   const selfConnRef = useRef<string | null>(null);
   const remoteRef = useRef<RemotePlayer[]>([]);
+  // Set by the game screen so a server-requested move can open the right place.
+  const relocateHandlerRef = useRef<((worldId: string | null) => void) | null>(null);
   const voiceAnchorRef = useRef({ x: 0, z: 0, location: 'world' });
   const voiceRef = useRef<VoiceManager | null>(null);
   if (!voiceRef.current) {
@@ -476,6 +480,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       onSnapshot: (players, _instanceId, vehicles) => {
         const self = selfConnRef.current;
         setRemotePlayers(players.filter((player) => player.connId !== self));
+        setInstance((current) => current ? { ...current, count: players.length } : current);
         setTransitVehicles(vehicles);
         const me = players.find((player) => player.connId === self);
         if (self && me && !me.riding) {
@@ -492,6 +497,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       onLeave: (connId) => {
         setRemotePlayers((prev) => prev.filter((player) => player.connId !== connId));
         setInstance((info) => (info ? { ...info, count: Math.max(1, info.count - 1) } : info));
+      },
+      onRelocate: (info) => {
+        const handler = relocateHandlerRef.current;
+        if (info.kind === 'world' && info.worldId) {
+          if (handler) handler(info.worldId);
+          else setChatError('That world is not available from here.');
+          return;
+        }
+        // Target is TheCity: leave any player world first.
+        handler?.(null);
       },
       onChat: (chat) => {
         setMessages((prev) => [...prev.slice(-119), chat]);
@@ -620,7 +635,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
     };
     poll();
-    const timer = window.setInterval(poll, 30_000);
+    const timer = window.setInterval(poll, 5_000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -903,6 +918,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     else { pendingWorldRef.current = worldId; setRealtimeActive(true); }
   }, [status]);
 
+  const setRelocateHandler = useCallback(
+    (handler: ((worldId: string | null) => void) | null) => {
+      relocateHandlerRef.current = handler;
+    },
+    []
+  );
+
   const clearChatError = useCallback(() => setChatError(null), []);
 
   const partyAction = useCallback<SessionValue['partyAction']>((action, data) => {
@@ -1057,6 +1079,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setPose,
       enterCity,
       enterWorld,
+      setRelocateHandler,
       clearChatError,
       partyAction,
       boardTransit,
@@ -1119,6 +1142,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setPose,
       enterCity,
       enterWorld,
+      setRelocateHandler,
       clearChatError,
       partyAction,
       boardTransit,

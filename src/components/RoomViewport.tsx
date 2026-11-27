@@ -141,7 +141,7 @@ interface RoomViewportProps {
   /** Mobile/tablet: cap pixel ratio and shadows for the smaller GPU budget. */
   lowPowerGraphics?: boolean;
   remotePlayers?: RemotePlayer[];
-  playerPoseRef?: React.MutableRefObject<{ x: number; z: number; yaw: number }>;
+  playerPoseRef?: React.MutableRefObject<{ x: number; z: number; yaw: number; known?: boolean }>;
   transitLines?: TransitLine[];
   transitVehicles?: TransitVehicle[];
   ridingVehicle?: { x: number; y?: number; z: number; heading: number } | null;
@@ -2900,6 +2900,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         propsRef.current.playerPoseRef.current.x = av.x;
         propsRef.current.playerPoseRef.current.z = av.z;
         propsRef.current.playerPoseRef.current.yaw = av.yaw;
+        propsRef.current.playerPoseRef.current.known = true;
       }
       if (currentLoc === 'world') {
         const label = getCityLocationLabel(av.x, av.z);
@@ -3172,7 +3173,11 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       // Remote players: interpolate toward their last server position.
       for (const entry of handles.remoteRigs.values()) {
         _vec3.set(entry.target.x, entry.target.y, entry.target.z);
-        entry.rig.root.position.lerp(_vec3, 1 - Math.exp(-12 * delta));
+        const remaining = entry.rig.root.position.distanceTo(_vec3);
+        // A stationary player must settle exactly on the last server position;
+        // otherwise the tail of the easing reads as sliding on the spot.
+        if (!entry.moving && remaining < 0.08) entry.rig.root.position.copy(_vec3);
+        else entry.rig.root.position.lerp(_vec3, 1 - Math.exp(-12 * delta));
         entry.rig.root.rotation.y +=
           shortestAngleDiff(entry.rig.root.rotation.y, entry.target.yaw) *
           (1 - Math.exp(-10 * delta));

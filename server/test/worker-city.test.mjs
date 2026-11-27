@@ -213,6 +213,7 @@ before(async () => {
       async put(key, value) {
         storage.set(key, value);
       },
+      async setAlarm() {},
     },
   };
 
@@ -263,10 +264,12 @@ test('worker: two guests share TheCity, see movement and city chat', async () =>
   assert.equal(readyA.instance.id, 'city:main');
   assert.equal(readyA.you.isGuest, true);
   assert.equal(readyA.you.name, 'Guest User - Sky Visitor');
+  assert.equal(readyA.you.voice, false, 'guest visitors never advertise private voice');
 
   const readyB = firstMessage(guestB.pair, 'ready');
   assert.equal(readyB.instance.id, 'city:main');
   assert.ok(readyB.players.some((player) => player.userId === guestA.session.guest.id));
+  assert.equal(readyB.players.find((player) => player.userId === guestA.session.guest.id).voice, false);
 
   await new Promise((resolve) => setImmediate(resolve));
   const join = firstMessage(guestA.pair, 'join');
@@ -297,6 +300,30 @@ test('worker: two guests share TheCity, see movement and city chat', async () =>
   assert.equal(chat.from.displayName, 'Guest User - River Guest');
   assert.equal(chat.scopeId, 'main');
 
+  const liveBefore = await durable.fetch(new Request('https://loftlife-internal/internal/presence?details=1'));
+  const liveBeforeBody = await liveBefore.json();
+  assert.equal(liveBeforeBody.online, 2, 'presence reports the two active city connections');
+  assert.equal(liveBeforeBody.players.length, 2);
+  const globalPresence = await durable.fetch(new Request('https://loftlife-internal/internal/party/presence-snapshot?details=1'));
+  const globalPresenceBody = await globalPresence.json();
+  assert.equal(globalPresenceBody.online, 2, 'global presence reconciles against the actual city sockets');
+  const publicPresenceResponse = await worker.fetch(new Request(`${ORIGIN}/api/presence`), env);
+  const publicPresence = await publicPresenceResponse.json();
+  assert.equal(publicPresence.online, 2, 'the public HUD count comes from reconciled live sockets');
+
+  const duplicateUpgrade = await worker.fetch(websocketRequest('city'), env);
+  assert.equal(duplicateUpgrade.status, 101);
+  const duplicatePair = pairs.at(-1);
+  await durable.webSocketMessage(duplicatePair.server, JSON.stringify({
+    t: 'hello', token: guestA.session.token, place: { kind: 'city' },
+  }));
+  const duplicateReady = firstMessage(duplicatePair, 'ready');
+  assert.equal(duplicateReady.instance.count, 2, 'reconnecting the same account does not inflate the count');
+  assert.equal(guestA.pair.server.readyState, 1, 'guest sessions may connect from a second device');
+  const deduplicatedPresence = await durable.fetch(new Request('https://loftlife-internal/internal/presence'));
+  assert.equal((await deduplicatedPresence.json()).online, 2);
+
+
   // Chat is throttled to one message per 700 ms before the guest scope guard.
   await new Promise((resolve) => setTimeout(resolve, 720));
   await durable.webSocketMessage(
@@ -310,11 +337,18 @@ test('worker: two guests share TheCity, see movement and city chat', async () =>
 
   await durable.webSocketMessage(
     guestB.pair.server,
+    JSON.stringify({ t: 'voice', to: readyA.you.connId, kind: 'offer', data: {} })
+  );
+  assert.ok(guestB.pair.client.messages.some((message) => message.t === 'error' && message.code === 'forbidden'),
+    'guest visitors cannot use voice signalling');
+
+  await durable.webSocketMessage(
+    guestB.pair.server,
     JSON.stringify({ t: 'party', action: 'create' })
   );
   assert.equal(
     guestB.pair.client.messages.filter((message) => message.t === 'error' && message.code === 'forbidden').length,
-    2
+    3
   );
 
   const worldUpgrade = await worker.fetch(websocketRequest('world:test-world'), env);
@@ -328,4 +362,14 @@ test('worker: two guests share TheCity, see movement and city chat', async () =>
     worldPair.client.messages.find((message) => message.t === 'error')?.code,
     'forbidden'
   );
+
+  const staleAttachment = guestB.pair.server.deserializeAttachment();
+  guestB.pair.server.serializeAttachment({ ...staleAttachment, lastSeen: Date.now() - 120_000 });
+  await durable.alarm();
+  const liveAfter = await durable.fetch(new Request('https://loftlife-internal/internal/presence?details=1'));
+  const liveAfterBody = await liveAfter.json();
+  assert.equal(liveAfterBody.online, 1, 'stale sockets are removed from the live player count');
+  assert.equal(liveAfterBody.players[0].userId, guestA.session.guest.id);
+  assert.ok(duplicatePair.client.messages.some((message) => message.t === 'leave' && message.connId === readyB.you.connId),
+    'remaining players receive the stale player leave event');
 });

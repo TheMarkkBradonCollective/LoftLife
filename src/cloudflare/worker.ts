@@ -782,6 +782,15 @@ export default {
         return env.REALTIME.get(id).fetch(new Request('https://loftlife-internal/internal/party/presence-snapshot'));
       }
 
+      if (url.pathname === '/api/admin/monitoring' && request.method === 'GET') {
+        const auth = await currentAccount(request, env);
+        if (!auth) return fail('Sign in to continue.',401,'unauthorized');
+        if (auth.account.role !== 'admin') return fail('Administrator access required.',403,'forbidden');
+        if (!env.REALTIME) return fail('Realtime Durable Object binding is not configured.',503,'realtime_unconfigured');
+        const id = env.REALTIME.idFromName('party:global');
+        return env.REALTIME.get(id).fetch(new Request('https://loftlife-internal/internal/party/presence-snapshot?details=1'));
+      }
+
       if (url.pathname === '/api/settings' || url.pathname.startsWith('/api/messages/')) {
         const auth = await currentAccount(request, env);
         const sql = auth?.sql ?? (await database(env));
