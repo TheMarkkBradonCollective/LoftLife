@@ -30,7 +30,7 @@ import { MOBILE_GAMEPLAY_MESSAGE } from '../shared/device-platform.mjs';
 const RoomViewport = lazy(() =>
   import('./components/RoomViewport').then((module) => ({ default: module.RoomViewport }))
 );
-import { api, type TravelDestination, type WorldSummary } from './net/api';
+import { api, type SavedOutfit, type TravelDestination, type WorldSummary } from './net/api';
 import { VOICE_RANGE_INFO } from '../shared/voice-controls.mjs';
 import { isEditableElement } from '../shared/desktop-shortcuts.mjs';
 import { bindingMatchesEvent } from '../shared/keybindings.mjs';
@@ -288,7 +288,15 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     yaw: number;
     at: number;
   } | null>(null);
-  const [avatarStudioMode, setAvatarStudioMode] = useState<'hair' | 'closet'>('hair');
+  const [avatarStudioMode, setAvatarStudioMode] = useState<'mirror' | 'salon' | 'closet' | 'studio'>('studio');
+  const [localOutfits, setLocalOutfits] = useState<SavedOutfit[]>(() => {
+    try {
+      const raw = localStorage.getItem('loftlife_outfits_local_v2');
+      return raw ? (JSON.parse(raw) as SavedOutfit[]) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Runtime environment decides controls and gameplay access. Width is never
   // used: a narrow desktop window stays a desktop, and a mobile PWA is still a
@@ -1996,8 +2004,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         travelRequest={travelRequest}
         onEnterGuestRoom={handleEnterGuestRoom}
         onOpenCloset={() => { setAvatarStudioMode('closet'); setAvatarModalOpen(true); }}
-        onOpenBathroomMirror={() => { setAvatarStudioMode('hair'); setAvatarModalOpen(true); }}
-        onOpenSalon={() => { setAvatarStudioMode('hair'); setAvatarModalOpen(true); }}
+        onOpenBathroomMirror={() => { setAvatarStudioMode('mirror'); setAvatarModalOpen(true); }}
+        onOpenSalon={() => { setAvatarStudioMode('salon'); setAvatarModalOpen(true); }}
         onOpenElevator={() => setElevatorModalOpen(true)}
         onUnlockRoomDoor={handleUnlockRoomDoor}
         onUnlockHallwayDoor={handleUnlockHallwayDoor}
@@ -2129,7 +2137,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onEditRoom={() => handleModeSwitch('edit')}
         onOpenCityMap={() => setCityMapOpen(true)}
         onOpenRoomSettings={() => setRoomSettingsOpen(true)}
-        onOpenAvatar={() => setAvatarModalOpen(true)}
+        onOpenAvatar={() => { setAvatarStudioMode('studio'); setAvatarModalOpen(true); }}
         onOpenShop={() => setShopOpen(true)}
         onOpenWorlds={() => setWorldsOpen(true)}
         onOpenAuth={() => setAuthOpen(true)}
@@ -2255,12 +2263,60 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       <AvatarModal
         open={avatarModalOpen}
         mode={avatarStudioMode}
-        outfitStorageKey={session.status === 'online' ? (session.user?.id ?? 'account') : `guest_${session.guestName ?? 'visitor'}`}
         config={avatarConfig}
+        wallet={session.wallet}
         ownedClothing={session.inventory
           .filter((entry) => entry.kind === 'clothing')
           .map((entry) => entry.catalogId)}
-        onChange={setAvatarConfig}
+        outfits={session.status === 'online' ? session.outfits : localOutfits}
+        onApply={(next) => setAvatarConfig(next)}
+        onMakeover={async (next) => {
+          const result = await session.makeover(next);
+          setAvatarConfig(result.profile.avatar);
+          showHint(
+            result.charged > 0
+              ? `Character Makeover complete · 元 ${result.charged} spent`
+              : 'Character appearance is already up to date'
+          );
+        }}
+        onSaveOutfit={async (name, avatar) => {
+          const config = {
+            topStyle: avatar.topStyle,
+            topColor: avatar.topColor,
+            bottomStyle: avatar.bottomStyle ?? 'jeans',
+            bottomColor: avatar.bottomColor,
+            shoeColor: avatar.shoeColor,
+            accessory: avatar.accessory,
+            jewelry: avatar.jewelry ?? 'none',
+            carry: avatar.carry ?? 'none',
+          } as const;
+          if (session.status === 'online') {
+            await session.saveOutfit(name, config);
+            return;
+          }
+          const saved: SavedOutfit = {
+            id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            name,
+            config,
+            createdAt: Date.now(),
+          };
+          setLocalOutfits((current) => {
+            const next = [saved, ...current];
+            try { localStorage.setItem('loftlife_outfits_local_v2', JSON.stringify(next)); } catch { /* device storage is optional */ }
+            return next;
+          });
+        }}
+        onDeleteOutfit={async (id) => {
+          if (session.status === 'online') {
+            await session.deleteOutfit(id);
+            return;
+          }
+          setLocalOutfits((current) => {
+            const next = current.filter((outfit) => outfit.id !== id);
+            try { localStorage.setItem('loftlife_outfits_local_v2', JSON.stringify(next)); } catch { /* device storage is optional */ }
+            return next;
+          });
+        }}
         onClose={() => setAvatarModalOpen(false)}
       />
 

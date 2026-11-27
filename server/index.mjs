@@ -44,17 +44,21 @@ import { taxiDestinations, transitHubs, transitLines } from './transit.mjs';
 import { travelDestinations } from './travel.mjs';
 import {
   acceptFriend,
+  applyMakeover,
   blockPlayer,
   chatHistory,
+  deleteOutfit,
   dmScopeId,
   fileReport,
   listBlocked,
   listConversations,
   listFriends,
   listOpenReports,
+  listOutfits,
   markConversationRead,
   readProfile,
   removeFriend,
+  saveOutfit,
   searchPlayers,
   sendFriendRequest,
   suspendAccount,
@@ -190,6 +194,7 @@ export function createApp() {
         profile: readProfile(req.user.id),
         wallet: getWallet(req.user.id),
         inventory: listInventory(req.user.id),
+        outfits: listOutfits(req.user.id),
         suite: getSuite(req.user.id),
       });
     })
@@ -208,6 +213,35 @@ export function createApp() {
     requireAuth,
     writeLimiter,
     handler((req, res) => res.json(updateProfile(req.user.id, req.body ?? {})))
+  );
+
+  // Foundational appearance changes are paid, idempotent, and separate from
+  // free hair/makeup/outfit saves.
+  app.post(
+    '/api/character/makeover',
+    requireAuth,
+    writeLimiter,
+    handler((req, res) => res.json(applyMakeover(req.user.id, req.body ?? {})))
+  );
+
+  app.get(
+    '/api/outfits',
+    requireAuth,
+    handler((req, res) => res.json(listOutfits(req.user.id)))
+  );
+
+  app.post(
+    '/api/outfits',
+    requireAuth,
+    writeLimiter,
+    handler((req, res) => res.json(saveOutfit(req.user.id, req.body ?? {})))
+  );
+
+  app.delete(
+    '/api/outfits/:id',
+    requireAuth,
+    writeLimiter,
+    handler((req, res) => res.json(deleteOutfit(req.user.id, req.params.id)))
   );
 
   // Keybindings + touch layout: local-first on the client, account-synced here.

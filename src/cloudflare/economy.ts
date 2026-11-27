@@ -1,3 +1,5 @@
+import { CLOTHING_CATALOG } from '../../shared/character.mjs';
+
 type Sql = { query(query: string, params?: unknown[]): Promise<unknown[]> };
 type User = { id: string };
 type Row = Record<string, unknown>;
@@ -7,11 +9,9 @@ const FURNITURE: Record<string, number> = {
  fireplace:340,bookshelf:130,arc_lamp:60,table_lamp:35,monstera_plant:40,olive_tree:75,
  woven_rug:55,wall_art:65,wall_shelf:50,floor_mirror:110,neon_sign:90,
 };
-const CLOTHING: Record<string,{price:number;currency:'yuanzi'|'tongbao'}> = {
- hoodie:{price:80,currency:'yuanzi'},blazer:{price:6,currency:'tongbao'},
- turtleneck:{price:120,currency:'yuanzi'},glasses:{price:60,currency:'yuanzi'},
- headphones:{price:5,currency:'tongbao'},beanie:{price:45,currency:'yuanzi'},
-};
+const CLOTHING = Object.fromEntries(
+ Object.entries(CLOTHING_CATALOG).map(([id, item]) => [id, { price: item.price, currency: item.currency }])
+) as Record<string,{price:number;currency:'yuanzi'|'tongbao'}>;
 const COOLDOWN=20*60*60*1000;
 function json(body:unknown,status=200){return new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'no-store'}});}
 function fail(message:string,status:number,code:string,detail?:unknown){return json({error:message,code,...(detail?{detail}:{})},status);}

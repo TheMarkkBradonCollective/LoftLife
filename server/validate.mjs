@@ -5,87 +5,44 @@
  */
 import { badRequest } from './errors.mjs';
 import { isKnownFurniture } from './economy.mjs';
+import {
+  ACCESSORIES,
+  BODY_PRESETS,
+  BUILDS,
+  CARRY,
+  DEFAULT_AVATAR,
+  EYE_SHAPES,
+  EYE_STYLES,
+  EYEBROWS,
+  FACE_SHAPES,
+  FACIAL_DETAILS,
+  FACIAL_HAIR,
+  HAIR_STYLES,
+  HEIGHTS,
+  JEWELRY,
+  MAKEUP_STYLES,
+  TOP_STYLES,
+  BOTTOM_STYLES,
+} from '../shared/character.mjs';
 
-export const HAIR_STYLES = [
-  'bob',
-  'afro',
-  'ponytail',
-  'sidepart',
-  'buns',
-  'spiky',
-  'long_waves',
-  'buzz',
-  'curls',
-  'locs',
-  'pixie',
-  'middle_part',
-  'top_knot',
-  'shoulder_waves',
-  'braids',
-  'undercut',
-  'fade',
-  'curtain',
-];
-export const TOP_STYLES = [
-  'hoodie',
-  'blazer',
-  'tee',
-  'turtleneck',
-  'button_shirt',
-  'sweater',
-  'jacket',
-  'tank',
-  'varsity',
-  'raincoat',
-  'suit',
-  'dress',
-  'crop_hoodie',
-  'cardigan',
-];
-export const BOTTOM_STYLES = [
-  'jeans',
-  'chinos',
-  'shorts',
-  'skirt',
-  'joggers',
-  'dress_pants',
-  'cargo',
-];
-export const ACCESSORIES = [
-  'none',
-  'glasses',
-  'headphones',
-  'beanie',
-  'cap',
-  'bucket_hat',
-  'sunglasses',
-  'scarf',
-];
-export const JEWELRY = ['none', 'chain', 'watch', 'earrings', 'bracelet'];
-export const CARRY = ['none', 'backpack', 'purse', 'tote'];
-export const FACIAL_HAIR = ['none', 'stubble', 'beard', 'goatee', 'mustache'];
-export const EYEBROWS = ['natural', 'bold', 'thin', 'arched'];
-export const EYE_STYLES = ['warm_brown', 'deep_brown', 'hazel', 'green', 'blue', 'gray'];
-export const MAKEUP_STYLES = ['none', 'natural', 'soft', 'bold'];
-
-/** Neutral starting look, shared by registration, edge accounts and tests. */
-export const DEFAULT_AVATAR = {
-  name: 'Newcomer',
-  skinTone: '#e8b48f',
-  hairStyle: 'bob',
-  hairColor: '#2f2119',
-  topStyle: 'tee',
-  topColor: '#e6dfd3',
-  bottomStyle: 'jeans',
-  bottomColor: '#2b3a2a',
-  shoeColor: '#1b1b1b',
-  accessory: 'none',
-  jewelry: 'none',
-  carry: 'none',
-  facialHair: 'none',
-  eyebrows: 'natural',
-  eyeStyle: 'warm_brown',
-  makeupStyle: 'none',
+export {
+  ACCESSORIES,
+  BODY_PRESETS,
+  BOTTOM_STYLES,
+  BUILDS,
+  CARRY,
+  DEFAULT_AVATAR,
+  EYE_SHAPES,
+  EYE_STYLES,
+  EYEBROWS,
+  FACE_SHAPES,
+  FACIAL_DETAILS,
+  FACIAL_HAIR,
+  HAIR_STYLES,
+  HEIGHTS,
+  JEWELRY,
+  MAKEUP_STYLES,
+  TOP_STYLES,
 };
 export const FLOOR_STYLES = ['oak_parquet', 'walnut_herringbone', 'terrazzo', 'concrete', 'boucle_carpet'];
 export const WALL_STYLES = [
@@ -143,21 +100,44 @@ export function sanitizeAvatar(input, fallbackName = 'Newcomer') {
   }
   return {
     name: str(input.name, 24)?.trim() || fallbackName,
-    skinTone: hex(input.skinTone, '#e8b48f'),
+    skinTone: hex(input.skinTone, DEFAULT_AVATAR.skinTone),
+    bodyPreset: oneOf(input.bodyPreset ?? DEFAULT_AVATAR.bodyPreset, BODY_PRESETS, 'avatar.bodyPreset'),
+    height: oneOf(input.height ?? DEFAULT_AVATAR.height, HEIGHTS, 'avatar.height'),
+    build: oneOf(input.build ?? DEFAULT_AVATAR.build, BUILDS, 'avatar.build'),
+    faceShape: oneOf(input.faceShape ?? DEFAULT_AVATAR.faceShape, FACE_SHAPES, 'avatar.faceShape'),
+    eyeShape: oneOf(input.eyeShape ?? DEFAULT_AVATAR.eyeShape, EYE_SHAPES, 'avatar.eyeShape'),
+    facialDetail: oneOf(input.facialDetail ?? DEFAULT_AVATAR.facialDetail, FACIAL_DETAILS, 'avatar.facialDetail'),
     hairStyle: oneOf(input.hairStyle, HAIR_STYLES, 'avatar.hairStyle'),
-    hairColor: hex(input.hairColor, '#2f2119'),
+    hairColor: hex(input.hairColor, DEFAULT_AVATAR.hairColor),
     topStyle: oneOf(input.topStyle, TOP_STYLES, 'avatar.topStyle'),
-    topColor: hex(input.topColor, '#e6dfd3'),
-    bottomStyle: oneOf(input.bottomStyle ?? 'jeans', BOTTOM_STYLES, 'avatar.bottomStyle'),
-    bottomColor: hex(input.bottomColor, '#2b3a2a'),
-    shoeColor: hex(input.shoeColor, '#1b1b1b'),
+    topColor: hex(input.topColor, DEFAULT_AVATAR.topColor),
+    bottomStyle: oneOf(input.bottomStyle ?? DEFAULT_AVATAR.bottomStyle, BOTTOM_STYLES, 'avatar.bottomStyle'),
+    bottomColor: hex(input.bottomColor, DEFAULT_AVATAR.bottomColor),
+    shoeColor: hex(input.shoeColor, DEFAULT_AVATAR.shoeColor),
     accessory: oneOf(input.accessory, ACCESSORIES, 'avatar.accessory'),
     jewelry: oneOf(input.jewelry ?? 'none', JEWELRY, 'avatar.jewelry'),
     carry: oneOf(input.carry ?? 'none', CARRY, 'avatar.carry'),
-    facialHair: oneOf(input.facialHair ?? 'none', FACIAL_HAIR, 'avatar.facialHair'),
-    eyebrows: oneOf(input.eyebrows ?? 'natural', EYEBROWS, 'avatar.eyebrows'),
-    eyeStyle: oneOf(input.eyeStyle ?? 'warm_brown', EYE_STYLES, 'avatar.eyeStyle'),
-    makeupStyle: oneOf(input.makeupStyle ?? 'none', MAKEUP_STYLES, 'avatar.makeupStyle'),
+    facialHair: oneOf(input.facialHair ?? DEFAULT_AVATAR.facialHair, FACIAL_HAIR, 'avatar.facialHair'),
+    eyebrows: oneOf(input.eyebrows ?? DEFAULT_AVATAR.eyebrows, EYEBROWS, 'avatar.eyebrows'),
+    eyeStyle: oneOf(input.eyeStyle ?? DEFAULT_AVATAR.eyeStyle, EYE_STYLES, 'avatar.eyeStyle'),
+    makeupStyle: oneOf(input.makeupStyle ?? DEFAULT_AVATAR.makeupStyle, MAKEUP_STYLES, 'avatar.makeupStyle'),
+  };
+}
+
+/** A saved outfit is wardrobe-only; foundational appearance is never copied. */
+export function sanitizeOutfit(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw badRequest('outfit must be an object');
+  }
+  return {
+    topStyle: oneOf(input.topStyle, TOP_STYLES, 'outfit.topStyle'),
+    topColor: hex(input.topColor, DEFAULT_AVATAR.topColor),
+    bottomStyle: oneOf(input.bottomStyle ?? DEFAULT_AVATAR.bottomStyle, BOTTOM_STYLES, 'outfit.bottomStyle'),
+    bottomColor: hex(input.bottomColor, DEFAULT_AVATAR.bottomColor),
+    shoeColor: hex(input.shoeColor, DEFAULT_AVATAR.shoeColor),
+    accessory: oneOf(input.accessory, ACCESSORIES, 'outfit.accessory'),
+    jewelry: oneOf(input.jewelry ?? 'none', JEWELRY, 'outfit.jewelry'),
+    carry: oneOf(input.carry ?? 'none', CARRY, 'outfit.carry'),
   };
 }
 

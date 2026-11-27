@@ -1,10 +1,11 @@
 /**
  * Profiles, friendships, blocking, persisted chat and moderation reports.
  */
-import { db, newId, now, audit } from './db.mjs';
+import { db, newId, now, tx, audit } from './db.mjs';
 import { badRequest, conflict, forbidden, notFound } from './errors.mjs';
-import { DEFAULT_OWNED_CLOTHING, ownsItem } from './economy.mjs';
-import { sanitizeAvatar, sanitizeText, pickOne } from './validate.mjs';
+import { DEFAULT_OWNED_CLOTHING, ownsItem, getWallet, applyLedger } from './economy.mjs';
+import { sanitizeAvatar, sanitizeOutfit, sanitizeText, pickOne } from './validate.mjs';
+import { CHARACTER_MAKEOVER, foundationalChanges } from '../shared/character.mjs';
 import { normalizeVoicePreferences } from '../shared/voice-controls.mjs';
 import { friendRequestsAllowed } from './settings.mjs';
 
@@ -57,6 +58,7 @@ export function readProfile(userId) {
 function assertWardrobeOwned(userId, avatar) {
   const checked = [
     ['top', avatar.topStyle],
+    ['bottom', avatar.bottomStyle ?? 'jeans'],
     ['accessory', avatar.accessory],
     ['jewelry', avatar.jewelry ?? 'none'],
     ['bag', avatar.carry ?? 'none'],
@@ -74,6 +76,15 @@ export function updateProfile(userId, body = {}) {
   const avatar = body.avatar ? sanitizeAvatar(body.avatar, current.displayName) : current.avatar;
   assertWardrobeOwned(userId, avatar);
 
+  // Free edits are hair, makeup and owned clothing. A foundational change has
+  // to go through applyMakeover() so it is paid and idempotent.
+  const foundation = foundationalChanges(current.avatar, avatar);
+  if (foundation.length > 0) {
+    throw forbidden(
+      `Foundational features (${foundation.join(', ')}) require the paid Character Makeover.`
+    );
+  }
+
   const displayName =
     body.displayName !== undefined
       ? sanitizeText(body.displayName, { max: 32, field: 'displayName' })
@@ -89,6 +100,97 @@ export function updateProfile(userId, body = {}) {
     'UPDATE profiles SET display_name = ?, avatar_json = ?, bio = ?, voice_json = ?, updated_at = ? WHERE user_id = ?'
   ).run(displayName, JSON.stringify(avatar), bio, JSON.stringify(voice), now(), userId);
   return readProfile(userId);
+}
+
+/**
+ * Paid foundation change. Hair and makeup never reach this path; only the paid
+ * fields are rewritten here. The ledger idempotency key means a retried request
+ * cannot charge twice.
+ */
+export function applyMakeover(userId, body = {}) {
+  const current = readProfile(userId);
+  if (!body.avatar || typeof body.avatar !== 'object') {
+    throw badRequest('avatar is required');
+  }
+  const next = sanitizeAvatar(body.avatar, current.displayName);
+  assertWardrobeOwned(userId, next);
+  const changed = foundationalChanges(current.avatar, next);
+  if (changed.length === 0) {
+    return { profile: current, wallet: getWallet(userId), charged: 0, duplicate: false, changed };
+  }
+  const idempotencyKey = String(body.idempotencyKey ?? '');
+  if (idempotencyKey.length < 8 || idempotencyKey.length > 160) {
+    throw badRequest('A valid idempotencyKey is required for a makeover');
+  }
+
+  return tx(() => {
+    // Idempotency keys are account-scoped in intent. Never let a key replayed
+    // from another account turn into a free makeover.
+    const prior = db
+      .prepare('SELECT user_id FROM ledger WHERE idempotency_key = ?')
+      .get(idempotencyKey);
+    if (prior && prior.user_id !== userId) {
+      throw conflict('That idempotency key has already been used');
+    }
+    const { duplicate } = applyLedger({
+      userId,
+      currency: CHARACTER_MAKEOVER.currency,
+      delta: -CHARACTER_MAKEOVER.price,
+      reason: 'character_makeover',
+      ref: changed.join(','),
+      idempotencyKey,
+    });
+    db.prepare(
+      'UPDATE profiles SET avatar_json = ?, updated_at = ? WHERE user_id = ?'
+    ).run(JSON.stringify(next), now(), userId);
+    if (!duplicate) audit(userId, 'character.makeover', changed.join(','));
+    return {
+      profile: readProfile(userId),
+      wallet: getWallet(userId),
+      charged: duplicate ? 0 : CHARACTER_MAKEOVER.price,
+      duplicate,
+      changed,
+    };
+  });
+}
+
+/* -------------------------------- outfits -------------------------------- */
+
+const outfitView = (row) => ({
+  id: row.id,
+  name: row.name,
+  config: JSON.parse(row.config_json),
+  createdAt: row.created_at,
+});
+
+export function listOutfits(userId) {
+  return db
+    .prepare('SELECT id, name, config_json, created_at FROM outfits WHERE user_id = ? ORDER BY created_at DESC')
+    .all(userId)
+    .map(outfitView);
+}
+
+/** Save an unlimited named outfit containing only owned wardrobe pieces. */
+export function saveOutfit(userId, body = {}) {
+  const name = sanitizeText(body.name, { max: 32, field: 'name' }) || 'My Outfit';
+  const config = sanitizeOutfit(body.config ?? {});
+  assertWardrobeOwned(userId, config);
+  const id = newId('outfit');
+  const createdAt = now();
+  db.prepare(
+    'INSERT INTO outfits (id, user_id, name, config_json, created_at) VALUES (?, ?, ?, ?, ?)'
+  ).run(id, userId, name, JSON.stringify(config), createdAt);
+  audit(userId, 'character.outfit.save', name);
+  return { id, name, config, createdAt };
+}
+
+export function deleteOutfit(userId, id) {
+  const result = db
+    .prepare('DELETE FROM outfits WHERE id = ? AND user_id = ?')
+    .run(String(id ?? ''), userId);
+  if (result.changes === 0) throw notFound('Outfit not found');
+  audit(userId, 'character.outfit.delete', String(id));
+  return { deleted: true, id: String(id) };
 }
 
 export function searchPlayers(viewerId, query) {

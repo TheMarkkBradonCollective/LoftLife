@@ -2,6 +2,15 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2, ShoppingBag, Shirt, Sofa, X } from 'lucide-react';
 import { api, ApiError, type ShopEntry } from '../net/api';
 import { useSession } from '../session';
+import { DEFAULT_AVATAR } from '../game/catalog';
+import type { AccessoryId, BottomStyleId, CarryId, JewelryId, TopStyleId } from '../game/types';
+import { CharacterPreview } from './CharacterPreview';
+
+const TOP_IDS = new Set<TopStyleId>(['hoodie', 'blazer', 'tee', 'turtleneck', 'button_shirt', 'sweater', 'jacket', 'tank', 'varsity', 'raincoat', 'suit', 'dress', 'crop_hoodie', 'cardigan']);
+const BOTTOM_IDS = new Set<BottomStyleId>(['jeans', 'chinos', 'shorts', 'skirt', 'joggers', 'dress_pants', 'cargo']);
+const ACCESSORY_IDS = new Set<AccessoryId>(['none', 'glasses', 'headphones', 'beanie', 'cap', 'bucket_hat', 'sunglasses', 'scarf']);
+const JEWELRY_IDS = new Set<JewelryId>(['none', 'chain', 'watch', 'earrings', 'bracelet']);
+const CARRY_IDS = new Set<CarryId>(['none', 'backpack', 'purse', 'tote']);
 
 const panel = 'bg-[#15181c]/97 text-slate-100 border-white/20';
 
@@ -16,7 +25,7 @@ interface ShopModalProps {
 
 /** Buy furniture and wardrobe pieces with the server-owned price list. */
 export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab = 'furniture', readOnly = false }) => {
-  const { wallet, inventory, buy, status } = useSession();
+  const { wallet, inventory, buy, status, profile } = useSession();
   const [furniture, setFurniture] = useState<ShopEntry[]>([]);
   const [clothing, setClothing] = useState<ShopEntry[]>([]);
   const [tab, setTab] = useState<'furniture' | 'clothing'>(initialTab);
@@ -24,6 +33,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ShopEntry | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -52,6 +62,16 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
   if (!open) return null;
 
   const items = tab === 'furniture' ? furniture : clothing;
+  const previewConfig = useMemo(() => {
+    const base = profile?.avatar ?? DEFAULT_AVATAR;
+    if (!preview) return base;
+    if (TOP_IDS.has(preview.id as TopStyleId)) return { ...base, topStyle: preview.id as TopStyleId };
+    if (BOTTOM_IDS.has(preview.id as BottomStyleId)) return { ...base, bottomStyle: preview.id as BottomStyleId };
+    if (ACCESSORY_IDS.has(preview.id as AccessoryId)) return { ...base, accessory: preview.id as AccessoryId };
+    if (JEWELRY_IDS.has(preview.id as JewelryId)) return { ...base, jewelry: preview.id as JewelryId };
+    if (CARRY_IDS.has(preview.id as CarryId)) return { ...base, carry: preview.id as CarryId };
+    return base;
+  }, [preview, profile?.avatar]);
 
   const purchase = async (item: ShopEntry) => {
     if (readOnly) return;
@@ -106,7 +126,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
         <div className="px-4 py-2 flex items-center gap-1 border-b border-white/8">
           <button
             type="button"
-            onClick={() => setTab('furniture')}
+            onClick={() => { setTab('furniture'); setPreview(null); }}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 ${
               tab === 'furniture' ? 'bg-white text-[#15181b]' : 'text-slate-300 hover:bg-white/10'
             }`}
@@ -136,6 +156,28 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
           </div>
         )}
 
+        {tab === 'clothing' && (
+          <div className="grid shrink-0 gap-3 border-b border-white/8 p-4 sm:grid-cols-[220px_minmax(0,1fr)]">
+            <CharacterPreview config={previewConfig} className="h-48 sm:h-56" compact />
+            <div className="flex flex-col justify-center">
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Try before you buy</span>
+              <h3 className="mt-1 text-sm font-bold text-white">
+                {preview ? label(preview) : 'Your character'}
+              </h3>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                {preview
+                  ? 'Selected piece is shown on your live character. Purchase adds it to your account inventory; put it on later at your home closet.'
+                  : 'Select any piece to preview it on your character. Outfit changes stay at your home closet.'}
+              </p>
+              {preview && (
+                <span className="mt-2 text-[11px] font-mono-tabular text-amber-300">
+                  {preview.currency === 'tongbao' ? '宝' : '元'} {preview.price}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="p-4 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-2">
           {items.length === 0 && <p className="text-xs text-slate-500">Loading the catalog…</p>}
           {items.map((item) => {
@@ -146,7 +188,12 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
             return (
               <div
                 key={item.id}
-                className="rounded-xl border border-white/10 bg-white/[0.05] p-3 flex flex-col gap-2"
+                onClick={() => { if (tab === 'clothing') setPreview(item); }}
+                className={`rounded-xl border p-3 flex flex-col gap-2 ${
+                  tab === 'clothing' && preview?.id === item.id
+                    ? 'border-[#39ff14]/70 bg-[#39ff14]/10'
+                    : 'border-white/10 bg-white/[0.05]'
+                } ${tab === 'clothing' ? 'cursor-pointer' : ''}`}
               >
                 <div className="text-xs font-semibold text-slate-100 leading-tight">{label(item)}</div>
                 <div className="flex items-center justify-between">
@@ -172,8 +219,8 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
         </div>
 
         <p className="px-4 py-2 border-t border-white/8 text-[11px] text-slate-500">
-          Bought furniture is placed from Edit Room → Furniture. Bought tops and accessories unlock in the
-          Avatar studio.
+          Bought furniture is placed from Edit Room → Furniture. Bought clothing enters your account
+          inventory and unlocks at your home closet, including on other devices.
         </p>
       </div>
     </div>
