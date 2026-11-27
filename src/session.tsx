@@ -605,7 +605,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       onTravel: (event) => setTravel(event),
       onHotel: (event) => setHotelEvent(event),
       onError: (code, message) => {
-        if (status === 'guest' && (code === 'unauthorized' || code === 'guest_expired')) {
+        // Only the explicit expiry/revocation response invalidates a guest token.
+        // A transient generic auth failure must not erase a first-time visitor's
+        // persisted session and bounce them back to the landing screen.
+        if (status === 'guest' && code === 'guest_expired') {
           writeGuestSession(null, null);
           setGuestToken(null); setGuestName(null); setStatus('offline');
         }
