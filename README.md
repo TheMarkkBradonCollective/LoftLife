@@ -69,6 +69,32 @@ split and the pieces that still need a live Neon sign-in test.
 
 ---
 
+## Product vision
+
+**LoftLife is a living 3D social gaming world.** Its guiding principles are:
+
+- **Explore a world, not a lobby:** a coherent, believable city with districts, streets, landmarks,
+  destinations and interiors designed to feel connected.
+- **Play without forced roleplay:** players choose how to spend their time; roleplay is not required
+  to enjoy the world.
+- **Interact with the world:** visible objects and places should be evaluated for meaningful,
+  consistent interactions rather than serving only as decoration.
+- **Give every destination a purpose:** locations should offer something to explore, something to
+  interact with, or something to do with other players.
+- **Create and share:** customizable characters, personal spaces, buildable destinations and
+  collaborative experiences are core gameplay, not side features.
+- **Make multiplayer feel alive:** accurate presence, synchronized movement and interactions,
+  proximity voice, parties and shared activities must work reliably across devices.
+
+The design shorthand is **FiveM-inspired world immersion + HighRise-inspired social creativity +
+LoftLife gameplay and interaction**. These are inspirations, not templates to copy.
+
+See the new root [`plan.md`](plan.md) for the complete product vision, design rules, feature pillars,
+known gaps, priorities and long-term roadmap. The more implementation-specific status remains in
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+---
+
 ## What works right now
 
 **Game (pre-existing, preserved)**
