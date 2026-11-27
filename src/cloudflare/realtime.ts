@@ -150,12 +150,14 @@ export class LoftLifeRealtime {
         return await response.json() as { online: number; instances: Array<{id:string;kind:string;worldId:string|null;capacity:number;count:number}>; userIds: string[]; players?: Array<Record<string,unknown>> };
       }));
       const active = snapshots.filter((snapshot): snapshot is NonNullable<typeof snapshot> => Boolean(snapshot));
-      const liveInstances = active.flatMap(snapshot => snapshot.instances).filter(instance => instance.count > 0);
       const actualPresence: Record<string,string> = {};
       for (const snapshot of active) for (const userId of snapshot.userIds) {
         const instance = snapshot.instances[0];
         if (instance) actualPresence[userId] = instance.id;
       }
+      const liveInstances = active.flatMap(snapshot => snapshot.instances).map((instance) => ({
+        ...instance, count: Object.values(actualPresence).filter((id) => id === instance.id).length,
+      })).filter((instance) => instance.count > 0);
       state.userInstances = actualPresence;
       await this.ctx.storage.put('party_state', state);
       const uniquePlayers = new Map<string,Record<string,unknown>>();
@@ -856,5 +858,6 @@ export class LoftLifeRealtime {
   }
   async webSocketError(ws: HibernatableWebSocket) {
     await this.disconnectPlayer(ws);
+  }
 }
-}
+
