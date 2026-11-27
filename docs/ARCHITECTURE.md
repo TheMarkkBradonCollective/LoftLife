@@ -2,26 +2,36 @@
 
 ## 1. Topology
 
+**Production (Cloudflare):**
+
 ```
-Browser (React 19 + Three.js)
-   │  same origin
-   ├── /api/*  ──►  Express (server/index.mjs)
-   └── /ws     ──►  WebSocket gateway (server/realtime.mjs)
-                          │
-                          └── SQLite (node:sqlite, WAL)  data/loftlife.db
+Browser (React + Three.js, static assets)
+   │
+   ▼
+Cloudflare Worker (src/cloudflare/worker.ts)
+   ├── Neon Postgres — accounts, sessions, profiles, worlds, social and economy data
+   └── Durable Objects — TheCity / world realtime sockets, presence, chat and movement
 ```
 
-In development Vite proxies `/api` and `/ws` to `:8787` so the browser only ever sees one origin —
-no CORS, no cross-site cookies, and WebSockets stay same-site. In production the same Express
-process serves `dist/` and the API on one port behind a TLS terminator.
+**Local development (Node parity runtime):**
 
-An optional Cloudflare Worker can sit in front of both: it serves the built client, owns account
-creation and sign-in against Neon, and proxies `/api/*` and `/ws` to the game server. See §8.
+```
+Browser ──► Vite ──► Express API (server/index.mjs) ──► SQLite
+                  └► WebSocket gateway (server/realtime.mjs) ─► in-process instances
+```
 
-**Why this shape:** the prototype already used Vite + React + Three.js, and the server had to run
-without paid services or native modules. `node:sqlite` (Node ≥ 22.5) gives real SQL, transactions and
-WAL durability with zero build steps, while the HTTP/WS surface stays language-agnostic so a Unity 6
-client can consume exactly the same protocol later.
+Vite proxies local `/api` and `/ws` requests to the Node dev server on `:8787`. The Node runtime
+keeps SQLite for local development; the deployed Worker uses Neon and Durable Objects. The guest
+session API and canonical city-instance contract are implemented in both runtimes so local
+development follows the same guest and Main City rules as production.
+
+The Worker serves the built client, owns account creation and sign-in against Neon, handles game
+APIs, and routes realtime connections to Durable Objects. It does not proxy production city
+realtime to the local Node server.
+
+**Why this shape:** the browser protocol remains transport-agnostic, while Cloudflare provides the
+production edge and per-instance realtime coordination. The Node runtime remains useful for fast
+local development and automated parity tests.
 
 ## 2. Data model
 
@@ -90,11 +100,13 @@ Server → client:
 | `transit` | `{riding, vehicles, exited?}` — seat changes and vehicle state |
 | `error` | `{code, message}` — explicit, never silent |
 
-**Instances.** The Main City is presented as one world but runs as numbered shards (`city:1`,
-`city:2`, …) with a capacity (default 40, `LOFTLIFE_INSTANCE_CAPACITY`). A new shard opens when all
-are full; `joinFriend` relocates a player to a friend's shard. Characters, inventory, currency and
-worlds are account-scoped, so travelling between shards loses nothing. Shards stay numbered rather
-than being deleted, so friends can rejoin the same one.
+**Instances.** TheCity is one shared logical instance. Clients request `city`; the shared
+resolver canonicalizes that request to `city:main`. Clients cannot select arbitrary numbered
+`city:*` instances, and invalid city shard requests are rejected before a Durable Object is
+allocated. The default city capacity is 64 (configurable with `LOFTLIFE_CITY_CAPACITY`, retaining
+`LOFTLIFE_INSTANCE_CAPACITY` as a compatibility fallback). When all 64 places are occupied, the
+server rejects another join with `instance_full`. There is currently no overflow shard, waiting
+lobby, or queue; the overflow experience is a follow-up design decision.
 
 **Chat routing.** `local` is range-gated server-side (whisper 4 m, say 14 m, shout 35 m) and is
 ephemeral; `city`/`world` are persisted and delivered to the instance; `dm` is persisted under a
@@ -164,74 +176,67 @@ message set, keep the same bearer token, and render the same authoritative world
 *content* (furniture ids, prices, grid rules) should move to a shared JSON manifest the server owns,
 which is the first step in Phase 9 and also benefits the browser client.
 
-## 8. Cloud identity: Cloudflare + Neon + authentication
+## 8. Production identity and realtime: Cloudflare + Neon
 
-The Cloudflare Worker is the identity edge. It stores accounts in Neon Postgres, hashes passwords
-with PBKDF2-SHA256 (Web Crypto), and mints HMAC-signed session tokens. The Node game server verifies
-the same token with the same secret, so a player signs in once and every game endpoint, WebSocket and
-world instance accepts that identity without a database round-trip.
+The deployed Cloudflare Worker is the production application edge. It serves static assets, owns
+account registration and sign-in, handles game APIs, and connects realtime clients to the
+`LoftLifeRealtime` Durable Object. Neon Postgres is the production store for account and game
+records; Durable Objects coordinate live city/world sessions.
 
 ```
-Browser ──► Cloudflare Worker ──► Neon Postgres     ll_accounts, ll_sessions
+Browser ──► Cloudflare Worker ──► Neon Postgres
                     │
-                    └── proxy /api/*, /ws ──► Node game server ──► SQLite
-                                                  │
-                                                  └── verifies the edge token (HMAC)
-                                                      and provisions the local account
+                    └──────────► Durable Objects (TheCity and player worlds)
 ```
 
-### Token format
+### Token and session behavior
 
-`llt1.<base64url(payload)>.<base64url(HMAC-SHA256)>`, where the payload is
-`{sub, handle, role, name, sid, iat, exp}` and `exp` is in seconds. The signature covers
-`llt1.<payload>`, so neither the identity nor the expiry can be altered by the client. `sid` is a
-session id that the Worker stores (hashed) in `ll_sessions` for revocation at the edge.
+Passwords are hashed with PBKDF2-SHA256 using Web Crypto. Session tokens are HMAC-signed with
+`LOFTLIFE_SESSION_SECRET`; the Worker checks the corresponding Neon session record on API and
+realtime joins. Guest sessions are separate from account sessions, use a signed 12-hour token, and
+are stored by hash in `ll_guest_sessions`. Guests can join TheCity and use public/nearby chat, but
+cannot use account-only social, party, private-world, or messaging features.
+
+The Node development runtime implements the matching `/api/guest/session` create/revoke contract.
+It uses its own local SQLite database and shares the canonical city resolver with the Worker.
 
 ### Who owns what
 
-| Concern | Owner | Notes |
+| Concern | Production owner | Notes |
 | --- | --- | --- |
-| Password hash, email, handle, role | Cloudflare Worker → Neon | `ll_accounts`; handle/email lowercased and unique |
-| Session revocation | Cloudflare Worker → Neon | `ll_sessions.jti_hash`; logout deletes the row |
-| Profile, wallet, inventory, suite, worlds, social graph | Node game server → SQLite | created on first authenticated request, keyed by the same account id |
-| Realtime, presence, parties, voice signalling, transit | Node game server | `/ws` is proxied by the Worker |
+| Password hash, email, handle, role | Worker → Neon | `ll_accounts`; unique handle and email |
+| Account session revocation | Worker → Neon | `ll_sessions`; checked at the edge |
+| Guest sessions | Worker → Neon | `ll_guest_sessions`; separate from registered accounts |
+| Profiles, wallets, inventory, suites, worlds, social and economy | Worker → Neon | `ll_*` tables |
+| Realtime presence, movement, chat and instance membership | Durable Objects | `LoftLifeRealtime`; one canonical `city:main` |
+| Local development state | Node dev server → SQLite | Separate local data; not production persistence |
 
-`server/edge-auth.mjs` verifies the token (`verifyEdgeToken`) and provisions the local account on
-first use (`ensureEdgeUser`): profile, 500 元子 / 25 通宝 welcome grant with ledger entries, the
-furnished suite 402, and the starting wardrobe. Account ids are the Neon user ids, so the two stores
-never disagree about who a player is.
+### Required Worker secrets
 
-### Configuration
+| Name | Purpose |
+| --- | --- |
+| `DATABASE_URL` | Neon Postgres connection string |
+| `LOFTLIFE_SESSION_SECRET` | HMAC signing key, at least 32 characters |
 
-| Name | Where | Purpose |
-| --- | --- | --- |
-| `DATABASE_URL` | Worker secret | Neon pooled connection string (`wrangler secret put DATABASE_URL`) |
-| `LOFTLIFE_SESSION_SECRET` | Worker secret **and** Node env | HMAC key, ≥ 32 characters, identical on both |
-| `GAME_ORIGIN` | `wrangler.toml` `[vars]` | Node server origin the Worker proxies to |
+Secrets are configured outside source control and injected by the deployment workflow. Never place
+secret values in client code, repository files, logs, or test fixtures.
 
-Without `DATABASE_URL` the Worker answers `503 unconfigured` on auth routes and `/api/health`
-reports `storageEngine: "unconfigured"`. Without `LOFTLIFE_SESSION_SECRET` the Node server rejects
-every `llt1.` token, so a missing secret fails closed instead of trusting an unsigned identity.
+### Verification status
 
-### Verified, and not verified
+The Node and in-process Worker/DO test suites cover guest session creation/revocation, canonical
+city routing, two-guest presence and chat, guest restrictions, and full-instance rejection. The
+in-process Worker harness uses a Neon SQL stub and WebSocket shim; it is not a live Neon or
+workerd test.
 
-Verified locally in workerd (`wrangler dev`): the Worker serves the built SPA, proxies `/api/shop`
-to the game server, rejects cross-origin auth POSTs with 403, and reports the missing database as a
-503 rather than crashing. Node-side: 5 integration tests cover password hashing, token signature and
-expiry, provisioning on first use, rejection of tampered/expired/foreign-signed tokens, and that
-local email/password accounts keep working.
+As of 2026-11-26, GitHub Actions checks and the Cloudflare deployment workflow completed
+successfully for commit `262e2855d2f91663cfffedd3555e61f29a7511a7`. Cloudflare reports that the
+corresponding Worker deployment is serving 100% of traffic. This confirms deployment, not the
+live guest journey or production database migration state. A real two-client test against the
+deployed Worker, Neon, and Durable Object is still required.
 
-Not verified: register/login against a live Neon database (no Neon credentials are configured in
-this environment, and none belong in source control). The SQL is standard Postgres and the path is
-exercised by the same tests with the Node driver, but a real `wrangler secret put DATABASE_URL`
-followed by a sign-in is still required before calling it production-ready.
+### Current scaling limit
 
-### Known limits
-
-- The Worker checks `ll_sessions`; the Node server verifies the signature only. A token revoked at
-  the edge stays valid for game endpoints until it expires (14 days). Lower the TTL or add a
-  revocation check on state-changing routes if that matters.
-- The Worker proxies WebSockets; some networks terminate long-lived upgrades at the edge. The Node
-  server remains the authoritative realtime host and can be exposed directly if needed.
-- Neon is the account store, not the world store: rooms, inventories and social state stay in the
-  game server's SQLite until that layer is ported.
+TheCity is a single 64-player instance. A player arriving when it is full receives
+`instance_full`. There is no queue, lobby, or automatic overflow routing yet. Do not create
+numbered city shards as an implicit workaround; choose and document the overflow experience before
+implementing it.
