@@ -1129,14 +1129,14 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
 
   /** Confirm-leave path: flush the latest build state, then restore the suite. */
   const handleLeaveWorldConfirmed = useCallback(async () => {
-    if (!activeWorld) return;
-    if (activeWorld.canEdit && session.status === 'online') {
+    if (activeWorld?.canEdit && session.status === 'online') {
       try {
         await api.saveWorldState(activeWorld.id, { items, surfaces, mood });
       } catch {
         showHint('World could not sync before leaving · the saved copy is unchanged');
       }
     }
+    // This action is intentionally available from every location, including Main City.
     handleLeaveWorld();
   }, [activeWorld, session.status, items, surfaces, mood, showHint, handleLeaveWorld]);
 
@@ -2262,7 +2262,6 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         viewMode={viewMode}
         closeZoom={closeZoom}
         followCharacter={followCharacter}
-        mood={mood}
         touch={controls.touch}
         syncing={controls.syncing}
         syncError={controls.syncError}
@@ -2276,7 +2275,6 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         debug={hudDebug}
         onSetTouch={controls.setTouch}
         onResetTouch={controls.resetTouch}
-        onSetMood={setMood}
         onSetView={handleSetView}
         onToggleZoom={toggleCloseZoom}
         onToggleFollow={toggleFollowCharacter}
