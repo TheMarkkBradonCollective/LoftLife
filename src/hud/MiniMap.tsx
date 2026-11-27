@@ -4,7 +4,7 @@ import { MapPinned } from 'lucide-react';
 interface MiniMapProps {
   currentStreet: string;
   locationLabel: string;
-  poseRef: React.MutableRefObject<{ x: number; z: number; yaw: number }>;
+  poseRef: React.MutableRefObject<{ x: number; z: number; yaw: number; known: boolean }>;
   presentation: 'mobile-portrait' | 'mobile-landscape' | 'tablet-portrait' | 'tablet-landscape' | 'desktop-browser' | 'desktop-app';
   onOpenMap: () => void;
 }
@@ -33,7 +33,7 @@ export const MiniMap: React.FC<MiniMapProps> = ({ currentStreet, locationLabel, 
         <div className="absolute right-[14%] top-[22%] h-2 w-2 rounded-sm bg-amber-300" />
         <div className="absolute left-[23%] bottom-[16%] h-2 w-2 rounded-sm bg-pink-400" />
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-          <span className="block h-4 w-4 rounded-full border-2 border-[#07100b] bg-[#39ff14] shadow-[0_0_12px_#39ff14]" style={{ transform: `rotate(${pose.yaw}rad)` }}>
+          <span className="relative block h-4 w-4 rounded-full border-2 border-[#07100b] bg-[#39ff14] shadow-[0_0_12px_#39ff14]" style={{ transform: `rotate(${pose.yaw}rad)` }}>
             <span className="absolute -top-1 left-1/2 h-2 w-1 -translate-x-1/2 rounded-full bg-white" />
           </span>
         </div>
