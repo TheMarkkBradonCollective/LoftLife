@@ -95,6 +95,8 @@ export interface PlacedItem {
   /** For wall items: which of the four suite walls it hangs on. */
   wall?: WallSide;
   color: string;
+  /** Vertical storey (0 = ground). Rooms may stack up to MAX_LEVELS. */
+  level?: number;
   /** Interactive state (e.g., lamp on/off, tv on/off) */
   active?: boolean;
 }
@@ -105,6 +107,8 @@ export type WallStyleId = 'warm_chalk' | 'sage_plaster' | 'terracotta' | 'slate_
 export interface RoomSurfaceConfig {
   floor: FloorStyleId;
   wall: WallStyleId;
+  /** Per-storey finishes; index 0 mirrors `floor`/`wall`. */
+  floors?: { floor: FloorStyleId; wall: WallStyleId }[];
 }
 
 export type HairStyleId =

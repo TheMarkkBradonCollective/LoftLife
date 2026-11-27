@@ -1,4 +1,5 @@
 import { getCatalogItem, GRID_SIZE } from './catalog';
+import { levelElevation } from '../../shared/building.mjs';
 import type { PlacedItem } from './types';
 import {
   normalizeWallSide,
@@ -43,24 +44,26 @@ export function getItemWorldTransform(placed: PlacedItem): {
 } {
   const cat = getCatalogItem(placed.catalogId);
   if (!cat) return { x: 0, y: 0, z: 0, rotY: 0 };
+  const elevation = levelElevation(placed.level ?? 0);
 
   if (cat.layer === 'wall') {
     const wall = normalizeWallSide(placed.wall) as WallSide;
     const along = wallAxis(wall) === 'x' ? placed.gx : placed.gz;
-    return wallItemTransform({
+    const transform = wallItemTransform({
       wall,
       start: along,
       span: cat.size[0],
       height: cat.wallHeight ?? 1.85,
       gridSize: GRID_SIZE,
     });
+    return { ...transform, y: transform.y + elevation };
   }
 
   const [ew, ed] = getEffectiveSize(placed.catalogId, placed.rot);
   const { x, z } = gridToWorldCenter(placed.gx, placed.gz, ew, ed);
   return {
     x,
-    y: cat.layer === 'rug' ? 0.02 : 0,
+    y: (cat.layer === 'rug' ? 0.02 : 0) + elevation,
     z,
     rotY: (placed.rot * Math.PI) / 2,
   };
@@ -138,7 +141,7 @@ export function getSeatWorldInfo(placed: PlacedItem): {
   return {
     seatPos: {
       x: t.x + sx,
-      y: cat.seatOffset[1],
+      y: cat.seatOffset[1] + levelElevation(placed.level ?? 0),
       z: t.z + sz,
     },
     approachPos: {

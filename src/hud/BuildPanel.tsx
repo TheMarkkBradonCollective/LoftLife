@@ -11,8 +11,10 @@ import {
   Frame,
   LampDesk,
   Layers,
+  Minus,
   Move,
   Paintbrush,
+  Plus,
   Palette,
   PencilRuler,
   RotateCw,
@@ -195,6 +197,54 @@ export const BuildPanel: React.FC<BuildPanelProps> = ({ build, presentation, tou
             <Check className="w-3.5 h-3.5" aria-hidden="true" />
             Done
           </button>
+        </div>
+
+        {/* Storey selector: a property stacks up to four levels. */}
+        <div className="flex items-center gap-1 overflow-x-auto border-b border-white/10 px-3 py-1.5 no-scrollbar">
+          <span className="mr-1 shrink-0 text-[9px] font-bold uppercase tracking-[0.14em] text-white/40">
+            Storey
+          </span>
+          {Array.from({ length: build.levels }).map((_, level) => (
+            <button
+              key={level}
+              type="button"
+              aria-pressed={build.level === level}
+              onClick={() => build.onSelectLevel(level)}
+              className={cx(
+                'll-focus inline-flex min-h-[28px] shrink-0 items-center gap-1 rounded-lg px-2 text-[10px] font-semibold',
+                build.level === level
+                  ? 'bg-white text-[#15181b]'
+                  : 'text-white/65 hover:bg-white/10 hover:text-white'
+              )}
+            >
+              {level === 0
+                ? 'Ground'
+                : level === build.levels - 1
+                ? `Roof ${level + 1}`
+                : `Level ${level + 1}`}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={build.onAddLevel}
+            disabled={build.levels >= 4}
+            aria-label="Add a storey above this property"
+            className="ll-focus inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30"
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={build.onRemoveLevel}
+            disabled={build.levels <= 1}
+            aria-label="Remove the top storey and its contents"
+            className="ll-focus inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30"
+          >
+            <Minus className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+          <span className="ml-auto shrink-0 font-mono-tabular text-[10px] text-white/40">
+            {build.itemCount} on this storey
+          </span>
         </div>
 
         {!build.collapsed && (

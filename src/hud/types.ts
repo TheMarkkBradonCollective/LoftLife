@@ -68,6 +68,14 @@ export interface BuildController {
   setTab: (tab: 'catalog' | 'surfaces' | 'presets') => void;
   categoryFilter: 'all' | FurnitureCategory;
   setCategoryFilter: (category: 'all' | FurnitureCategory) => void;
+  /** Storey currently being edited (0 = ground). */
+  level: number;
+  /** Number of storeys in this property (1..MAX_LEVELS). */
+  levels: number;
+  onSelectLevel: (level: number) => void;
+  onAddLevel: () => void;
+  onRemoveLevel: () => void;
+  /** Items placed on the active storey only. */
   itemCount: number;
   historyLength: number;
   canEdit: boolean;

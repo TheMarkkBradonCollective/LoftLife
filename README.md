@@ -29,7 +29,9 @@ Other scripts:
 | `npm run build` | Production build to `dist/` |
 | `npm run assets:previews` | Render every catalog preview PNG from its actual 3D model (`--force`, `--only=`, `--category=`) |
 | `npm run assets:check` | Re-validate every catalog image against the model signature that produced it |
-| `npm test` | 170 integration/acceptance checks: HTTP API, permissions, CUBITS/TG-Banking/cash, economy, parties, voice signalling, transit seats, Cloudflare-issued identity, two-client city movement, 64-player capacity, the shipping Worker/Durable Object path, and the catalog/preview pipeline |
+| `npm run assets:upload` | Upload previews to R2 under `catalog/v1/<category>/` (needs `CATALOG_R2_BUCKET` + `CLOUDFLARE_API_TOKEN`) |
+| `npm run db:seed` | Apply the catalog migration + generated seed to Neon (`--apply`, needs `DATABASE_URL`) |
+| `npm test` | 180 integration/acceptance checks: HTTP API, permissions, CUBITS/TG-Banking/cash, economy, parties, voice signalling, transit seats, Cloudflare-issued identity, two-client city movement, 64-player capacity, the shipping Worker/Durable Object path, the catalog/preview pipeline, and multi-storey build persistence |
 | `npm run lint` | `tsc --noEmit` |
 
 Catalog assets are generated, not hand-drawn: `shared/catalog/expansion.mjs` is the single record of
@@ -108,8 +110,11 @@ known gaps, priorities and long-term roadmap. The more implementation-specific s
 - Grid-based room builder: **344 catalog items** (73 original + 271 expansion) covering construction,
   residential, commercial, nightlife, specialty, event, outdoor and vehicle pieces — with a preview
   thumbnail per item and per colour variant rendered from that item's own model, search, category and
-  themed-collection filters. Recolour/rotate/move/duplicate/delete, undo, 5 floor finishes, 6 wall
-  paints, 3 lighting moods, 3 starter layouts.
+  themed-collection filters. **Up to four stacked storeys** with per-storey finishes, real slabs,
+  walls and rooftop railings, stairs that move the avatar between floors, and storey-local
+  collision (see [docs/BUILDING-MULTIFLOOR.md](docs/BUILDING-MULTIFLOOR.md)).
+  Recolour/rotate/move/duplicate/delete, undo, 5 floor finishes, 6 wall paints, 3 lighting moods,
+  3 starter layouts.
 - Character studio: skin tones, 6 hairstyles, 4 tops, accessories, hair/outfit colours.
 - Main Hotel: lobby, 4 floors, brass elevator, keycard door terminal, numbered suite doors,
   resident NPC suites and greetings.
@@ -163,14 +168,15 @@ known gaps, priorities and long-term roadmap. The more implementation-specific s
   differently on the server than in the catalog.
 - Reports and admin moderation endpoints; audit log.
 
-**Not implemented yet** (see [docs/CATALOG-EXPANSION.md](docs/CATALOG-EXPANSION.md#known-limitations) and
-[docs/ROADMAP.md](docs/ROADMAP.md)): multi-floor stacking in the room editor (stair, mezzanine and
-balcony pieces exist and place correctly, but there is still one 14×14 floor per suite), a
-substantially expanded *clothing* line (the wardrobe still has its 6 pieces; garments need new rig
-geometry), automatic wall/fixture snapping for curved and angled pieces, escalator/elevator motion,
-custom uploaded assets, the Unity 6 Windows/Android clients, server-side collision re-simulation, an
-earned-income loop, and CI/load testing. R2 upload of the preview set is implemented as documented
-deployment steps but was not run here (no bucket credentials in this environment).
+**Not implemented yet** (see [plan.md](plan.md) and
+[docs/CATALOG-EXPANSION.md](docs/CATALOG-EXPANSION.md#known-limitations)): an expanded *clothing*
+line (the wardrobe keeps its existing garments; new shoes/swimwear/outerwear need rig geometry and
+character-rendered previews), mitred geometry for curved/angled wall corners, animated stair
+traversal and elevator/escalator motion, per-storey presence for visitors, custom uploaded assets,
+the Unity 6 Windows/Android clients, server-side collision re-simulation, an earned-income loop, and
+CI/load testing. R2 upload and the Neon migration/seed are implemented as guarded scripts but were
+**not applied** here — this environment has no `DATABASE_URL`, R2 bucket or Cloudflare token; the
+blockers and commands are in [docs/CATALOG-EXPANSION.md](docs/CATALOG-EXPANSION.md#storage-pipeline).
 
 ---
 
@@ -217,6 +223,9 @@ docs/              AUDIT.md, ARCHITECTURE.md, CATALOG-EXPANSION.md, ROADMAP.md, 
   screenshots and the verification report.
 - [docs/DEVICE-COMPATIBILITY.md](docs/DEVICE-COMPATIBILITY.md) — runtime/input matrix, HUD rules,
   mobile renderer budget and the device test report.
+- [docs/BUILDING-MULTIFLOOR.md](docs/BUILDING-MULTIFLOOR.md) — storey model, editor controls,
+  stairs and movement, persistence/Worker parity, wall joining and limits.
+- [plan.md](plan.md) — living status table: shipped, blocked storage, clothing expansion next.
 - [docs/CATALOG-EXPANSION.md](docs/CATALOG-EXPANSION.md) — the 344-item catalog, model kinds,
   preview-rendering pipeline, database/storage changes, verification and known limitations.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased plan with current status.

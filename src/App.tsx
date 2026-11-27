@@ -37,6 +37,7 @@ import { isEditableElement } from '../shared/desktop-shortcuts.mjs';
 import { bindingMatchesEvent } from '../shared/keybindings.mjs';
 import { useKeybindings } from './game/keybindings';
 import { wallAxis } from '../shared/room-walls.mjs';
+import { MAX_LEVELS, joinWallRun, normalizeFloors } from '../shared/building.mjs';
 import { useSession } from './session';
 import { useSettings } from './platform/settings';
 import type { GameEntry } from './platform/types';
@@ -58,11 +59,17 @@ import type {
   FurnitureCategory,
   GameMode,
   LightingMood,
-  PlacedItem,
   RoomSurfaceConfig,
+  PlacedItem,
   ViewMode,
   WorldLocation,
 } from './game/types';
+
+type LevelStyles = NonNullable<RoomSurfaceConfig['floors']>;
+
+/** normalizeFloors is a plain-JS rule module; narrow it for the typed editor. */
+const styleFloors = (surfaces: RoomSurfaceConfig, roomItems: PlacedItem[]): LevelStyles =>
+  normalizeFloors(surfaces, roomItems) as LevelStyles;
 
 const STORAGE_KEY = 'loftlife_room_state_v1';
 const GUEST_STORAGE_KEY = 'loftlife_guest_room_state_v1';
@@ -361,6 +368,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [placingRotation, setPlacingRotation] = useState<0 | 1 | 2 | 3>(0);
   const [placingColor, setPlacingColor] = useState<string>('#e6dfd3');
   const [movingUid, setMovingUid] = useState<string | null>(null);
+  // Which storey is being edited / walked. Level 0 is the ground floor.
+  const [activeLevel, setActiveLevel] = useState(0);
 
   // UI Chrome state
   const [dockCollapsed, setDockCollapsed] = useState(() => device.controls === 'touch');
@@ -1172,12 +1181,38 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     (candidate: Omit<PlacedItem, 'uid'>) => {
       pushHistory(items);
       const uid = `it_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      const created: PlacedItem = { ...candidate, uid };
+      const level = candidate.level ?? activeLevel;
+      const catalog = getCatalogItem(candidate.catalogId);
+      // Structural pieces snap into their neighbours so wall runs meet exactly.
+      const snapped =
+        catalog?.category === 'structure' && catalog.layer === 'floor'
+          ? joinWallRun(
+              { ...candidate, level, size: catalog.size },
+              items
+                .filter((item) => (item.level ?? 0) === level)
+                .map((item) => ({
+                  uid: item.uid,
+                  gx: item.gx,
+                  gz: item.gz,
+                  rot: item.rot,
+                  level: item.level ?? 0,
+                  size: getCatalogItem(item.catalogId)?.size ?? [1, 1],
+                }))
+            )
+          : candidate;
+      const created: PlacedItem = {
+        ...candidate,
+        gx: snapped.gx,
+        gz: snapped.gz,
+        rot: snapped.rot,
+        uid,
+        level,
+      };
       setItems((prev) => [...prev, created]);
       setSelectedUid(uid);
       setPlacingCatalogId(null);
     },
-    [items, pushHistory]
+    [items, pushHistory, activeLevel]
   );
 
   const handleFinishMove = useCallback(
@@ -1208,6 +1243,61 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     [selectedItem]
   );
 
+  const levelFloors = useMemo(() => styleFloors(surfaces, items), [surfaces, items]);
+  const levelTotal = levelFloors.length;
+  const levelItems = useMemo(
+    () => items.filter((item) => (item.level ?? 0) === activeLevel),
+    [items, activeLevel]
+  );
+
+  const setLevelSurface = useCallback(
+    (patch: Partial<RoomSurfaceConfig>) => {
+      setSurfaces((current) => {
+        const floors = styleFloors(current, items).map((entry, index) =>
+          index === activeLevel ? { ...entry, ...patch } : entry
+        );
+        const ground = floors[0] ?? current;
+        return { ...current, floors, floor: ground.floor, wall: ground.wall };
+      });
+    },
+    [activeLevel, items]
+  );
+
+  const addLevel = useCallback(() => {
+    if (levelTotal >= MAX_LEVELS) {
+      showHint(`A property can have at most ${MAX_LEVELS} storeys`);
+      return;
+    }
+    pushHistory(items);
+    setSurfaces((current) => {
+      const floors = styleFloors(current, items);
+      const next = floors[floors.length - 1] ?? floors[0];
+      return { ...current, floors: [...floors, { ...next }] };
+    });
+    setActiveLevel(levelTotal);
+    sfx.playPlace();
+    showHint(`Added Level ${levelTotal + 1} — place stairs to connect the floors`);
+  }, [items, levelTotal, pushHistory, showHint]);
+
+  const removeLevel = useCallback(() => {
+    if (levelTotal <= 1) {
+      showHint('The ground floor cannot be removed');
+      return;
+    }
+    const top = levelTotal - 1;
+    pushHistory(items);
+    setItems((prev) => prev.filter((item) => (item.level ?? 0) < top));
+    setSurfaces((current) => {
+      const floors = styleFloors(current, items).slice(0, top);
+      const ground = floors[0] ?? current;
+      return { ...current, floors, floor: ground.floor, wall: ground.wall };
+    });
+    setActiveLevel((level) => Math.min(level, top - 1));
+    setSelectedUid(null);
+    sfx.playRemove();
+    showHint('Removed the top storey and everything placed on it');
+  }, [items, levelTotal, pushHistory, showHint]);
+
   const rotateSelectedOrPlacing = useCallback(() => {
     if (placingCatalogId || movingUid) {
       sfx.playClick();
@@ -1221,7 +1311,12 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       const clampedGx = snapGrid(Math.max(0, Math.min(selectedItem.gx, GRID_SIZE - ew)));
       const clampedGz = snapGrid(Math.max(0, Math.min(selectedItem.gz, GRID_SIZE - ed)));
       const candidate = { ...selectedItem, gx: clampedGx, gz: clampedGz, rot: nextRot };
-      if (isValidPlacement(candidate, items)) {
+      if (
+        isValidPlacement(
+          candidate,
+          items.filter((it) => (it.level ?? 0) === (selectedItem.level ?? 0))
+        )
+      ) {
         sfx.playClick();
         pushHistory(items);
         setItems((prev) => prev.map((it) => (it.uid === selectedItem.uid ? candidate : it)));
@@ -1246,6 +1341,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     setPlacingCatalogId(selectedItem.catalogId);
     setPlacingColor(selectedItem.color);
     setPlacingRotation(selectedItem.rot);
+    setActiveLevel(selectedItem.level ?? 0);
     setSelectedUid(null);
     setMovingUid(null);
   }, [selectedItem]);
@@ -1630,6 +1726,11 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     sfx.playRemove();
     pushHistory(items);
     setItems([]);
+    setSurfaces((current) => {
+      const ground = styleFloors(current, [])[0] ?? current;
+      return { ...current, floors: [ground], floor: ground.floor, wall: ground.wall };
+    });
+    setActiveLevel(0);
     setSelectedUid(null);
     setPlacingCatalogId(null);
     setMovingUid(null);
@@ -1641,8 +1742,9 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       if (!preset) return;
       sfx.playPlace();
       pushHistory(items);
-      setItems(preset.items.map((item) => ({ ...item })));
-      setSurfaces({ ...preset.surfaces });
+      setItems(preset.items.map((item) => ({ ...item, level: 0 })));
+      setSurfaces({ ...preset.surfaces, floors: [{ ...preset.surfaces }] });
+      setActiveLevel(0);
       setMood(preset.mood);
       setRoomName(preset.name);
       setSelectedUid(null);
@@ -1662,7 +1764,17 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     setTab: setEditTab,
     categoryFilter,
     setCategoryFilter,
-    itemCount: items.length,
+    level: activeLevel,
+    levels: levelTotal,
+    onSelectLevel: (level) => {
+      setActiveLevel(Math.max(0, Math.min(levelTotal - 1, level)));
+      setSelectedUid(null);
+      setPlacingCatalogId(null);
+      setMovingUid(null);
+    },
+    onAddLevel: addLevel,
+    onRemoveLevel: removeLevel,
+    itemCount: levelItems.length,
     historyLength: history.length,
     canEdit: canEditRoom,
     collapsed: dockCollapsed,
@@ -1703,8 +1815,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     onClear: handleClearSuite,
     onDone: () => handleModeSwitch('walk'),
     surfaces,
-    onFloorChange: (floor) => setSurfaces((current) => ({ ...current, floor })),
-    onWallChange: (wall) => setSurfaces((current) => ({ ...current, wall })),
+    onFloorChange: (floor) => setLevelSurface({ floor }),
+    onWallChange: (wall) => setLevelSurface({ wall }),
     presets: ROOM_PRESETS.map((preset) => ({
       id: preset.id,
       name: preset.name,
@@ -1966,6 +2078,9 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         lowPowerGraphics={device.lowPowerGraphics}
         items={items}
         surfaces={surfaces}
+        buildLevel={activeLevel}
+        levelFloors={levelFloors}
+        onLevelChange={(level) => setActiveLevel(Math.max(0, Math.min(MAX_LEVELS - 1, level)))}
         mood={mood}
         avatarConfig={avatarConfig}
         activeEmote={activeEmote}
