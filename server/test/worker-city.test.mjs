@@ -307,6 +307,9 @@ test('worker: two guests share TheCity, see movement and city chat', async () =>
   const globalPresence = await durable.fetch(new Request('https://loftlife-internal/internal/party/presence-snapshot?details=1'));
   const globalPresenceBody = await globalPresence.json();
   assert.equal(globalPresenceBody.online, 2, 'global presence reconciles against the actual city sockets');
+  const publicPresenceResponse = await worker.fetch(new Request(`${ORIGIN}/api/presence`), env);
+  const publicPresence = await publicPresenceResponse.json();
+  assert.equal(publicPresence.online, 2, 'the public HUD count comes from reconciled live sockets');
 
   const duplicateUpgrade = await worker.fetch(websocketRequest('city'), env);
   assert.equal(duplicateUpgrade.status, 101);
