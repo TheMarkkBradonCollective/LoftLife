@@ -28,12 +28,12 @@ export const BINDING_ACTIONS = [
   { id: 'isoRight', label: 'Move right', category: 'Isometric movement', scope: 'isometric', detail: 'Moves the avatar relative to the isometric camera.' },
   { id: 'follow', label: 'Follow character', category: 'Isometric camera', scope: 'isometric', detail: 'Toggles the isometric camera following your character.' },
 
-  { id: 'playForward', label: 'Walk forward', category: 'Third-Person movement', scope: 'play', detail: 'Moves the avatar relative to the camera.' },
-  { id: 'playBack', label: 'Walk backward', category: 'Play View movement', scope: 'play', detail: 'Moves the avatar relative to the camera.' },
-  { id: 'playLeft', label: 'Strafe left', category: 'Play View movement', scope: 'play', detail: 'Moves the avatar relative to the camera.' },
-  { id: 'playRight', label: 'Strafe right', category: 'Play View movement', scope: 'play', detail: 'Moves the avatar relative to the camera.' },
-  { id: 'sprint', label: 'Sprint', category: 'Play View movement', scope: 'play', detail: 'Hold to run.' },
-  { id: 'jump', label: 'Jump / stand up', category: 'Play View movement', scope: 'play', detail: 'Jumps, or stands from a seat.' },
+  { id: 'playForward', label: 'Walk forward', category: 'Third-Person movement', scope: 'play', detail: 'Moves the avatar relative to the Third-Person camera.' },
+  { id: 'playBack', label: 'Walk backward', category: 'Third-Person movement', scope: 'play', detail: 'Moves the avatar relative to the camera.' },
+  { id: 'playLeft', label: 'Strafe left', category: 'Third-Person movement', scope: 'play', detail: 'Moves the avatar relative to the camera.' },
+  { id: 'playRight', label: 'Strafe right', category: 'Third-Person movement', scope: 'play', detail: 'Moves the avatar relative to the camera.' },
+  { id: 'sprint', label: 'Sprint', category: 'Third-Person movement', scope: 'play', detail: 'Hold to run.' },
+  { id: 'jump', label: 'Jump / stand up', category: 'Third-Person movement', scope: 'play', detail: 'Jumps, or stands from a seat.' },
 
   { id: 'zoom', label: 'Close / wide zoom', category: 'Camera', scope: 'global', detail: 'Changes distance only; follow state is untouched.' },
   { id: 'playToggle', label: 'Switch camera mode', category: 'Camera', scope: 'global', detail: 'Isometric ↔ Third-Person (V by default).' },
