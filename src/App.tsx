@@ -2210,6 +2210,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
           void session.pressMicrophone();
         }}
         onMicRelease={session.releaseMicrophone}
+        onMicModeChange={session.setMicMode}
         onOpenVoiceSettings={() => {
           sfx.playClick();
           setRoomSettingsOpen(true);
