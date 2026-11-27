@@ -3424,12 +3424,17 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         entry.signature = signature;
       }
 
+      // Locomotion must be driven by actual position changes, not the
+      // client's emote label. A stale "walk" emote can otherwise make a
+      // stationary remote player appear to walk forever.
       const moved = Math.hypot(player.x - entry.target.x, player.z - entry.target.z) > 0.03;
       entry.target = { x: player.x, y: player.y, z: player.z, yaw: player.yaw };
-      entry.moving = moved || player.emote === 'walk';
-      entry.emote = (EMOTE_SET.has(player.emote)
+      entry.moving = moved;
+      entry.emote = (player.emote === 'walk'
+        ? (moved ? 'walk' : 'idle')
+        : EMOTE_SET.has(player.emote)
         ? player.emote
-        : entry.moving
+        : moved
         ? 'walk'
         : 'idle') as EmoteType;
     }
