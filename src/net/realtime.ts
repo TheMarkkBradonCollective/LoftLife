@@ -113,6 +113,8 @@ export interface RealtimeOptions {
   onSnapshot?: (players: RemotePlayer[], instanceId: string, vehicles: TransitVehicle[]) => void;
   onJoin?: (player: RemotePlayer) => void;
   onLeave?: (connId: string) => void;
+  /** The server wants this client to reconnect to another instance. */
+  onRelocate?: (instance: InstanceInfo) => void;
   onChat?: (chat: ChatEvent) => void;
   onParty?: (party: Party | null, invites: Party[]) => void;
   onVoice?: (signal: VoiceSignal) => void;
@@ -134,6 +136,10 @@ export class RealtimeClient {
   private closedByUser = false;
   private retryTimer: number | null = null;
   private poseTimer: number | null = null;
+  // No pose is streamed until the scene has reported a real position; sending
+  // the placeholder origin first would make the gateway treat the real spawn
+  // as an impossible jump and pin the avatar at the origin.
+  private hasPose = false;
   private pose: {
     x: number;
     y: number;
@@ -188,6 +194,8 @@ export class RealtimeClient {
     this.socket = socket;
 
     socket.onopen = () => {
+      // A socket replaced by switchPlace() must not drive this client.
+      if (this.socket !== socket) return;
       this.retry = 0;
       socket.send(
         JSON.stringify({ t: 'hello', token: this.options.token, place: this.options.place })
@@ -196,6 +204,7 @@ export class RealtimeClient {
     };
 
     socket.onmessage = (event) => {
+      if (this.socket !== socket) return;
       let msg: Record<string, unknown>;
       try {
         msg = JSON.parse(String(event.data)) as Record<string, unknown>;
@@ -229,6 +238,11 @@ export class RealtimeClient {
           socket.close(4003, 'replaced');
           this.options.onStatus?.('offline');
           break;
+        case 'relocate': {
+          const instance = msg.instance as InstanceInfo | undefined;
+          if (instance?.id) this.options.onRelocate?.(instance);
+          break;
+        }
         case 'chat':
           this.options.onChat?.(msg as unknown as ChatEvent);
           break;
@@ -261,6 +275,10 @@ export class RealtimeClient {
     };
 
     socket.onclose = () => {
+      // Ignore a socket that switchPlace()/close() already detached; otherwise
+      // its close would wipe the replacement socket and stop its pose loop,
+      // leaving this client sending stale poses from an orphaned connection.
+      if (this.socket !== socket) return;
       this.stopPoseLoop();
       this.socket = null;
       if (this.closedByUser) {
@@ -281,6 +299,7 @@ export class RealtimeClient {
   private startPoseLoop() {
     this.stopPoseLoop();
     this.poseTimer = window.setInterval(() => {
+      if (!this.hasPose) return;
       if (this.socket?.readyState !== WebSocket.OPEN) return;
       this.socket.send(JSON.stringify({ t: 'pose', ...this.pose }));
     }, POSE_INTERVAL_MS);
@@ -295,6 +314,7 @@ export class RealtimeClient {
 
   setPose(next: Partial<RealtimeClient['pose']>) {
     this.pose = { ...this.pose, ...next };
+    this.hasPose = true;
   }
 
   sendChat(chat: ChatScope) {
@@ -333,26 +353,47 @@ export class RealtimeClient {
   }
 
   switchPlace(place: Place) {
+    const current = this.options.place;
+    const sameInstance =
+      (place.kind === 'city' && current.kind === 'city') ||
+      (place.kind === 'world' && current.kind === 'world' && current.worldId === place.worldId);
     this.options.place = place;
-    if (this.socket) {
-      this.closedByUser = true;
-      this.socket.close();
-      this.socket = null;
+    // Re-entering the place we are already in must not open a second socket:
+    // two connections for one account show up as a duplicate avatar.
+    if (sameInstance && (this.socket?.readyState === WebSocket.OPEN || this.socket?.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+    // Detach first, so the retiring socket's close handler is a no-op.
+    const socket = this.socket;
+    this.socket = null;
+    this.stopPoseLoop();
+    this.clearRetryTimer();
+    if (socket) {
+      try {
+        socket.close();
+      } catch {
+        // Already closing.
+      }
     }
     this.retry = 0;
     this.closedByUser = false;
     this.open();
   }
 
-  close() {
-    this.closedByUser = true;
-    this.stopPoseLoop();
+  private clearRetryTimer() {
     if (this.retryTimer !== null) {
       window.clearTimeout(this.retryTimer);
       this.retryTimer = null;
     }
-    this.socket?.close();
+  }
+
+  close() {
+    this.closedByUser = true;
+    this.stopPoseLoop();
+    this.clearRetryTimer();
+    const socket = this.socket;
     this.socket = null;
+    socket?.close();
     this.options.onStatus?.('idle');
   }
 }
