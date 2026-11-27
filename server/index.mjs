@@ -32,7 +32,13 @@ import {
 } from './economy.mjs';
 import { ApiError, forbidden, handler, notFound, unauthorized } from './errors.mjs';
 import { createGuestSession, guestForToken, revokeGuestSession } from './guests.mjs';
-import { attachRealtime, presenceSnapshot } from './realtime.mjs';
+import {
+  attachRealtime,
+  broadcastWorldEdit,
+  presenceSnapshot,
+  worldHasPlayer,
+  worldPlayerCount,
+} from './realtime.mjs';
 import { partyFor, partyView, pendingInvitesFor } from './parties.mjs';
 import { taxiDestinations, transitHubs, transitLines } from './transit.mjs';
 import { travelDestinations } from './travel.mjs';
@@ -67,11 +73,23 @@ import {
   inviteToWorld,
   listWorlds,
   removeCollaborator,
+  requestWorldBuildMode,
   saveSuite,
   saveWorldState,
   setSuiteVisibility,
+  setWorldStatus,
   updateWorld,
 } from './worlds.mjs';
+import {
+  applyBuildOperation,
+  buildStateFor,
+  ensureOfficialMainCity,
+  foundationMeta,
+  publishBuild,
+  redoBuild,
+  restoreBuild,
+  undoBuild,
+} from './worldBuild.mjs';
 import { readControls, saveControls } from './preferences.mjs';
 
 const PORT = Number(process.env.PORT || process.env.LOFTLIFE_PORT || 8787);
@@ -323,6 +341,17 @@ export function createApp() {
     )
   );
 
+  app.get(
+    '/api/worlds/foundations',
+    handler((_req, res) => res.json({ default: 'TG-MapDefault', foundations: foundationMeta() }))
+  );
+
+  app.get(
+    '/api/official/main-city',
+    requireAuth,
+    handler((req, res) => res.json(ensureOfficialMainCity(req.user.id)))
+  );
+
   app.post(
     '/api/worlds',
     requireAuth,
@@ -350,6 +379,95 @@ export function createApp() {
     handler((req, res) => res.json(saveWorldState(req.user.id, req.params.id, req.body ?? {})))
   );
 
+  app.post(
+    '/api/worlds/:id/status',
+    requireAuth,
+    writeLimiter,
+    handler((req, res) =>
+      res.json(
+        setWorldStatus(req.user.id, req.params.id, req.body?.status, {
+          activeCount: worldPlayerCount(req.params.id),
+          viewerPresent: worldHasPlayer(req.params.id, req.user.id),
+        })
+      )
+    )
+  );
+
+  app.post(
+    '/api/worlds/:id/build-mode',
+    requireAuth,
+    writeLimiter,
+    handler((req, res) =>
+      res.json(requestWorldBuildMode(req.user.id, req.params.id, worldPlayerCount(req.params.id)))
+    )
+  );
+
+  /* --------------------------- city building --------------------------- */
+
+  app.get(
+    '/api/worlds/:id/build',
+    requireAuth,
+    handler((req, res) => res.json(buildStateFor(req.user.id, req.params.id)))
+  );
+
+  app.post(
+    '/api/worlds/:id/build/op',
+    requireAuth,
+    writeLimiter,
+    handler((req, res) => {
+      const result = applyBuildOperation(req.user.id, req.params.id, req.body ?? {});
+      broadcastWorldEdit(req.params.id, {
+        revision: result.state.world.layoutVersion,
+        actorId: req.user.id,
+      });
+      res.json(result);
+    })
+  );
+
+  app.post(
+    '/api/worlds/:id/build/undo',
+    requireAuth,
+    writeLimiter,
+    handler((req, res) => {
+      const result = undoBuild(req.user.id, req.params.id);
+      broadcastWorldEdit(req.params.id, { revision: result.state.world.layoutVersion, actorId: req.user.id });
+      res.json(result);
+    })
+  );
+
+  app.post(
+    '/api/worlds/:id/build/redo',
+    requireAuth,
+    writeLimiter,
+    handler((req, res) => {
+      const result = redoBuild(req.user.id, req.params.id);
+      broadcastWorldEdit(req.params.id, { revision: result.state.world.layoutVersion, actorId: req.user.id });
+      res.json(result);
+    })
+  );
+
+  app.post(
+    '/api/worlds/:id/build/restore',
+    requireAuth,
+    writeLimiter,
+    handler((req, res) => {
+      const result = restoreBuild(req.user.id, req.params.id, req.body?.revision);
+      broadcastWorldEdit(req.params.id, { revision: result.state.world.layoutVersion, actorId: req.user.id });
+      res.json(result);
+    })
+  );
+
+  app.post(
+    '/api/worlds/:id/build/publish',
+    requireAuth,
+    writeLimiter,
+    handler((req, res) => {
+      const worldId = req.params.id;
+      const active = worldPlayerCount(worldId) - (worldHasPlayer(worldId, req.user.id) ? 1 : 0);
+      res.json(publishBuild(req.user.id, worldId, Math.max(0, active)));
+    })
+  );
+
   app.delete(
     '/api/worlds/:id',
     requireAuth,
@@ -361,7 +479,7 @@ export function createApp() {
     requireAuth,
     writeLimiter,
     handler((req, res) =>
-      res.json(addCollaborator(req.user.id, req.params.id, req.body?.handle))
+      res.json(addCollaborator(req.user.id, req.params.id, req.body?.handle, req.body?.role))
     )
   );
 

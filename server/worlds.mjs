@@ -6,7 +6,7 @@
  * Visitors never receive edit rights implicitly.
  */
 import { db, newId, now, tx, audit } from './db.mjs';
-import { badRequest, forbidden, notFound } from './errors.mjs';
+import { badRequest, conflict, forbidden, notFound } from './errors.mjs';
 import {
   WORLD_ACCESS,
   WORLD_KINDS,
@@ -15,6 +15,14 @@ import {
   sanitizeText,
 } from './validate.mjs';
 import { invitationsAllowed } from './settings.mjs';
+import { WORLD_ROLES } from './validate.mjs';
+import { DEFAULT_FOUNDATION_ID, FOUNDATION_IDS } from '../shared/world-layout.mjs';
+import {
+  createWorldLayout,
+  initializeWorldLayout,
+  isStaffUser,
+  worldPermissionsFor,
+} from './worldBuild.mjs';
 
 const MAX_WORLDS_PER_OWNER = 20;
 
@@ -57,6 +65,19 @@ export function canEditWorld(world, userId) {
 
 export function canEnterWorld(world, userId) {
   if (!world) return false;
+  if (world.is_official === 1 && !isStaffUser(userId)) return false;
+  const status = String(world.status ?? 'offline');
+  // Closed-for-editing states never admit visitors; builders may rejoin their
+  // own Build Mode session.
+  if (status === 'maintenance' || status === 'build_pending') return false;
+  if (status === 'build_mode') {
+    if (!userId) return false;
+    if (world.owner_id === userId) return true;
+    const role = db
+      .prepare('SELECT role FROM world_collaborators WHERE world_id = ? AND user_id = ?')
+      .get(world.id, userId)?.role;
+    return role === 'co_owner' || role === 'builder';
+  }
   if (!userId) return world.published === 1 && world.access === 'public';
   if (world.owner_id === userId) return true;
   if (hasBlocked(world.owner_id, userId)) return false;
@@ -85,6 +106,8 @@ function ownerHandle(ownerId) {
 }
 
 function serializeWorld(row, viewerId, { includeState = false } = {}) {
+  const permissions = worldPermissionsFor(row, viewerId);
+  const role = permissions.role === 'visitor' || permissions.role === 'staff' ? null : permissions.role;
   const base = {
     id: row.id,
     name: row.name,
@@ -92,13 +115,21 @@ function serializeWorld(row, viewerId, { includeState = false } = {}) {
     description: row.description,
     access: row.access,
     published: row.published === 1,
+    status: row.status ?? 'offline',
+    foundation: row.foundation ?? DEFAULT_FOUNDATION_ID,
+    isOfficial: row.is_official === 1,
     ownerId: row.owner_id,
     ownerHandle: ownerHandle(row.owner_id),
     maxVisitors: row.max_visitors,
     updatedAt: row.updated_at,
     createdAt: row.created_at,
+    role,
     canEdit: canEditWorld(row, viewerId),
     canEnter: canEnterWorld(row, viewerId),
+    canBuild: permissions.canBuild,
+    canManageStatus: permissions.canManage,
+    layoutVersion: row.layout_version ?? 0,
+    publishedVersion: row.published_version ?? 0,
   };
   if (includeState) {
     base.items = JSON.parse(row.items_json);
@@ -123,6 +154,12 @@ export function createWorld(userId, body = {}) {
     ? body.description.slice(0, 280)
     : '';
 
+  const foundation = body.foundation === undefined ? DEFAULT_FOUNDATION_ID : String(body.foundation);
+  if (!FOUNDATION_IDS.includes(foundation)) {
+    throw badRequest(`foundation must be one of: ${FOUNDATION_IDS.join(', ')}`);
+  }
+  const layout = createWorldLayout(foundation);
+
   return tx(() => {
     const count = db
       .prepare('SELECT COUNT(*) AS n FROM worlds WHERE owner_id = ?')
@@ -134,8 +171,9 @@ export function createWorld(userId, body = {}) {
     const timestamp = now();
     db.prepare(
       `INSERT INTO worlds (id, owner_id, name, kind, description, access, published,
-        items_json, surfaces_json, mood, max_visitors, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 0, '[]', ?, 'morning', 30, ?, ?)`
+        items_json, surfaces_json, mood, max_visitors, status, foundation, layout_json,
+        settings_json, layout_version, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, '[]', ?, 'morning', 30, 'offline', ?, ?, ?, 0, ?, ?)`
     ).run(
       id,
       userId,
@@ -144,9 +182,13 @@ export function createWorld(userId, body = {}) {
       description,
       access,
       JSON.stringify({ floor: 'oak_parquet', wall: 'warm_chalk' }),
+      foundation,
+      JSON.stringify(layout),
+      JSON.stringify(layout.settings),
       timestamp,
       timestamp
     );
+    initializeWorldLayout(id, foundation, userId);
     audit(userId, 'world.create', id);
     return serializeWorld(worldRow(id), userId, { includeState: true });
   });
@@ -255,19 +297,74 @@ export function saveWorldState(userId, worldId, body) {
   return { id: worldId, ...state, updatedAt: now() };
 }
 
+/* --------------------------- management states --------------------------- */
+
+/** Owner/co-owner only. A live world cannot be closed while players remain. */
+export function setWorldStatus(userId, worldId, status, { activeCount = 0, viewerPresent = false } = {}) {
+  const row = worldRow(worldId);
+  if (!row) throw notFound('World not found');
+  const permissions = worldPermissionsFor(row, userId);
+  if (!permissions.canManage) {
+    throw forbidden('Only the owner or co-owner can change this world status');
+  }
+  const next = pickOne(status, ['live', 'available', 'offline'], 'status');
+  const current = String(row.status ?? 'offline');
+  if (next === 'live' && !viewerPresent) {
+    throw conflict('Enter your city before making it Live');
+  }
+  if (current === 'live' && next !== 'live' && activeCount > 0) {
+    throw conflict('Nobody can shut down a live world while players are still inside');
+  }
+  if (current === 'build_mode' || current === 'build_pending') {
+    throw conflict('Publish or leave Build Mode before changing this city status');
+  }
+  db.prepare(
+    'UPDATE worlds SET status = ?, published = ?, updated_at = ? WHERE id = ?'
+  ).run(next, next === 'live' ? 1 : 0, now(), worldId);
+  audit(userId, 'world.status', `${worldId}:${next}`);
+  return { status: next, activeCount, world: serializeWorld(worldRow(worldId), userId, { includeState: true }) };
+}
+
+/** Build Mode opens only when the live player count has reached zero. */
+export function requestWorldBuildMode(userId, worldId, activeCount = 0) {
+  const row = worldRow(worldId);
+  if (!row) throw notFound('World not found');
+  const permissions = worldPermissionsFor(row, userId);
+  if (!permissions.canOpenBuildMode) {
+    throw forbidden('Only the owner, co-owner, or an approved builder can open Build Mode');
+  }
+  const current = String(row.status ?? 'offline');
+  if (current !== 'offline') {
+    throw conflict('The city must be set Offline before Build Mode can start');
+  }
+  const next = activeCount === 0 ? 'build_mode' : 'build_pending';
+  db.prepare(
+    'UPDATE worlds SET status = ?, published = 0, updated_at = ? WHERE id = ?'
+  ).run(next, now(), worldId);
+  audit(userId, 'world.build_mode', `${worldId}:${next}`);
+  return { status: next, activeCount, pending: activeCount > 0 };
+}
+
 export function deleteWorld(userId, worldId) {
   const row = worldRow(worldId);
   if (!row) throw notFound('World not found');
   if (row.owner_id !== userId) throw forbidden('Only the owner can delete this world');
+  if (row.is_official === 1) throw forbidden('The official Main City cannot be deleted');
   db.prepare('DELETE FROM worlds WHERE id = ?').run(worldId);
   audit(userId, 'world.delete', worldId);
   return { deleted: true };
 }
 
-export function addCollaborator(userId, worldId, handle) {
+export function addCollaborator(userId, worldId, handle, role = 'builder') {
   const row = worldRow(worldId);
   if (!row) throw notFound('World not found');
-  if (row.owner_id !== userId) throw forbidden('Only the owner can add collaborators');
+  if (row.owner_id !== userId && !isStaffUser(userId)) {
+    throw forbidden('Only the owner can assign world roles');
+  }
+  const nextRole = pickOne(role ?? 'builder', WORLD_ROLES, 'role');
+  if (nextRole === 'co_owner' && row.owner_id !== userId) {
+    throw forbidden('Only the owner can appoint a co-owner');
+  }
   const target = db
     .prepare('SELECT id FROM users WHERE handle = ?')
     .get(String(handle ?? '').toLowerCase());
@@ -275,9 +372,9 @@ export function addCollaborator(userId, worldId, handle) {
   if (target.id === userId) throw badRequest('You already own this world');
   db.prepare(
     `INSERT INTO world_collaborators (world_id, user_id, role, created_at)
-     VALUES (?, ?, 'editor', ?) ON CONFLICT(world_id, user_id) DO NOTHING`
-  ).run(worldId, target.id, now());
-  audit(userId, 'world.collaborator.add', `${worldId}:${target.id}`);
+     VALUES (?, ?, ?, ?) ON CONFLICT(world_id, user_id) DO UPDATE SET role = excluded.role`
+  ).run(worldId, target.id, nextRole, now());
+  audit(userId, 'world.collaborator.add', `${worldId}:${target.id}:${nextRole}`);
   return serializeWorld(worldRow(worldId), userId, { includeState: true });
 }
 

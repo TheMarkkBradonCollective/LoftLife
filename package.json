@@ -15,7 +15,8 @@
     "verify:edge": "node scripts/verify-edge-auth.mjs",
     "check:city": "node scripts/check-city-venues.mjs",
     "check:hotel": "node scripts/check-hotel-airport.mjs",
-    "check:transit": "node scripts/check-transit-network.mjs"
+    "check:transit": "node scripts/check-transit-network.mjs",
+    "check:worlds": "node scripts/check-world-layout.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

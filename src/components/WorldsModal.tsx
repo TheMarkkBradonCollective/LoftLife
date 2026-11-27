@@ -1,6 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { DoorOpen, Globe2, Loader2, Lock, Plus, Trash2, UserPlus, X } from 'lucide-react';
-import { api, ApiError, type WorldAccess, type WorldKind, type WorldRole, type WorldStatus, type WorldSummary } from '../net/api';
+import { DoorOpen, Globe2, Hammer, Loader2, Lock, Plus, Trash2, UserPlus, X } from 'lucide-react';
+import {
+  api,
+  ApiError,
+  type WorldAccess,
+  type WorldFoundationId,
+  type WorldKind,
+  type WorldRole,
+  type WorldStatus,
+  type WorldSummary,
+} from '../net/api';
 import { MOBILE_GAMEPLAY_MESSAGE } from '../../shared/device-platform.mjs';
 import { useSession } from '../session';
 
@@ -46,6 +55,8 @@ interface WorldsModalProps {
   open: boolean;
   onClose: () => void;
   onEnter: (worldId: string) => void;
+  /** Open the visual city-building studio for a world the player can build in. */
+  onOpenStudio?: (worldId: string) => void;
   /** Unsupported runtimes can browse/manage but never launch a world. */
   gameplayAllowed?: boolean;
 }
@@ -55,10 +66,12 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
   open,
   onClose,
   onEnter,
+  onOpenStudio,
   gameplayAllowed = true,
 }) => {
-  const { status } = useSession();
+  const { status, user } = useSession();
   const online = status === 'online';
+  const isStaff = user?.role === 'admin';
 
   const [tab, setTab] = useState<'mine' | 'discover'>('mine');
   const [mine, setMine] = useState<WorldSummary[]>([]);
@@ -70,7 +83,14 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
   const [name, setName] = useState('');
   const [kind, setKind] = useState<WorldKind>('hangout');
   const [access, setAccess] = useState<WorldAccess>('private');
+  const [foundation, setFoundation] = useState<WorldFoundationId>('TG-MapDefault');
+  const [foundationOptions, setFoundationOptions] = useState<
+    { id: WorldFoundationId; label: string; description: string }[]
+  >([
+    { id: 'TG-MapDefault', label: 'TG-MapDefault', description: 'Grass and the street/road grid only' },
+  ]);
   const [creating, setCreating] = useState(false);
+  const [openingOfficial, setOpeningOfficial] = useState(false);
 
   const [shareTarget, setShareTarget] = useState<Record<string, string>>({});
   const [shareRole, setShareRole] = useState<Record<string, Exclude<WorldRole, 'owner'>>>({});
@@ -97,6 +117,19 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
     if (open) load();
   }, [open, load]);
 
+  useEffect(() => {
+    if (!open) return;
+    api
+      .foundations()
+      .then((result) => {
+        setFoundationOptions(result.foundations);
+        setFoundation((current) =>
+          result.foundations.some((entry) => entry.id === current) ? current : result.default
+        );
+      })
+      .catch(() => undefined);
+  }, [open]);
+
   if (!open) return null;
 
   const create = async (event: React.FormEvent) => {
@@ -108,7 +141,7 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
     setCreating(true);
     setError(null);
     try {
-      const world = await api.createWorld({ name: name.trim(), kind, access });
+      const world = await api.createWorld({ name: name.trim(), kind, access, foundation });
       setName('');
       const build = await api.requestWorldBuildMode(world.id);
       await load();
@@ -159,6 +192,19 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
       setError(caught instanceof ApiError ? caught.message : 'Could not enter Build Mode');
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const openOfficial = async () => {
+    setOpeningOfficial(true);
+    setError(null);
+    try {
+      const studio = await api.officialMainCity();
+      onOpenStudio?.(studio.world.id);
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Could not open the Main City workspace');
+    } finally {
+      setOpeningOfficial(false);
     }
   };
 
@@ -243,6 +289,21 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
           </div>
         )}
 
+        {tab === 'mine' && isStaff && (
+          <div className="px-4 py-2 border-b border-amber-300/20 bg-amber-400/5 flex flex-wrap items-center gap-2">
+            <span className="text-[11px] text-amber-100">Official Main City · LoftLife staff workspace</span>
+            <button
+              type="button"
+              onClick={() => void openOfficial()}
+              disabled={openingOfficial}
+              className="ml-auto px-2.5 py-1 rounded-lg bg-amber-300 text-[#241a05] text-[11px] font-bold flex items-center gap-1 disabled:opacity-50"
+            >
+              {openingOfficial ? <Loader2 className="w-3 h-3 animate-spin" /> : <Hammer className="w-3 h-3" />}
+              Open Main City studio
+            </button>
+          </div>
+        )}
+
         {tab === 'mine' && (
           <form onSubmit={create} className="px-4 py-2.5 border-b border-white/8 flex flex-wrap items-center gap-2">
             <input
@@ -274,6 +335,19 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
               {(Object.keys(ACCESS_LABEL) as WorldAccess[]).map((option) => (
                 <option key={option} value={option}>
                   {ACCESS_LABEL[option]}
+                </option>
+              ))}
+            </select>
+            <select
+              className={input}
+              value={foundation}
+              onChange={(event) => setFoundation(event.target.value as WorldFoundationId)}
+              aria-label="Map foundation"
+              title="Map foundation"
+            >
+              {foundationOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
                 </option>
               ))}
             </select>
@@ -337,6 +411,15 @@ export const WorldsModal: React.FC<WorldsModalProps> = ({
                       className="px-2.5 py-1.5 rounded-lg bg-white text-[#15181b] text-[11px] font-bold flex items-center gap-1 hover:bg-white/90"
                     >
                       <DoorOpen className="w-3.5 h-3.5" /> {world.status === 'build_mode' ? 'Build' : world.canManageStatus && world.status !== 'live' ? 'Enter to Go Live' : 'Enter'}
+                    </button>
+                  )}
+                  {onOpenStudio && (world.canBuild || world.canManageStatus || world.canEdit) && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenStudio(world.id)}
+                      className="px-2 py-1 rounded-lg bg-[#39ff14]/15 border border-[#39ff14]/40 text-[#b6ffab] text-[11px] font-semibold flex items-center gap-1"
+                    >
+                      <Hammer className="w-3 h-3" /> City studio
                     </button>
                   )}
                   {world.canManageStatus && (

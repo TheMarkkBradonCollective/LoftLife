@@ -13,6 +13,7 @@ import { RoomSettingsModal } from './components/RoomSettingsModal';
 import { SyncConflictModal } from './components/SyncConflictModal';
 import { ShopModal } from './components/ShopModal';
 import { WorldsModal } from './components/WorldsModal';
+import { WorldStudio } from './components/WorldStudio';
 import { GameInterface } from './hud/GameInterface';
 import { GameMenu } from './hud/GameMenu';
 import { SocialPanel } from './hud/SocialPanel';
@@ -324,6 +325,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [socialIntent, setSocialIntent] = useState<SocialIntent>('chat');
   const [shopOpen, setShopOpen] = useState(false);
   const [worldsOpen, setWorldsOpen] = useState(false);
+  const [studioWorldId, setStudioWorldId] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const controls = useKeybindings({
     online: session.status === 'online',
@@ -1716,6 +1718,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     furnitureShopOpen ||
     roomSettingsOpen ||
     authOpen ||
+    studioWorldId !== null ||
     menuOpen ||
     worldMenuOpen ||
     conflictOpen;
@@ -2170,8 +2173,24 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
           setWorldsOpen(false);
           void handleEnterWorld(worldId);
         }}
+        onOpenStudio={(worldId) => {
+          setWorldsOpen(false);
+          setStudioWorldId(worldId);
+        }}
         gameplayAllowed={gameplayAllowed}
       />
+
+      {studioWorldId && (
+        <WorldStudio
+          worldId={studioWorldId}
+          onClose={() => setStudioWorldId(null)}
+          onWorldChanged={() => {
+            if (activeWorld?.id === studioWorldId) {
+              void api.world(studioWorldId).then(handleWorldUpdated).catch(() => undefined);
+            }
+          }}
+        />
+      )}
 
       {/* Unsupported runtimes see the dashboard + loft manager only. */}
       {!gameplayAllowed && <PlatformNotice platformLabel={device.label} />}

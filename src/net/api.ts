@@ -127,6 +127,21 @@ export interface TravelDestination {
   blurb?: string;
 }
 
+export type WorldFoundationId = 'TG-MapDefault' | 'TG-MapRiverside' | 'TG-MapHarbor';
+
+export interface WorldFoundation {
+  id: WorldFoundationId;
+  label: string;
+  description: string;
+  default: boolean;
+  size: number;
+  terrain: string;
+  terrainColor: string;
+  climate: string;
+  roads: Array<{ x: number; z: number; w: number; d: number }>;
+  water: Array<{ x: number; z: number; w: number; d: number }>;
+}
+
 export type WorldAccess = 'public' | 'private' | 'invite' | 'friends' | 'collab';
 export type WorldRole = 'owner' | 'co_owner' | 'moderator' | 'builder' | 'member';
 export type WorldStatus = 'live' | 'available' | 'offline' | 'build_mode' | 'build_pending' | 'maintenance';
@@ -159,11 +174,116 @@ export interface WorldSummary {
   updatedAt: number;
   canEdit: boolean;
   canEnter: boolean;
+  canViewStudio?: boolean;
+  foundation?: WorldFoundationId;
+  isOfficial?: boolean;
+  layoutVersion?: number;
+  publishedVersion?: number;
   items?: PlacedItem[];
   surfaces?: RoomSurfaceConfig;
   mood?: LightingMood;
   collaborators?: { userId: string; handle: string; role: Exclude<WorldRole, 'owner'> }[];
 }
+
+export interface WorldLayoutObject {
+  id: string;
+  tool: string;
+  x: number;
+  z: number;
+  rot: number;
+  color: string;
+  material: string;
+}
+
+export interface WorldLayoutSettings {
+  climate: 'temperate' | 'coastal' | 'desert' | 'alpine';
+  timeOfDay: 'day' | 'golden' | 'night';
+  terrain: 'lawn' | 'meadow' | 'sand' | 'stone';
+  terrainColor: string;
+}
+
+export interface WorldLayout {
+  v: number;
+  foundation: WorldFoundationId;
+  settings: WorldLayoutSettings;
+  objects: WorldLayoutObject[];
+}
+
+export interface WorldPlot {
+  id: string;
+  name: string;
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+  status: 'available' | 'requested' | 'approved' | 'denied';
+  requestedBy: string | null;
+  assignedTo: string | null;
+}
+
+export interface WorldBuildPermissions {
+  role: string;
+  isOwner: boolean;
+  isStaff: boolean;
+  isOfficial: boolean;
+  canManage: boolean;
+  canOpenBuildMode: boolean;
+  canPlaceStreets: boolean;
+  canApprovePlots: boolean;
+  canBuild: boolean;
+  canUseDecorations: boolean;
+  canPublish: boolean;
+  canUndo: boolean;
+  canViewStudio: boolean;
+  canChangeStatus: boolean;
+  canAccessOfficialWorkspace: boolean;
+  isMember: boolean;
+}
+
+export interface WorldBuildHistoryEntry {
+  id: string;
+  revision: number;
+  action: string;
+  detail: string;
+  actorId: string | null;
+  actorHandle: string;
+  createdAt: number;
+}
+
+export interface WorldBuildState {
+  world: {
+    id: string;
+    name: string;
+    kind: WorldKind;
+    access: WorldAccess;
+    status: WorldStatus;
+    published: boolean;
+    foundation: WorldFoundationId;
+    isOfficial: boolean;
+    ownerId: string;
+    layoutVersion: number;
+    publishedVersion: number;
+    updatedAt: number;
+  };
+  role: string;
+  permissions: WorldBuildPermissions;
+  layout: WorldLayout;
+  publishedLayout: WorldLayout;
+  plots: WorldPlot[];
+  history: WorldBuildHistoryEntry[];
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
+export type WorldBuildOp =
+  | { action: 'place'; tool: string; x: number; z: number; rot?: number; color?: string; material?: string; id?: string }
+  | { action: 'move'; id: string; x: number; z: number }
+  | { action: 'rotate'; id: string }
+  | { action: 'recolor'; id: string; color: string; material?: string }
+  | { action: 'remove'; id: string }
+  | { action: 'settings'; settings: Partial<WorldLayoutSettings> }
+  | { action: 'plot_create'; name: string; x: number; z: number; w: number; d: number }
+  | { action: 'plot_remove' | 'plot_request' | 'plot_approve' | 'plot_deny' | 'plot_release'; id: string };
 
 export interface ShopEntry {
   id: string;
@@ -383,8 +503,41 @@ export const api = {
   // Send the session when available so owner/editor flags and state are correct.
   world: (id: string) => request<WorldSummary>(`/worlds/${id}`),
 
-  createWorld: (body: { name: string; kind: WorldKind; access: WorldAccess; description?: string }) =>
-    request<WorldSummary>('/worlds', { method: 'POST', body }),
+  createWorld: (body: {
+    name: string;
+    kind: WorldKind;
+    access: WorldAccess;
+    description?: string;
+    foundation?: WorldFoundationId;
+  }) => request<WorldSummary>('/worlds', { method: 'POST', body }),
+
+  foundations: () =>
+    request<{ default: WorldFoundationId; foundations: WorldFoundation[] }>('/worlds/foundations'),
+
+  officialMainCity: () => request<WorldBuildState>('/official/main-city'),
+
+  worldBuild: (id: string) => request<WorldBuildState>(`/worlds/${id}/build`),
+
+  worldBuildOp: (id: string, op: WorldBuildOp) =>
+    request<{ state: WorldBuildState; summary: string }>(`/worlds/${id}/build/op`, {
+      method: 'POST',
+      body: op,
+    }),
+
+  worldBuildUndo: (id: string) =>
+    request<{ state: WorldBuildState; summary: string }>(`/worlds/${id}/build/undo`, { method: 'POST' }),
+
+  worldBuildRedo: (id: string) =>
+    request<{ state: WorldBuildState; summary: string }>(`/worlds/${id}/build/redo`, { method: 'POST' }),
+
+  worldBuildRestore: (id: string, revision: number) =>
+    request<{ state: WorldBuildState; summary: string }>(`/worlds/${id}/build/restore`, {
+      method: 'POST',
+      body: { revision },
+    }),
+
+  worldBuildPublish: (id: string) =>
+    request<{ state: WorldBuildState; summary: string }>(`/worlds/${id}/build/publish`, { method: 'POST' }),
 
   updateWorld: (
     id: string,

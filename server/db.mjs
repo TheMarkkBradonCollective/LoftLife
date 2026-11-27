@@ -123,6 +123,16 @@ CREATE TABLE IF NOT EXISTS worlds (
   surfaces_json TEXT NOT NULL DEFAULT '{}',
   mood         TEXT NOT NULL DEFAULT 'morning',
   max_visitors INTEGER NOT NULL DEFAULT 30,
+  status       TEXT NOT NULL DEFAULT 'offline',
+  foundation   TEXT NOT NULL DEFAULT 'TG-MapDefault',
+  layout_json  TEXT,
+  published_layout_json TEXT,
+  settings_json TEXT NOT NULL DEFAULT '{}',
+  layout_version INTEGER NOT NULL DEFAULT 0,
+  published_version INTEGER NOT NULL DEFAULT 0,
+  redo_json    TEXT NOT NULL DEFAULT '[]',
+  undo_json    TEXT NOT NULL DEFAULT '[]',
+  is_official  INTEGER NOT NULL DEFAULT 0,
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL
 );
@@ -132,10 +142,43 @@ CREATE INDEX IF NOT EXISTS worlds_public ON worlds(published, access);
 CREATE TABLE IF NOT EXISTS world_collaborators (
   world_id  TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
   user_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  role      TEXT NOT NULL DEFAULT 'editor' CHECK (role IN ('editor')),
+  role      TEXT NOT NULL DEFAULT 'builder'
+            CHECK (role IN ('co_owner','moderator','builder','member')),
   created_at INTEGER NOT NULL,
   PRIMARY KEY (world_id, user_id)
 );
+
+-- Build areas and their owner/co-owner approvals.
+CREATE TABLE IF NOT EXISTS world_plots (
+  id           TEXT PRIMARY KEY,
+  world_id     TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+  name         TEXT NOT NULL,
+  x            INTEGER NOT NULL,
+  z            INTEGER NOT NULL,
+  w            INTEGER NOT NULL,
+  d            INTEGER NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'available'
+               CHECK (status IN ('available','requested','approved','denied')),
+  requested_by TEXT,
+  assigned_to  TEXT,
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS world_plots_world ON world_plots(world_id);
+
+-- Every structural revision, used for undo/redo, history and restoration.
+CREATE TABLE IF NOT EXISTS world_snapshots (
+  id          TEXT PRIMARY KEY,
+  world_id    TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+  revision    INTEGER NOT NULL,
+  actor_id    TEXT,
+  action      TEXT NOT NULL,
+  detail      TEXT NOT NULL DEFAULT '',
+  layout_json TEXT NOT NULL,
+  created_at  INTEGER NOT NULL,
+  UNIQUE (world_id, revision)
+);
+CREATE INDEX IF NOT EXISTS world_snapshots_world ON world_snapshots(world_id, revision DESC);
 
 CREATE TABLE IF NOT EXISTS world_invites (
   world_id   TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
@@ -219,6 +262,56 @@ if (!profileColumns.includes('controls_json')) {
 }
 if (!profileColumns.includes('controls_updated_at')) {
   db.exec('ALTER TABLE profiles ADD COLUMN controls_updated_at INTEGER NOT NULL DEFAULT 0');
+}
+
+// Existing databases predate the city-building columns and the role set.
+const worldColumns = db
+  .prepare('PRAGMA table_info(worlds)')
+  .all()
+  .map((row) => row.name);
+const WORLD_COLUMN_DEFAULTS = {
+  status: "TEXT NOT NULL DEFAULT 'offline'",
+  foundation: "TEXT NOT NULL DEFAULT 'TG-MapDefault'",
+  layout_json: 'TEXT',
+  published_layout_json: 'TEXT',
+  settings_json: "TEXT NOT NULL DEFAULT '{}'",
+  layout_version: 'INTEGER NOT NULL DEFAULT 0',
+  published_version: 'INTEGER NOT NULL DEFAULT 0',
+  redo_json: "TEXT NOT NULL DEFAULT '[]'",
+  undo_json: "TEXT NOT NULL DEFAULT '[]'",
+  is_official: 'INTEGER NOT NULL DEFAULT 0',
+};
+for (const [column, definition] of Object.entries(WORLD_COLUMN_DEFAULTS)) {
+  if (!worldColumns.includes(column)) {
+    db.exec(`ALTER TABLE worlds ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+// Older SQLite files only allow the legacy 'editor' role. Rebuild the table
+// with the current role set while preserving assignments.
+const collaboratorSql = db
+  .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='world_collaborators'")
+  .get()?.sql ?? '';
+if (/role\s+TEXT[^,]*CHECK\s*\(\s*role\s+IN\s*\(\s*'editor'\s*\)/i.test(collaboratorSql)) {
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    BEGIN IMMEDIATE;
+    ALTER TABLE world_collaborators RENAME TO world_collaborators_legacy;
+    CREATE TABLE world_collaborators (
+      world_id  TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+      user_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role      TEXT NOT NULL DEFAULT 'builder'
+                CHECK (role IN ('co_owner','moderator','builder','member')),
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (world_id, user_id)
+    );
+    INSERT INTO world_collaborators (world_id, user_id, role, created_at)
+      SELECT world_id, user_id, CASE WHEN role='editor' THEN 'builder' ELSE role END, created_at
+      FROM world_collaborators_legacy;
+    DROP TABLE world_collaborators_legacy;
+    COMMIT;
+    PRAGMA foreign_keys = ON;
+  `);
 }
 
 /** Run `fn` inside an IMMEDIATE transaction; rolls back on any throw. */
