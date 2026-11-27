@@ -1042,8 +1042,8 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-1.5 text-[10px] text-slate-400">
-                  <SmallBadge tone="green">Isometric: WASD pans · F follow · Z zoom · M menu</SmallBadge>
-                  <SmallBadge>Play: WASD moves · mouse looks · Z zoom · M menu</SmallBadge>
+                  <SmallBadge tone="green">Isometric: WASD moves · F follow · Z zoom · M menu</SmallBadge>
+                  <SmallBadge>Third-Person: WASD moves · mouse looks · Z zoom · M menu</SmallBadge>
                 </div>
                 {bindingError && <p className="text-[11px] text-amber-300">{bindingError}</p>}
                 {syncError && <p className="text-[11px] text-amber-300">Account sync: {syncError}</p>}
