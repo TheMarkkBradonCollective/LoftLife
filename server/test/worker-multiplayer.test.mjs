@@ -249,14 +249,14 @@ function websocketRequest(instance) {
   });
 }
 
-async function connect(instance, token, place) {
+async function connect(instance, token, place, avatar) {
   const response = await worker.fetch(websocketRequest(instance), env);
   assert.equal(response.status, 101, `expected an upgrade for ${instance}`);
   const pair = pairs.at(-1);
   const instanceId = instance === 'city' ? 'city:main' : instance;
   await durable(instanceId).webSocketMessage(
     pair.server,
-    JSON.stringify({ t: 'hello', token, place })
+    JSON.stringify({ t: 'hello', token, place, avatar })
   );
   return { pair, instanceId, server: durable(instanceId) };
 }
@@ -507,4 +507,18 @@ test('worker: a live socket is closed when its session expires', async () => {
   assert.equal(failure?.code, 'unauthorized');
   assert.equal(connection.pair.server.closeInfo?.code, 1008);
   assert.equal(connection.pair.server.closeInfo?.reason, 'session_expired');
+});
+
+
+test('worker: guest appearance is replicated instead of falling back to each viewer avatar', async () => {
+  const session = await guestSession('Style Check', '10.9.0.1');
+  const avatar = {
+    name: 'Style Check', skinTone: '#ae7248', hairStyle: 'locs', hairColor: '#6b3e26',
+    topStyle: 'jacket', topColor: '#b55436', bottomStyle: 'jeans', bottomColor: '#364152',
+    shoeColor: '#f0ece3', accessory: 'none',
+  };
+  const connection = await connect('city', session.token, { kind: 'city' }, avatar);
+  const ready = firstMessage(connection.pair, 'ready');
+  assert.deepEqual(ready.you.avatar, avatar);
+  assert.equal(ready.you.isGuest, true);
 });

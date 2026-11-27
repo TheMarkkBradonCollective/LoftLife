@@ -77,6 +77,23 @@ const encoder = new TextEncoder();
 function send(ws: WebSocket, value: unknown) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(value));
 }
+function guestAvatarFromMessage(value: unknown, name: string): Record<string, string> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  const keys = ['name','skinTone','bodyPreset','height','build','faceShape','eyeShape','facialDetail','hairStyle','hairColor','topStyle','topColor','bottomStyle','bottomColor','shoeColor','accessory','jewelry','carry','facialHair','eyebrows','eyeStyle','makeupStyle'];
+  const avatar: Record<string, string> = {};
+  for (const key of keys) {
+    const field = source[key];
+    if (typeof field !== 'string' || field.length > 64) continue;
+    if ((key.toLowerCase().includes('color') || key === 'skinTone') && !/^#[0-9a-f]{6}$/i.test(field)) continue;
+    avatar[key] = field;
+  }
+  const required = ['skinTone','hairStyle','hairColor','topStyle','topColor','bottomColor','shoeColor','accessory'];
+  if (!required.every((key) => typeof avatar[key] === 'string')) return null;
+  avatar.name = (avatar.name || name).slice(0, 32);
+  return avatar;
+}
+
 function publicPlayer(p: Player) {
   return {
     connId: p.connId, userId: p.userId, handle: p.handle,
@@ -308,7 +325,7 @@ export class LoftLifeRealtime {
         error(ws, 'unauthorized', 'Send hello first');
         return;
       }
-      await this.join(ws, current.instanceId ?? 'city:main', String(message.token ?? ''), message.place);
+      await this.join(ws, current.instanceId ?? 'city:main', String(message.token ?? ''), message.place, message.avatar);
       return;
     }
 
@@ -436,7 +453,7 @@ export class LoftLifeRealtime {
     }
   }
 
-  private async join(ws: HibernatableWebSocket, instanceId: string, token: string, place: unknown) {
+  private async join(ws: HibernatableWebSocket, instanceId: string, token: string, place: unknown, guestAvatar?: unknown) {
     const secret = this.env.LOFTLIFE_SESSION_SECRET ?? '';
     if (secret.length < 32 || !token) {
       error(ws, 'unauthorized', 'Sign in to play online');
@@ -467,8 +484,8 @@ export class LoftLifeRealtime {
         return;
       }
       const player: Player = {
-        connId: crypto.randomUUID(), userId: guest.guest_id, handle: 'guest',
-        name: guest.display_name, avatar: null, isGuest: true, instanceId,
+        connId: crypto.randomUUID(), userId: guest.guest_id, handle: 'guest', instanceId,
+        name: guest.display_name, avatar: guestAvatarFromMessage(guestAvatar, guest.display_name), isGuest: true,
         x: 0, y: 0, z: 0, yaw: 0, emote: 'idle', location: 'world', voice: false, voiceMode: 'say',
         connectedAt: Date.now(), lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
         positioned: false, teleportStrikes: 0, sessionExpiresAt: Number(payload.exp) * 1000,

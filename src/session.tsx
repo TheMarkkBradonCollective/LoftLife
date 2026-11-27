@@ -516,9 +516,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const token = status === 'guest' ? guestToken : getToken();
     if (!token) return;
 
+    let guestAvatar: AvatarConfig | null = null;
+    if (status === 'guest') {
+      try {
+        const savedGuest = JSON.parse(localStorage.getItem('loftlife_guest_room_state_v1') ?? 'null') as { avatar?: AvatarConfig } | null;
+        guestAvatar = savedGuest?.avatar ?? null;
+      } catch {
+        guestAvatar = null;
+      }
+    }
     const client = new RealtimeClient({
       token,
       place: { kind: 'city' },
+      avatar: guestAvatar,
       onStatus: setConnection,
       onReady: ({ instance: info, you, players }) => {
         selfConnRef.current = you.connId;

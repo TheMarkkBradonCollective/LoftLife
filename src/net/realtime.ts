@@ -191,6 +191,8 @@ export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'reconnecti
 export interface RealtimeOptions {
   token: string;
   place: Place;
+  /** Guest appearance is device-local and sent once at authenticated hello. */
+  avatar?: AvatarConfig | null;
   onStatus?: (status: ConnectionStatus) => void;
   onReady?: (payload: { instance: InstanceInfo; you: RemotePlayer; players: RemotePlayer[] }) => void;
   onSnapshot?: (players: RemotePlayer[], instanceId: string, vehicles: TransitVehicle[]) => void;
@@ -291,7 +293,7 @@ export class RealtimeClient {
       if (this.socket !== socket) return;
       this.retry = 0;
       socket.send(
-        JSON.stringify({ t: 'hello', token: this.options.token, place: this.options.place })
+        JSON.stringify({ t: 'hello', token: this.options.token, place: this.options.place, avatar: this.options.avatar ?? undefined })
       );
       this.startPoseLoop();
     };

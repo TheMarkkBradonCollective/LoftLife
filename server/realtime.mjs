@@ -125,6 +125,29 @@ function publicInstance(instance) {
   };
 }
 
+function guestAvatarFromMessage(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const allowed = [
+    'name', 'skinTone', 'bodyPreset', 'height', 'build', 'faceShape', 'eyeShape',
+    'facialDetail', 'hairStyle', 'hairColor', 'topStyle', 'topColor', 'bottomStyle',
+    'bottomColor', 'shoeColor', 'accessory', 'jewelry', 'carry', 'facialHair',
+    'eyebrows', 'eyeStyle', 'makeupStyle',
+  ];
+  const avatar = {};
+  for (const key of allowed) {
+    const field = value[key];
+    if (typeof field !== 'string' || field.length > 64) continue;
+    if (key.toLowerCase().includes('color') || key === 'skinTone') {
+      if (!/^#[0-9a-f]{6}$/i.test(field)) continue;
+    }
+    avatar[key] = field;
+  }
+  const required = ['skinTone', 'hairStyle', 'hairColor', 'topStyle', 'topColor', 'bottomColor', 'shoeColor', 'accessory'];
+  if (!required.every((key) => typeof avatar[key] === 'string')) return null;
+  avatar.name = typeof avatar.name === 'string' ? avatar.name.slice(0, 32) : 'Guest';
+  return avatar;
+}
+
 function playerView(player) {
   const shownName = player.isGuest ? `Guest User - ${player.name}` : player.name;
   return {
@@ -993,7 +1016,9 @@ export function attachRealtime(httpServer) {
           player.userId = guest.id;
           player.handle = 'guest';
           player.name = guest.displayName;
-          player.avatar = null;
+          // Guest avatars are client-local (not account profiles); accept only
+          // the known visual fields so every viewer receives the same outfit.
+          player.avatar = guestAvatarFromMessage(msg.avatar);
         } else {
           const profile = profileFor(user.id);
           player.userId = user.id;
