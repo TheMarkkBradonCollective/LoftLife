@@ -92,7 +92,7 @@ export async function handleAdminRoute(request: Request, sql: Sql, user: User | 
         FROM ll_admin_audit l LEFT JOIN ll_accounts a ON a.id=l.actor_id
         LEFT JOIN ll_accounts t ON t.id=l.target_id ORDER BY l.created_at DESC LIMIT 80`) as Promise<Array<Row>>,
     ]);
-    const staff = staffRows.map((row) => ({
+    const scopedReports = canModerate(actor.role) ? reportRows : [];\n    const scopedAudit = ['founder','director','management','administrator'].includes(actor.role) ? auditRows : [];\n    const staff = staffRows.map((row) => ({
       userId: String(row.id), handle: String(row.handle), displayName: String(row.display_name ?? row.handle),
       role: String(row.role), departments: (() => { try { return parseList(JSON.parse(String(row.departments_json ?? '[]'))); } catch { return []; } })(),
       appointedAt: Number(row.appointed_at),
@@ -101,9 +101,9 @@ export async function handleAdminRoute(request: Request, sql: Sql, user: User | 
       actor: { userId: user.id, handle: user.handle, role: actor.role, departments: actor.departments },
       stats: { accounts: Number(accountCount[0]?.total ?? 0), staff: staff.length, openReports: Number(openReports[0]?.total ?? 0) },
       staff,
-      reports: reportRows.map((row) => ({ id: String(row.id), reason: String(row.reason), details: String(row.details ?? ''), status: String(row.status), createdAt: Number(row.created_at), reporter: String(row.reporter_handle), target: String(row.target_handle), targetId: String(row.target_id) })),
+      reports: scopedReports.map((row) => ({ id: String(row.id), reason: String(row.reason), details: String(row.details ?? ''), status: String(row.status), createdAt: Number(row.created_at), reporter: String(row.reporter_handle), target: String(row.target_handle), targetId: String(row.target_id) })),
       players: playerRows.map((row) => ({ id: String(row.id), handle: String(row.handle), displayName: String(row.display_name ?? row.handle), createdAt: Number(row.created_at), suspendedUntil: Number(row.suspended_until ?? 0), staffRole: String(row.staff_role) })),
-      audit: auditRows.map((row) => ({ id: String(row.id), action: String(row.action), detail: safeDetail(JSON.parse(String(row.detail_json ?? '{}'))), createdAt: Number(row.created_at), actor: String(row.actor_handle ?? 'System'), target: row.target_handle ? String(row.target_handle) : null })),
+      audit: scopedAudit.map((row) => ({ id: String(row.id), action: String(row.action), detail: safeDetail(JSON.parse(String(row.detail_json ?? '{}'))), createdAt: Number(row.created_at), actor: String(row.actor_handle ?? 'System'), target: row.target_handle ? String(row.target_handle) : null })),
       founderSetup: bootstrap,
     });
   }
@@ -118,7 +118,11 @@ export async function handleAdminRoute(request: Request, sql: Sql, user: User | 
     if (!accounts[0]) return fail('Player account not found.', 404, 'not_found');
     if (accounts[0].id === user.id) return fail('You cannot change your own staff assignment.', 400, 'self_change');
     const existing = await staffFor(sql, accounts[0].id);
+    if (existing?.role === 'founder') return fail('Founder appointments are immutable and cannot be changed through staff management.', 403, 'founder_protected');
     if (existing && !canManageRole(actor.role, existing.role)) return fail('You cannot modify this staff member.', 403, 'forbidden');
+    if (actor.role !== 'founder' && departments.some((department) => !actor.departments.includes(department))) {
+      return fail('You can only assign staff within your own departments.', 403, 'department_scope');
+    }
     const now = Date.now();
     await sql.query(`INSERT INTO ll_staff_assignments(user_id,role,departments_json,active,appointed_by,appointed_at,updated_at)
       VALUES($1,$2,$3,TRUE,$4,$5,$5)
@@ -130,11 +134,10 @@ export async function handleAdminRoute(request: Request, sql: Sql, user: User | 
 
   const staffMatch = url.pathname.match(/^\/api\/admin\/console\/staff\/([^/]+)$/);
   if (staffMatch && request.method === 'DELETE') {
-    if (actor.role !== 'founder' && actor.role !== 'director') return fail('Director or founder access required.', 403, 'forbidden');
     const targetId = decodeURIComponent(staffMatch[1]);
     if (targetId === user.id) return fail('You cannot remove your own staff assignment.', 400, 'self_change');
     const target = await staffFor(sql, targetId);
-    if (!target || !canManageRole(actor.role, target.role)) return fail('You cannot remove this staff member.', 403, 'forbidden');
+    if (!target || target.role === 'founder' || !canManageRole(actor.role, target.role)) return fail('You cannot remove this staff member.', 403, 'forbidden');
     await sql.query('UPDATE ll_staff_assignments SET active=FALSE,updated_at=$2 WHERE user_id=$1', [targetId, Date.now()]);
     await audit(sql, user.id, targetId, 'staff.removed', { previousRole: target.role });
     return json({ ok: true });
