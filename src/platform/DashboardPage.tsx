@@ -1,4 +1,5 @@
 import React from 'react';
+import { Activity, RefreshCw } from 'lucide-react';
 import {
   ArrowRight,
   BellRing,
@@ -13,6 +14,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useSession } from '../session';
+import { api, type LiveGameMonitoring } from '../net/api';
 import { usePlatformData } from './data';
 import { useSettings } from './settings';
 import { useIdentity } from './identity';
@@ -56,6 +58,40 @@ export function DashboardPage({
   const { settings } = useSettings();
   const { avatar, displayName, handle } = useIdentity();
   const suite = session.suite;
+  const [monitoring, setMonitoring] = React.useState<LiveGameMonitoring | null>(null);
+  const [monitorError, setMonitorError] = React.useState<string | null>(null);
+  const [monitorUpdatedAt, setMonitorUpdatedAt] = React.useState(0);
+
+  React.useEffect(() => {
+    if (session.user?.role !== 'admin') {
+      setMonitoring(null);
+      return;
+    }
+    let cancelled = false;
+    let inFlight = false;
+    const refresh = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const snapshot = await api.monitoring();
+        if (!cancelled) {
+          setMonitoring(snapshot);
+          setMonitorUpdatedAt(Date.now());
+          setMonitorError(null);
+        }
+      } catch (error) {
+        if (!cancelled) setMonitorError(error instanceof Error ? error.message : 'Live monitoring is unavailable');
+      } finally {
+        inFlight = false;
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [session.user?.role]);
 
   const exploreWorlds = data.worlds.filter((world) => world.published && world.canEnter).slice(0, 3);
   const announcements = settings.notifications.announcements ? ANNOUNCEMENTS.slice(0, 3) : [];
@@ -74,6 +110,57 @@ export function DashboardPage({
   return (
     <div className="space-y-6">
       <CityEntryCard onEnter={onEnter} />
+
+      {session.user?.role === 'admin' && (
+        <section className={`${panelClass} p-4`}>
+          <SectionHeader
+            eyebrow="Live operations"
+            title="Game monitor"
+            action={
+              <span className="inline-flex items-center gap-1.5 text-[10px] text-slate-400">
+                <Activity className="h-3.5 w-3.5 text-[#39ff14]" />
+                {monitoring ? `Live · refreshed ${new Date(monitorUpdatedAt).toLocaleTimeString()}` : 'Connecting…'}
+              </span>
+            }
+          />
+          <div className="mb-3 flex flex-wrap items-end gap-x-6 gap-y-2">
+            <div>
+              <div className="font-display text-3xl font-bold tabular-nums text-white">{monitoring?.online ?? '—'}</div>
+              <div className="text-[10px] uppercase tracking-wider text-slate-500">Players online</div>
+            </div>
+            <div className="text-xs text-slate-400">
+              {monitoring?.instances.map((instance) => `${instance.id === 'city:main' ? 'TheCity' : `World ${instance.worldId ?? ''}`} · ${instance.count}`).join('  /  ') || 'No active instances'}
+            </div>
+            <button type="button" onClick={() => void api.monitoring().then((snapshot) => { setMonitoring(snapshot); setMonitorUpdatedAt(Date.now()); setMonitorError(null); }).catch((error) => setMonitorError(error instanceof Error ? error.message : 'Refresh failed'))} className={`${btnGhost} ml-auto`}>
+              <RefreshCw className="h-3.5 w-3.5" /> Refresh
+            </button>
+          </div>
+          {monitorError ? (
+            <p className="rounded-lg border border-amber-400/20 bg-amber-400/5 px-3 py-2 text-xs text-amber-100">{monitorError}</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[520px] text-left text-xs">
+                <thead className="border-b border-white/8 text-[10px] uppercase tracking-wider text-slate-500">
+                  <tr><th className="py-2 pr-3">Player</th><th className="py-2 pr-3">Type</th><th className="py-2 pr-3">Instance</th><th className="py-2 pr-3">Location</th><th className="py-2">Connected</th></tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {monitoring?.players.map((player) => (
+                    <tr key={`${player.userId}:${player.instanceId}`}>
+                      <td className="py-2 pr-3"><div className="font-semibold text-slate-200">{player.name}</div><div className="text-[10px] text-slate-500">@{player.handle}</div></td>
+                      <td className="py-2 pr-3 text-slate-400">{player.isGuest ? 'Guest' : 'Resident'}</td>
+                      <td className="py-2 pr-3 text-slate-400">{player.instanceId === 'city:main' ? 'TheCity' : `World ${player.instanceId.slice(6)}`}</td>
+                      <td className="py-2 pr-3 text-slate-400">{player.location}</td>
+                      <td className="py-2 tabular-nums text-slate-400">{new Date(player.connectedAt).toLocaleTimeString()}</td>
+                    </tr>
+                  ))}
+                  {(!monitoring || monitoring.players.length === 0) && <tr><td colSpan={5} className="py-5 text-center text-slate-500">Nobody is currently connected.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="mt-2 text-[10px] text-slate-600">Server-authoritative sessions · updates every 5 seconds · stale connections expire automatically</p>
+        </section>
+      )}
 
       {/* Explore destinations */}
       <section>
