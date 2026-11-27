@@ -17,6 +17,8 @@
     "check:hotel": "node scripts/check-hotel-airport.mjs",
     "check:transit": "node scripts/check-transit-network.mjs",
     "check:worlds": "node scripts/check-world-layout.mjs",
+    "assets:previews": "node scripts/render-catalog-previews.mjs",
+    "assets:check": "node scripts/render-catalog-previews.mjs --validate-only",
     "check:character": "node scripts/check-character.mjs",
     "check:finance": "node scripts/check-finance.mjs"
   },

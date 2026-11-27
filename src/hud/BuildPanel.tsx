@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Armchair,
   Bath,
@@ -16,6 +16,7 @@ import {
   Palette,
   PencilRuler,
   RotateCw,
+  Search,
   Sofa,
   Sparkles,
   Sprout,
@@ -27,25 +28,19 @@ import {
   X,
   Check,
 } from 'lucide-react';
+import { CATALOG_CATEGORIES, COLLECTIONS } from '../../shared/catalog/expansion.mjs';
 import { FLOOR_STYLES, FURNITURE_CATALOG, WALL_STYLES } from '../game/catalog';
+import { catalogPreviewUrl } from '../game/catalogExpansion';
 import type { FurnitureCategory } from '../game/types';
 import type { BuildController, HudPresentation } from './types';
 import { cx } from './primitives';
 
 const CATEGORY_TABS: { id: 'all' | FurnitureCategory; label: string }[] = [
   { id: 'all', label: 'All' },
-  { id: 'seating', label: 'Seating' },
-  { id: 'tables', label: 'Tables' },
-  { id: 'living', label: 'Living' },
-  { id: 'bedroom', label: 'Bedroom' },
-  { id: 'kitchen', label: 'Kitchen' },
-  { id: 'bathroom', label: 'Bath' },
-  { id: 'office', label: 'Office' },
-  { id: 'outdoor', label: 'Outdoor' },
-  { id: 'decor', label: 'Decor' },
-  { id: 'lighting', label: 'Lighting' },
-  { id: 'plants_rugs', label: 'Plants' },
-  { id: 'wall', label: 'Wall' },
+  ...CATALOG_CATEGORIES.filter((category) => category.id !== 'living').map((category) => ({
+    id: category.id as 'all' | FurnitureCategory,
+    label: category.label,
+  })),
 ];
 
 function catalogIcon(category: FurnitureCategory) {
@@ -74,6 +69,15 @@ function catalogIcon(category: FurnitureCategory) {
       return <Sprout className="w-4 h-4" />;
     case 'wall':
       return <Frame className="w-4 h-4" />;
+    case 'structure':
+    case 'vehicles':
+      return <Layers className="w-4 h-4" />;
+    case 'commercial':
+      return <BriefcaseBusiness className="w-4 h-4" />;
+    case 'nightlife':
+    case 'events':
+    case 'specialty':
+      return <Sparkles className="w-4 h-4" />;
     default:
       return <Armchair className="w-4 h-4" />;
   }
@@ -91,13 +95,20 @@ interface BuildPanelProps {
  * builder handler — catalog, surfaces, layouts, undo, clear and Done.
  */
 export const BuildPanel: React.FC<BuildPanelProps> = ({ build, presentation, touch }) => {
-  const filtered = useMemo(
-    () =>
-      build.categoryFilter === 'all'
-        ? FURNITURE_CATALOG
-        : FURNITURE_CATALOG.filter((item) => item.category === build.categoryFilter),
-    [build.categoryFilter]
-  );
+  const [query, setQuery] = useState('');
+  const [collection, setCollection] = useState('all');
+
+  const filtered = useMemo(() => {
+    const search = query.trim().toLowerCase();
+    return FURNITURE_CATALOG.filter((item) => {
+      if (build.categoryFilter !== 'all' && item.category !== build.categoryFilter) return false;
+      if (collection !== 'all' && !(item.themes ?? []).includes(collection)) return false;
+      if (!search) return true;
+      return `${item.name} ${item.description ?? ''} ${(item.styleTags ?? []).join(' ')}`
+        .toLowerCase()
+        .includes(search);
+    });
+  }, [build.categoryFilter, collection, query]);
 
   const portraitPhone = presentation === 'mobile-portrait';
 
@@ -314,9 +325,37 @@ export const BuildPanel: React.FC<BuildPanelProps> = ({ build, presentation, tou
                   </span>
                 </div>
 
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="flex min-w-[150px] flex-1 items-center gap-1.5 rounded-lg border border-white/12 bg-black/25 px-2 py-1">
+                    <Search className="w-3 h-3 text-white/40" aria-hidden="true" />
+                    <input
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="Search 344 models — sofas, DJ booths, brick walls, cars…"
+                      aria-label="Search the build catalog"
+                      className="w-full bg-transparent text-[11px] text-white outline-none placeholder:text-white/35"
+                    />
+                  </div>
+                  <select
+                    value={collection}
+                    onChange={(event) => setCollection(event.target.value)}
+                    aria-label="Filter by themed collection"
+                    className="rounded-lg border border-white/12 bg-black/40 px-2 py-1 text-[11px] text-white/85"
+                  >
+                    <option value="all">All collections</option>
+                    {COLLECTIONS.map((entry) => (
+                      <option key={entry.id} value={entry.id}>
+                        {entry.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="font-mono-tabular text-[10px] text-white/40">{filtered.length} shown</span>
+                </div>
+
                 <div className="flex items-stretch gap-2 overflow-x-auto no-scrollbar pb-1">
                   {filtered.map((item) => {
                     const active = build.placing?.id === item.id;
+                    const preview = catalogPreviewUrl(item, item.defaultColor);
                     return (
                       <button
                         key={item.id}
@@ -324,28 +363,48 @@ export const BuildPanel: React.FC<BuildPanelProps> = ({ build, presentation, tou
                         aria-pressed={active}
                         onClick={() => build.onPickCatalog(item.id)}
                         className={cx(
-                          'll-focus flex min-w-[112px] shrink-0 flex-col gap-1.5 rounded-xl border px-2.5 py-2 text-left transition-colors',
+                          'll-focus flex w-[122px] shrink-0 flex-col gap-1 rounded-xl border p-2 text-left transition-colors',
                           active
                             ? 'border-white bg-white text-[#15181b]'
                             : 'border-white/12 bg-white/[0.06] text-white hover:border-white/30 hover:bg-white/10'
                         )}
                       >
-                        <span className="flex w-full items-center justify-between">
-                          <span
-                            className={cx(
-                              'flex h-6 w-6 items-center justify-center rounded-md',
-                              active ? 'bg-black/10' : 'bg-white/10 text-white/80'
-                            )}
-                          >
+                        <span
+                          className={cx(
+                            'flex h-[64px] w-full items-center justify-center rounded-lg',
+                            active ? 'bg-black/5' : 'bg-black/25'
+                          )}
+                        >
+                          {item.availability === 'incomplete' ? (
+                            <span className="px-1 text-center text-[9px] font-semibold text-amber-300">
+                              Model incomplete
+                            </span>
+                          ) : (
+                            <img
+                              src={preview}
+                              alt={`${item.name} preview`}
+                              loading="lazy"
+                              decoding="async"
+                              className="h-full w-full object-contain"
+                            />
+                          )}
+                        </span>
+                        <span className="flex w-full items-center justify-between gap-1">
+                          <span className={cx('flex h-4 w-4 items-center justify-center', active ? 'text-black/60' : 'text-white/60')}>
                             {catalogIcon(item.category)}
                           </span>
-                          <span
-                            className="h-3.5 w-3.5 rounded-full border border-black/20"
-                            style={{ backgroundColor: item.defaultColor }}
-                            aria-hidden="true"
-                          />
+                          {typeof item.price === 'number' && (
+                            <span
+                              className={cx(
+                                'font-mono-tabular text-[9px]',
+                                active ? 'text-black/50' : 'text-white/45'
+                              )}
+                            >
+                              元 {item.price}
+                            </span>
+                          )}
                         </span>
-                        <span className="truncate text-[11px] font-semibold">{item.name}</span>
+                        <span className="line-clamp-2 text-[11px] font-semibold leading-tight">{item.name}</span>
                         <span
                           className={cx(
                             'font-mono-tabular text-[10px]',
@@ -358,6 +417,11 @@ export const BuildPanel: React.FC<BuildPanelProps> = ({ build, presentation, tou
                       </button>
                     );
                   })}
+                  {filtered.length === 0 && (
+                    <p className="px-2 py-3 text-[11px] text-white/45">
+                      No catalogue items match that search and filter.
+                    </p>
+                  )}
                 </div>
               </>
             )}

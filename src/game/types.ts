@@ -27,7 +27,13 @@ export type FurnitureCategory =
   | 'bathroom'
   | 'office'
   | 'outdoor'
-  | 'decor';
+  | 'decor'
+  | 'structure'
+  | 'commercial'
+  | 'nightlife'
+  | 'specialty'
+  | 'events'
+  | 'vehicles';
 
 export type PlacementLayer = 'floor' | 'rug' | 'wall';
 
@@ -53,6 +59,26 @@ export interface FurnitureCatalogItem {
   /** Available color palette swatches (primary fabric/wood/paint) */
   colors: { label: string; hex: string }[];
   defaultColor: string;
+
+  /* ── Expanded asset catalog metadata (see shared/catalog/expansion.mjs) ── */
+  subcategory?: string;
+  description?: string;
+  /** Themed starter collection ids this piece belongs to. */
+  themes?: string[];
+  styleTags?: string[];
+  /** Server-owned price, mirrored from the shared catalog for display only. */
+  price?: number;
+  currency?: 'yuanzi' | 'tongbao';
+  /** Exact 3D model kind + parameters, resolved through src/game/models. */
+  model?: { kind: string; params?: Record<string, unknown> };
+  /** Preview image base path; variant images append `-<colourIndex>`. */
+  previewBase?: string;
+  availability?: 'available' | 'incomplete' | 'retired';
+  assetVersion?: number;
+  placement?: 'indoor' | 'outdoor' | 'both';
+  /** Ceiling-mounted pieces render at ceiling height but snap to the floor grid. */
+  mount?: 'ceiling';
+  sizes?: { label: string; size: [number, number]; scale: number }[] | null;
 }
 
 export type WallSide = 'north' | 'east' | 'south' | 'west';

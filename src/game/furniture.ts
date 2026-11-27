@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { buildExtraFurniture } from './furnitureExtra';
+import { getExpansionCatalogItem } from './catalogExpansion';
+import { buildCatalogModel } from './models';
 import { createArtTexture, createRugTexture, createVinylTexture } from './textures';
 import type { PlacedItem } from './types';
 
@@ -1325,7 +1327,22 @@ export function buildFurnitureGroup(
         isGhost: opts.isGhost,
         isSoftwareGl: opts.isSoftwareGl,
       });
-      if (extra) group.add(extra);
+      if (extra) {
+        group.add(extra);
+        break;
+      }
+      // Expanded catalog: resolve the shared record and build its real
+      // parametric model (construction, business, nightlife, outdoor, vehicles).
+      const entry = getExpansionCatalogItem(placed.catalogId);
+      if (entry) {
+        const model = buildCatalogModel(entry, {
+          color: placed.color,
+          active: placed.active,
+          isGhost: opts.isGhost,
+          isSoftwareGl: opts.isSoftwareGl,
+        });
+        if (model) group.add(model);
+      }
       break;
     }
   }

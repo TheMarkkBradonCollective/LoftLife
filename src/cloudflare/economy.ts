@@ -1,3 +1,4 @@
+import { EXPANSION_PRICES } from '../../shared/catalog/expansion.mjs';
 import { CLOTHING_CATALOG } from '../../shared/character.mjs';
 import {
   ATM_IDS,
@@ -21,6 +22,10 @@ const FURNITURE: Record<string, number> = {
   fireplace:340,bookshelf:130,arc_lamp:60,table_lamp:35,monstera_plant:40,olive_tree:75,
   woven_rug:55,wall_art:65,wall_shelf:50,floor_mirror:110,neon_sign:90,
 };
+// Construction / business / nightlife / specialty / event / outdoor / vehicle
+// catalog shares one price table with the game client and the renderer.
+for (const [id, entry] of Object.entries(EXPANSION_PRICES)) FURNITURE[id] = entry.price;
+
 const CLOTHING = Object.fromEntries(
   Object.entries(CLOTHING_CATALOG).map(([id, item]) => [id, { price: item.price, currency: item.currency }])
 ) as Record<string, { price: number; currency: 'yuanzi' | 'tongbao' }>;

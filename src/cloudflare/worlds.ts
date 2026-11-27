@@ -1,3 +1,4 @@
+import { EXPANSION_PRICES } from '../../shared/catalog/expansion.mjs';
 import { invitationsAllowedWith } from './platform';
 import {
   DEFAULT_FOUNDATION_ID,
@@ -122,7 +123,12 @@ async function view(sql: Sql, world: World, user: User | null, state = false) {
   return result;
 }
 function sanitizeState(body: Record<string, unknown>) {
-  const furniture = new Set(['plush_sofa','sectional_sofa','lounge_chair','bar_stool','cozy_bed','dining_set','espresso_bar','dual_desk','coffee_table','side_desk','record_console','media_tv','fireplace','bookshelf','arc_lamp','table_lamp','monstera_plant','olive_tree','woven_rug','wall_art','wall_shelf','floor_mirror','neon_sign']);
+  const furniture = new Set([
+    'plush_sofa','sectional_sofa','lounge_chair','bar_stool','cozy_bed','dining_set','espresso_bar','dual_desk',
+    'coffee_table','side_desk','record_console','media_tv','fireplace','bookshelf','arc_lamp','table_lamp',
+    'monstera_plant','olive_tree','woven_rug','wall_art','wall_shelf','floor_mirror','neon_sign',
+    ...Object.keys(EXPANSION_PRICES),
+  ]);
   const floors = new Set(['oak_parquet','walnut_herringbone','terrazzo','concrete','boucle_carpet']);
   const walls = new Set(['warm_chalk','sage_plaster','terracotta','slate_blue','charcoal_loft','soft_blush']);
   const moods = new Set(['morning','golden','night']);

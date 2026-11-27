@@ -1,3 +1,4 @@
+import { EXPANSION_PRICES } from '../../shared/catalog/expansion.mjs';
 import { neon } from '@neondatabase/serverless';
 import { handleWorldRoute, permission } from './worlds';
 import { handleSocialRoute } from './social';
@@ -657,6 +658,7 @@ const FURNITURE_PRICES: Record<string, number> = {
   record_console:150, media_tv:300, fireplace:340, bookshelf:130, arc_lamp:60,
   table_lamp:35, monstera_plant:40, olive_tree:75, woven_rug:55, wall_art:65,
   wall_shelf:50, floor_mirror:110, neon_sign:90,
+  ...Object.fromEntries(Object.entries(EXPANSION_PRICES).map(([id, entry]) => [id, entry.price])),
 };
 const FLOOR_STYLES = ['oak_parquet','walnut_herringbone','terrazzo','concrete','boucle_carpet'];
 const WALL_STYLES = ['warm_chalk','sage_plaster','terracotta','slate_blue','charcoal_loft','soft_blush'];

@@ -361,8 +361,12 @@ export interface ShopEntry {
   price: number;
   currency: 'yuanzi' | 'tongbao' | 'cubits';
   label?: string;
+  category?: string;
+  subcategory?: string;
   description?: string;
   merchant?: string;
+  /** Transparent catalog preview rendered from the item's own 3D model. */
+  preview?: string | null;
 }
 
 export interface ConversationEntry {

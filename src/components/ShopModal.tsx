@@ -1,5 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Banknote, CreditCard, Loader2, ShoppingBag, Shirt, Sofa, Store, Wallet, X } from 'lucide-react';
+import { Banknote, CreditCard, Loader2, Search, ShoppingBag, Shirt, Sofa, Store, Wallet, X } from 'lucide-react';
+import { CATALOG_CATEGORIES } from '../../shared/catalog/expansion.mjs';
+import { getCatalogItem } from '../game/catalog';
+import { catalogPreviewUrl } from '../game/catalogExpansion';
+import { ModelInspector } from './ModelInspector';
 import { api, ApiError, type ShopEntry } from '../net/api';
 import { useSession } from '../session';
 import { DEFAULT_AVATAR } from '../game/catalog';
@@ -13,6 +17,13 @@ const JEWELRY_IDS = new Set<JewelryId>(['none', 'chain', 'watch', 'earrings', 'b
 const CARRY_IDS = new Set<CarryId>(['none', 'backpack', 'purse', 'tote']);
 
 const panel = 'bg-[#15181c]/97 text-slate-100 border-white/20';
+
+const labelFor = (item: ShopEntry) =>
+  item.label ??
+  item.id
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 
 const currencyLabel = (currency: ShopEntry['currency']) =>
   currency === 'yuanzi' ? '元' : currency === 'tongbao' ? '宝' : '₡';
@@ -37,6 +48,9 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [preview, setPreview] = useState<ShopEntry | null>(null);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState('all');
+  const [colour, setColour] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -65,7 +79,23 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
 
   if (!open) return null;
 
-  const items = tab === 'furniture' ? furniture : tab === 'clothing' ? clothing : general;
+  const categories = useMemo(() => {
+    const present = new Set(furniture.map((item) => item.category).filter(Boolean));
+    return CATALOG_CATEGORIES.filter((entry) => present.has(entry.id));
+  }, [furniture]);
+
+  const items = useMemo(() => {
+    if (tab !== 'furniture') return tab === 'clothing' ? clothing : general;
+    const search = query.trim().toLowerCase();
+    return furniture.filter((item) => {
+      if (category !== 'all' && item.category !== category) return false;
+      if (!search) return true;
+      return `${labelFor(item)} ${item.description ?? ''} ${item.category ?? ''}`.toLowerCase().includes(search);
+    });
+  }, [tab, furniture, clothing, general, category, query]);
+
+  const selectedCatalog = tab === 'furniture' && preview ? getCatalogItem(preview.id) : undefined;
+  const activeColour = colour ?? selectedCatalog?.defaultColor ?? undefined;
   const previewConfig = useMemo(() => {
     const base = profile?.avatar ?? DEFAULT_AVATAR;
     if (!preview) return base;
@@ -109,12 +139,12 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
     return item.currency === 'yuanzi' ? wallet.yuanzi >= item.price : wallet.tongbao >= item.price;
   };
 
-  const label = (item: ShopEntry) =>
-    item.label ??
-    item.id
-      .split('_')
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(' ');
+  const catalogPreviewUrlFor = (item: ShopEntry) => {
+    const entry = getCatalogItem(item.id);
+    return entry ? catalogPreviewUrl(entry) : null;
+  };
+
+  const label = (item: ShopEntry) => labelFor(item);
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
@@ -176,6 +206,47 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
           </button>
         </div>
 
+        {tab === 'furniture' && (
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-white/8 px-4 py-2">
+            <div className="flex min-w-[180px] flex-1 items-center gap-1.5 rounded-lg border border-white/12 bg-black/30 px-2 py-1 sm:max-w-[240px]">
+              <Search className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search 344 models…"
+                aria-label="Search the catalog"
+                className="w-full bg-transparent text-[11px] text-white outline-none placeholder:text-slate-500"
+              />
+            </div>
+            <div className="flex flex-1 items-center gap-1 overflow-x-auto no-scrollbar">
+              <button
+                type="button"
+                onClick={() => setCategory('all')}
+                aria-pressed={category === 'all'}
+                className={`shrink-0 rounded-lg px-2.5 py-1 text-[10px] font-semibold ${
+                  category === 'all' ? 'bg-white text-[#15181b]' : 'text-slate-300 hover:bg-white/10'
+                }`}
+              >
+                All
+              </button>
+              {categories.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  onClick={() => setCategory(entry.id)}
+                  aria-pressed={category === entry.id}
+                  className={`shrink-0 rounded-lg px-2.5 py-1 text-[10px] font-semibold ${
+                    category === entry.id ? 'bg-white text-[#15181b]' : 'text-slate-300 hover:bg-white/10'
+                  }`}
+                >
+                  {entry.label}
+                </button>
+              ))}
+            </div>
+            <span className="font-mono-tabular text-[10px] text-slate-500">{items.length} shown</span>
+          </div>
+        )}
+
         {tab === 'general' && (
           <div className="flex flex-wrap items-center gap-2 border-b border-white/8 px-4 py-2">
             <span className="mr-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
@@ -215,6 +286,63 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
           </div>
         )}
 
+        {tab === 'furniture' && preview && (
+          <div className="grid shrink-0 gap-3 border-b border-white/8 p-4 sm:grid-cols-[220px_minmax(0,1fr)]">
+            <div className="h-44 overflow-hidden rounded-xl border border-white/10 bg-[radial-gradient(circle_at_50%_35%,rgba(255,255,255,0.10),rgba(0,0,0,0.35))]">
+              {selectedCatalog ? (
+                <ModelInspector
+                  catalogId={preview.id}
+                  colour={activeColour}
+                  label={labelFor(preview)}
+                  fallbackSrc={preview.preview ?? undefined}
+                  className="h-full w-full"
+                />
+              ) : (
+                <img
+                  src={preview.preview ?? ''}
+                  alt={`${labelFor(preview)} preview`}
+                  className="h-full w-full object-contain"
+                />
+              )}
+            </div>
+            <div className="flex flex-col justify-center">
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Inspect in 3D</span>
+              <h3 className="mt-1 text-sm font-bold text-white">{labelFor(preview)}</h3>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{preview.description}</p>
+              {selectedCatalog && selectedCatalog.colors.length > 0 && (
+                <>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {selectedCatalog.colors.map((swatch) => (
+                      <button
+                        key={swatch.hex}
+                        type="button"
+                        title={swatch.label}
+                        aria-label={swatch.label}
+                        aria-pressed={activeColour === swatch.hex}
+                        onClick={() => setColour(swatch.hex)}
+                        className={`h-6 w-6 rounded-full border ${
+                          activeColour === swatch.hex ? 'border-white ring-2 ring-white/40' : 'border-white/25'
+                        }`}
+                        style={{ backgroundColor: swatch.hex }}
+                      />
+                    ))}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <img
+                      src={catalogPreviewUrl(selectedCatalog, activeColour)}
+                      alt={`${labelFor(preview)} ${activeColour ?? ''} render`}
+                      className="h-16 w-16 rounded-lg border border-white/10 bg-black/30 object-contain"
+                    />
+                    <p className="text-[10px] leading-snug text-slate-500">
+                      Rendered from the same model you place, in the selected finish.
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         {tab === 'clothing' && (
           <div className="grid shrink-0 gap-3 border-b border-white/8 p-4 sm:grid-cols-[220px_minmax(0,1fr)]">
             <CharacterPreview config={previewConfig} className="h-48 sm:h-56" compact />
@@ -246,13 +374,30 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
             return (
               <div
                 key={item.id}
-                onClick={() => { if (tab === 'clothing') setPreview(item); }}
+                onClick={() => {
+                  if (tab === 'clothing') setPreview(item);
+                  if (tab === 'furniture') {
+                    setPreview(item);
+                    setColour(getCatalogItem(item.id)?.defaultColor ?? null);
+                  }
+                }}
                 className={`rounded-xl border p-3 flex flex-col gap-2 ${
-                  tab === 'clothing' && preview?.id === item.id
+                  preview?.id === item.id
                     ? 'border-[#39ff14]/70 bg-[#39ff14]/10'
                     : 'border-white/10 bg-white/[0.05]'
-                } ${tab === 'clothing' ? 'cursor-pointer' : ''}`}
+                } ${tab === 'general' ? '' : 'cursor-pointer'}`}
               >
+                {tab === 'furniture' && (item.preview ?? catalogPreviewUrlFor(item)) && (
+                  <span className="flex h-20 items-center justify-center rounded-lg border border-white/5 bg-[radial-gradient(circle_at_50%_35%,rgba(255,255,255,0.10),rgba(0,0,0,0.28))]">
+                    <img
+                      src={(item.preview ?? catalogPreviewUrlFor(item)) as string}
+                      alt={`${label(item)} 3D preview`}
+                      loading="lazy"
+                      decoding="async"
+                      className="h-[72px] w-full object-contain"
+                    />
+                  </span>
+                )}
                 <div className="text-xs font-semibold text-slate-100 leading-tight">{label(item)}</div>
                 {item.kind === 'general' && (
                   <p className="text-[10px] leading-snug text-slate-400">
