@@ -73,7 +73,18 @@ guest city contract.
   position after it was first placed and after it walked, and saw the position stay byte-stable
   while the browser was idle.
 
-## Not verified here — requires the deployed environment
+## Deployed environment
+
+Merging this work into `main` ran `deploy-cloudflare.yml`, which re-ran `npm test`,
+`npm run lint` and `npm run build`, pushed `DATABASE_URL` and `LOFTLIFE_SESSION_SECRET` to
+the Worker, and uploaded the Worker, its assets and the `LoftLifeRealtime` Durable Object
+class to Cloudflare. That job finished green, so the branch is live on the production
+deployment. The deployed URL is not recorded in the repository and this workspace has no
+Cloudflare credentials, so no request was made against the live origin from here: what
+follows is what the deployment upload proves (the bundle, bindings, DO migration and
+secrets were accepted) and what it does not.
+
+## Not verified — requires the deployed environment
 
 These need credentials and hardware that this workspace does not have. They are not claimed
 as passing.
@@ -92,8 +103,10 @@ as passing.
 - **Two physical devices over the public internet.** Verified with two browser contexts and
   with a browser plus an independent socket client on one host; NAT latency, mobile
   backgrounding and carrier behavior were not exercised.
-- **Production deployment.** No `CLOUDFLARE_API_TOKEN` or `LOFTLIFE_SESSION_SECRET` is
-  available here, so the Worker was not deployed and no live acceptance run was performed.
+- **Live acceptance against the deployed origin.** The deploy job uploaded the Worker and
+  green-lit, but no request was made to the live hostname from this workspace, so runtime
+  behavior in production (real Durable Object state, Neon latency, WebSocket upgrade at the
+  edge) is unverified here.
 
 ## Known limitations left in place
 
