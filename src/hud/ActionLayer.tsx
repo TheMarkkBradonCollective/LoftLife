@@ -61,6 +61,13 @@ export const ActionLayer: React.FC<ActionLayerProps> = ({
   }, [state, viewMode]);
 
   useEffect(() => {
+    if (viewMode !== 'isometric') return;
+    setSprint(false);
+    touchInput.sprint = false;
+    setCameraOpen(false);
+  }, [viewMode]);
+
+  useEffect(() => {
     if (!hudShowsActions(state)) {
       setCameraOpen(false);
       setEmoteOpen(false);
