@@ -36,6 +36,7 @@ export interface TopHudProps {
   onRangeChange: (range: VoiceSnapshot['range']) => void;
   onMicPress: () => void;
   onMicRelease: () => void;
+  onMicModeChange: (mode: VoiceSnapshot['micMode']) => void;
   onOpenVoiceSettings: () => void;
   /** Installed desktop builds get a window control in the dock. */
   installedApp?: boolean;
@@ -80,6 +81,7 @@ export const TopHud: React.FC<TopHudProps> = ({
   onRangeChange,
   onMicPress,
   onMicRelease,
+  onMicModeChange,
   onOpenVoiceSettings,
   installedApp = false,
   appBar = false,
@@ -156,6 +158,7 @@ export const TopHud: React.FC<TopHudProps> = ({
               onRangeChange={onRangeChange}
               onMicPress={onMicPress}
               onMicRelease={onMicRelease}
+              onMicModeChange={onMicModeChange}
               onOpenSettings={onOpenVoiceSettings}
               showLabel
             />
@@ -322,6 +325,7 @@ export const TopHud: React.FC<TopHudProps> = ({
           onRangeChange={onRangeChange}
           onMicPress={onMicPress}
           onMicRelease={onMicRelease}
+          onMicModeChange={onMicModeChange}
           onOpenSettings={onOpenVoiceSettings}
           showLabel={!compact}
         />
