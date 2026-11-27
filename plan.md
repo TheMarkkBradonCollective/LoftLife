@@ -8,6 +8,8 @@ This document is the product-level source of truth for what LoftLife is meant to
 
 ---
 
+- [Discord community integration](docs/DISCORD-COMMUNITY-INTEGRATION.md) — official server structure, private user-created city categories, account linking, role synchronization, permissions, bot architecture and rollout phases.
+
 ## 1. The vision
 
 LoftLife takes inspiration from two different strengths:
