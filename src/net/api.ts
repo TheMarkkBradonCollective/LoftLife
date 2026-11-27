@@ -749,6 +749,7 @@ export const api = {
   report: (body: { handle: string; reason: string; details?: string }) =>
     request<{ id: string; status: string }>('/reports', { method: 'POST', body }),
 
+  adminAccess: () => request<{ actor: { userId: string; handle: string; role: LoftStaffRole; departments: string[] } }>('/admin/console/access'),
   adminConsole: (q = '') => request<AdminConsoleData>(`/admin/console${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   assignStaff: (body: { handle: string; role: Exclude<LoftStaffRole, 'founder'>; departments: string[] }) =>
     request<{ ok: boolean }>('/admin/console/staff', { method: 'POST', body }),
