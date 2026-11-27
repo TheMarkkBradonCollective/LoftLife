@@ -47,7 +47,6 @@ export interface CityCrowdHandles {
 
 const CROWD_SIZE: Record<CrowdQuality, number> = { high: 50, medium: 34, low: 20 };
 
-
 const RIG_POOL_LIMIT = 10;
 
 /**
@@ -107,14 +106,6 @@ function createCrowdLodAvatar(avatar: AvatarConfig): THREE.Group {
   return root;
 }
 
-function hashId(value: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
 
 /**
  * A city crowd: deterministic sidewalk simulation plus two render tiers.
@@ -161,7 +152,6 @@ export function createCityCrowd(options: {
     opacity: 0.32,
   });
   const shadowGeometry = new THREE.PlaneGeometry(0.9, 0.9).rotateX(-Math.PI / 2);
-
 
   function propFor(agent: CrowdAgentView) {
     let entry = props.get(agent.id);
@@ -259,9 +249,8 @@ export function createCityCrowd(options: {
       entry.group.visible = true;
       const bob = isMoving ? Math.abs(Math.sin(elapsed * 5.4 + agent.personalPhase)) * 0.02 : 0;
       entry.group.position.set(agent.x, ground + bob, agent.z);
-      // Kenney characters and the LoftLife rig both face +Z.
+      // The lightweight avatar LOD and nearby LoftLife rig share +Z forward.
       entry.group.rotation.y = agent.yaw;
-
     }
 
     // Keep hidden props out of the draw list entirely.
