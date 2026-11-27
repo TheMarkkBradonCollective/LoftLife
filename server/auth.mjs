@@ -8,7 +8,12 @@
 import crypto from 'node:crypto';
 import { db, newId, now, audit, tx } from './db.mjs';
 import { ApiError, badRequest, conflict, unauthorized, tooMany } from './errors.mjs';
-import { CLOTHING_SHOP } from './economy.mjs';
+import {
+  CLOTHING_SHOP,
+  DEFAULT_OWNED_CLOTHING,
+  WELCOME_BALANCES,
+  ensureBankAccount,
+} from './economy.mjs';
 import { EDGE_TOKEN_PREFIX, edgeUserForToken } from './edge-auth.mjs';
 import { STARTER_SUITE } from './starter.mjs';
 import { DEFAULT_AVATAR, sanitizeAvatar } from './validate.mjs';
@@ -157,13 +162,13 @@ export function registerUser({ handle, email, password, displayName, avatar }) {
        VALUES (?, ?, ?, '', ?)`
     ).run(userId, name, avatarJson, createdAt);
 
-    db.prepare('INSERT INTO wallets (user_id, yuanzi, tongbao) VALUES (?, 0, 0)').run(userId);
+    db.prepare('INSERT INTO wallets (user_id) VALUES (?)').run(userId);
+    ensureBankAccount(userId);
 
     // Welcome grant goes through the ledger like any other balance change.
-    for (const [currency, amount] of [
-      ['yuanzi', 500],
-      ['tongbao', 25],
-    ]) {
+    // CUBITS and cash are additive starter assets; existing currencies keep
+    // their historical welcome amounts and no exchange rate is applied.
+    for (const [currency, amount] of Object.entries(WELCOME_BALANCES)) {
       const balance = amount;
       db.prepare(`UPDATE wallets SET ${currency} = ? WHERE user_id = ?`).run(balance, userId);
       db.prepare(
@@ -201,16 +206,21 @@ export function registerUser({ handle, email, password, displayName, avatar }) {
       createdAt
     );
 
-    // Own whatever clothing the chosen starting outfit uses, so the account is
-    // never rejected by wardrobe ownership checks on first save.
+    // Own the free starter wardrobe plus whatever clothing the chosen starting
+    // outfit uses, so the account is never rejected by ownership checks.
     const clothingIds = new Set(CLOTHING_SHOP.map((entry) => entry.id));
+    const starterPieces = new Set(DEFAULT_OWNED_CLOTHING);
     for (const piece of [
+      ...DEFAULT_OWNED_CLOTHING,
       safeAvatar.topStyle,
+      safeAvatar.bottomStyle,
       safeAvatar.accessory,
       safeAvatar.jewelry,
       safeAvatar.carry,
     ]) {
-      if (!clothingIds.has(piece)) continue;
+      // Free starter pieces are owned even though they are not sold in the shop;
+      // every other starting piece must exist in the catalogue.
+      if (!starterPieces.has(piece) && !clothingIds.has(piece)) continue;
       db.prepare(
         `INSERT INTO inventory (id, user_id, kind, catalog_id, qty, acquired_at)
          VALUES (?, ?, 'clothing', ?, 1, ?)

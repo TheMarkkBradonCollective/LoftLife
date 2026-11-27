@@ -401,6 +401,12 @@ export const WALL_STYLES: { id: WallStyleId; label: string; color: string }[] = 
 export const DEFAULT_AVATAR: AvatarConfig = {
   name: 'Milo',
   skinTone: '#e8b896',
+  bodyPreset: 'balanced',
+  height: 'average',
+  build: 'average',
+  faceShape: 'oval',
+  eyeShape: 'almond',
+  facialDetail: 'none',
   hairStyle: 'bob',
   hairColor: '#2d2320',
   topStyle: 'hoodie',

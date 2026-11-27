@@ -90,9 +90,9 @@ export function PlatformApp() {
             <span className="text-xl font-bold tracking-tight">LoftLife</span>
           </header>
           <section className="flex flex-1 flex-col items-center justify-center py-16 text-center">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">A world to call your own</p>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">A living 3D social gaming world</p>
             <h1 className="max-w-2xl text-4xl font-bold tracking-tight sm:text-6xl">Create. Connect. Explore.</h1>
-            <p className="mt-5 max-w-lg text-base leading-7 text-slate-600">Build your space, meet people, and explore TheCity.</p>
+            <p className="mt-5 max-w-lg text-base leading-7 text-slate-600">Explore a living city, interact with the world, build your own spaces, and share experiences with other players. No roleplay required.</p>
             <div className="mt-9 flex w-full max-w-sm flex-col gap-3">
               <button type="button" onClick={() => setAuthOpen(true)} className="rounded-xl bg-slate-900 px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-slate-700">Sign In</button>
               <button type="button" onClick={() => { setGuestFormOpen(true); setGuestError(null); }} className="rounded-xl border border-slate-300 bg-white px-6 py-3.5 text-sm font-semibold text-slate-800 transition hover:bg-slate-50">Visit as Guest</button>

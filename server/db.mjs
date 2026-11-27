@@ -68,13 +68,16 @@ CREATE TABLE IF NOT EXISTS profiles (
 CREATE TABLE IF NOT EXISTS wallets (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   yuanzi  INTEGER NOT NULL DEFAULT 0 CHECK (yuanzi >= 0),
-  tongbao INTEGER NOT NULL DEFAULT 0 CHECK (tongbao >= 0)
+  tongbao INTEGER NOT NULL DEFAULT 0 CHECK (tongbao >= 0),
+  cubits  INTEGER NOT NULL DEFAULT 0 CHECK (cubits >= 0),
+  cash    INTEGER NOT NULL DEFAULT 0 CHECK (cash >= 0)
 );
 
 CREATE TABLE IF NOT EXISTS ledger (
   id              TEXT PRIMARY KEY,
   user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  currency        TEXT NOT NULL CHECK (currency IN ('yuanzi','tongbao')),
+  currency        TEXT NOT NULL CHECK (currency IN ('yuanzi','tongbao','cubits','cash')),
+  account         TEXT NOT NULL DEFAULT 'wallet' CHECK (account IN ('wallet','bank','cash')),
   delta           INTEGER NOT NULL,
   balance_after   INTEGER NOT NULL,
   reason          TEXT NOT NULL,
@@ -95,6 +98,44 @@ CREATE TABLE IF NOT EXISTS inventory (
   acquired_at INTEGER NOT NULL,
   UNIQUE (user_id, kind, catalog_id)
 );
+
+-- Unlimited named outfits, account-scoped so they follow the player across
+-- devices. Only the wardrobe slice of an avatar is stored here.
+CREATE TABLE IF NOT EXISTS outfits (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  config_json TEXT NOT NULL,
+  created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS outfits_user ON outfits(user_id, created_at DESC);
+
+-- TG-Banking account and immutable payment/transfer receipts. The spendable
+-- digital wallet (CUBITS) lives in wallets; the bank account holds deposits.
+CREATE TABLE IF NOT EXISTS bank_accounts (
+  user_id       TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  account_number TEXT NOT NULL UNIQUE,
+  card_last4    TEXT NOT NULL,
+  card_status   TEXT NOT NULL DEFAULT 'active',
+  balance       INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS bank_payments (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL CHECK (kind IN ('deposit','withdrawal','payment')),
+  method          TEXT NOT NULL CHECK (method IN ('wallet','card','cash')),
+  amount          INTEGER NOT NULL CHECK (amount > 0),
+  currency        TEXT NOT NULL DEFAULT 'cubits' CHECK (currency = 'cubits'),
+  merchant        TEXT,
+  ref             TEXT,
+  atm_id          TEXT,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  created_at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS bank_payments_user ON bank_payments(user_id, created_at DESC);
 
 -- One hotel suite per player, plus the shared decoration state of it.
 CREATE TABLE IF NOT EXISTS suites (
@@ -286,6 +327,73 @@ for (const [column, definition] of Object.entries(WORLD_COLUMN_DEFAULTS)) {
     db.exec(`ALTER TABLE worlds ADD COLUMN ${column} ${definition}`);
   }
 }
+
+// CUBITS and physical cash are additive columns. Existing YUANZI/TONGBAO
+// balances and ledger rows are left untouched for the future conversion policy.
+const walletColumns = db
+  .prepare('PRAGMA table_info(wallets)')
+  .all()
+  .map((row) => row.name);
+if (!walletColumns.includes('cubits')) {
+  db.exec('ALTER TABLE wallets ADD COLUMN cubits INTEGER NOT NULL DEFAULT 0 CHECK (cubits >= 0)');
+}
+if (!walletColumns.includes('cash')) {
+  db.exec('ALTER TABLE wallets ADD COLUMN cash INTEGER NOT NULL DEFAULT 0 CHECK (cash >= 0)');
+}
+
+// The original ledger constraint only allowed yuanzi/tongbao. SQLite cannot
+// widen a CHECK in place, so rebuild it while copying every historical row.
+const ledgerSql =
+  db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='ledger'").get()?.sql ?? '';
+if (!ledgerSql.includes("'cubits'")) {
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    DROP TRIGGER IF EXISTS ledger_no_update;
+    DROP TRIGGER IF EXISTS ledger_no_delete;
+    BEGIN IMMEDIATE;
+    ALTER TABLE ledger RENAME TO ledger_legacy;
+    CREATE TABLE ledger (
+      id              TEXT PRIMARY KEY,
+      user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      currency        TEXT NOT NULL CHECK (currency IN ('yuanzi','tongbao','cubits','cash')),
+      account         TEXT NOT NULL DEFAULT 'wallet' CHECK (account IN ('wallet','bank','cash')),
+      delta           INTEGER NOT NULL,
+      balance_after   INTEGER NOT NULL,
+      reason          TEXT NOT NULL,
+      ref             TEXT,
+      idempotency_key TEXT,
+      created_at      INTEGER NOT NULL
+    );
+    INSERT INTO ledger (id, user_id, currency, account, delta, balance_after, reason, ref, idempotency_key, created_at)
+      SELECT id, user_id, currency, 'wallet', delta, balance_after, reason, ref, idempotency_key, created_at
+      FROM ledger_legacy;
+    DROP TABLE ledger_legacy;
+    DROP INDEX IF EXISTS ledger_user;
+    DROP INDEX IF EXISTS ledger_idem;
+    CREATE INDEX IF NOT EXISTS ledger_user ON ledger(user_id, created_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS ledger_idem
+      ON ledger(idempotency_key) WHERE idempotency_key IS NOT NULL;
+    COMMIT;
+    PRAGMA foreign_keys = ON;
+  `);
+}
+
+// Financial history is append-only. Corrections must be new compensating
+// entries, never edits or deletes of past balances.
+db.exec(`
+  CREATE TRIGGER IF NOT EXISTS ledger_no_update
+    BEFORE UPDATE ON ledger BEGIN SELECT RAISE(ABORT, 'ledger is append-only'); END;
+  CREATE TRIGGER IF NOT EXISTS ledger_no_delete
+    BEFORE DELETE ON ledger BEGIN SELECT RAISE(ABORT, 'ledger is append-only'); END;
+  CREATE TRIGGER IF NOT EXISTS bank_payment_no_update
+    BEFORE UPDATE ON bank_payments BEGIN SELECT RAISE(ABORT, 'bank payments are append-only'); END;
+  CREATE TRIGGER IF NOT EXISTS bank_payment_no_delete
+    BEFORE DELETE ON bank_payments BEGIN SELECT RAISE(ABORT, 'bank payments are append-only'); END;
+  CREATE TRIGGER IF NOT EXISTS audit_no_update
+    BEFORE UPDATE ON audit_log BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END;
+  CREATE TRIGGER IF NOT EXISTS audit_no_delete
+    BEFORE DELETE ON audit_log BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END;
+`);
 
 // Older SQLite files only allow the legacy 'editor' role. Rebuild the table
 // with the current role set while preserving assignments.

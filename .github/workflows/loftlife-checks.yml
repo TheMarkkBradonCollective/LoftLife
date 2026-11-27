@@ -22,6 +22,7 @@ jobs:
       - run: npm run check:hotel
       - run: npm run check:transit
       - run: npm run check:worlds
+      - run: npm run check:character
       - run: npm run build
       - name: Validate Cloudflare Worker bundle
         run: npx --yes wrangler@4 deploy --dry-run --outdir .wrangler-out

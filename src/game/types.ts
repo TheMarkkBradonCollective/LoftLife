@@ -168,11 +168,23 @@ export type FacialHairId = 'none' | 'stubble' | 'beard' | 'goatee' | 'mustache';
 export type EyebrowStyleId = 'natural' | 'bold' | 'thin' | 'arched';
 export type EyeStyleId = 'warm_brown' | 'deep_brown' | 'hazel' | 'green' | 'blue' | 'gray';
 export type MakeupStyleId = 'none' | 'natural' | 'soft' | 'bold';
+export type BodyPresetId = 'balanced' | 'soft' | 'athletic' | 'broad';
+export type HeightId = 'petite' | 'average' | 'tall';
+export type BuildId = 'slim' | 'average' | 'athletic' | 'curvy';
+export type FaceShapeId = 'oval' | 'square' | 'heart' | 'round';
+export type EyeShapeId = 'almond' | 'round' | 'hooded' | 'upturned';
+export type FacialDetailId = 'none' | 'freckles' | 'beauty_mark' | 'scar' | 'blush';
 
 export interface AvatarConfig {
   name: string;
   makeupStyle?: MakeupStyleId;
   skinTone: string;
+  bodyPreset?: BodyPresetId;
+  height?: HeightId;
+  build?: BuildId;
+  faceShape?: FaceShapeId;
+  eyeShape?: EyeShapeId;
+  facialDetail?: FacialDetailId;
   hairStyle: HairStyleId;
   hairColor: string;
   topStyle: TopStyleId;

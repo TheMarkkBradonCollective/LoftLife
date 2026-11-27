@@ -12,6 +12,7 @@ import { HOTEL_FLOOR_COUNT, roomRangeLabel } from '../shared/hotel-layout.mjs';
 import { RoomSettingsModal } from './components/RoomSettingsModal';
 import { SyncConflictModal } from './components/SyncConflictModal';
 import { ShopModal } from './components/ShopModal';
+import { BankModal } from './components/BankModal';
 import { WorldsModal } from './components/WorldsModal';
 import { WorldStudio } from './components/WorldStudio';
 import { GameInterface } from './hud/GameInterface';
@@ -30,7 +31,7 @@ import { MOBILE_GAMEPLAY_MESSAGE } from '../shared/device-platform.mjs';
 const RoomViewport = lazy(() =>
   import('./components/RoomViewport').then((module) => ({ default: module.RoomViewport }))
 );
-import { api, type TravelDestination, type WorldSummary } from './net/api';
+import { api, type SavedOutfit, type TravelDestination, type WorldSummary } from './net/api';
 import { VOICE_RANGE_INFO } from '../shared/voice-controls.mjs';
 import { isEditableElement } from '../shared/desktop-shortcuts.mjs';
 import { bindingMatchesEvent } from '../shared/keybindings.mjs';
@@ -288,7 +289,15 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     yaw: number;
     at: number;
   } | null>(null);
-  const [avatarStudioMode, setAvatarStudioMode] = useState<'hair' | 'closet'>('hair');
+  const [avatarStudioMode, setAvatarStudioMode] = useState<'mirror' | 'salon' | 'closet' | 'studio'>('studio');
+  const [localOutfits, setLocalOutfits] = useState<SavedOutfit[]>(() => {
+    try {
+      const raw = localStorage.getItem('loftlife_outfits_local_v2');
+      return raw ? (JSON.parse(raw) as SavedOutfit[]) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Runtime environment decides controls and gameplay access. Width is never
   // used: a narrow desktop window stays a desktop, and a mobile PWA is still a
@@ -324,6 +333,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [worldMenuTab, setWorldMenuTab] = useState<'map' | 'world' | 'manage' | 'controls'>('map');
   const [socialIntent, setSocialIntent] = useState<SocialIntent>('chat');
   const [shopOpen, setShopOpen] = useState(false);
+  const [bankOpen, setBankOpen] = useState(false);
+  const [bankAtm, setBankAtm] = useState<string | undefined>(undefined);
   const [worldsOpen, setWorldsOpen] = useState(false);
   const [studioWorldId, setStudioWorldId] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -1993,11 +2004,12 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onHailTaxi={handleHailTaxi}
         onOpenClothingStore={() => setClothingStoreOpen(true)}
         onOpenFurnitureShop={() => setFurnitureShopOpen(true)}
+        onOpenBank={(atmId) => { setBankAtm(atmId); setBankOpen(true); }}
         travelRequest={travelRequest}
         onEnterGuestRoom={handleEnterGuestRoom}
         onOpenCloset={() => { setAvatarStudioMode('closet'); setAvatarModalOpen(true); }}
-        onOpenBathroomMirror={() => { setAvatarStudioMode('hair'); setAvatarModalOpen(true); }}
-        onOpenSalon={() => { setAvatarStudioMode('hair'); setAvatarModalOpen(true); }}
+        onOpenBathroomMirror={() => { setAvatarStudioMode('mirror'); setAvatarModalOpen(true); }}
+        onOpenSalon={() => { setAvatarStudioMode('salon'); setAvatarModalOpen(true); }}
         onOpenElevator={() => setElevatorModalOpen(true)}
         onUnlockRoomDoor={handleUnlockRoomDoor}
         onUnlockHallwayDoor={handleUnlockHallwayDoor}
@@ -2129,8 +2141,9 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onEditRoom={() => handleModeSwitch('edit')}
         onOpenCityMap={() => setCityMapOpen(true)}
         onOpenRoomSettings={() => setRoomSettingsOpen(true)}
-        onOpenAvatar={() => setAvatarModalOpen(true)}
+        onOpenAvatar={() => { setAvatarStudioMode('studio'); setAvatarModalOpen(true); }}
         onOpenShop={() => setShopOpen(true)}
+        onOpenBank={() => { setBankAtm(undefined); setBankOpen(true); }}
         onOpenWorlds={() => setWorldsOpen(true)}
         onOpenAuth={() => setAuthOpen(true)}
         onOpenControls={openWorldControls}
@@ -2165,6 +2178,11 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         open={shopOpen}
         onClose={() => setShopOpen(false)}
         readOnly={session.status === 'guest'}
+      />
+      <BankModal
+        open={bankOpen && session.status !== 'guest'}
+        onClose={() => setBankOpen(false)}
+        atmId={bankAtm}
       />
       <WorldsModal
         open={worldsOpen && session.status !== 'guest'}
@@ -2255,12 +2273,60 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       <AvatarModal
         open={avatarModalOpen}
         mode={avatarStudioMode}
-        outfitStorageKey={session.status === 'online' ? (session.user?.id ?? 'account') : `guest_${session.guestName ?? 'visitor'}`}
         config={avatarConfig}
+        wallet={session.wallet}
         ownedClothing={session.inventory
           .filter((entry) => entry.kind === 'clothing')
           .map((entry) => entry.catalogId)}
-        onChange={setAvatarConfig}
+        outfits={session.status === 'online' ? session.outfits : localOutfits}
+        onApply={(next) => setAvatarConfig(next)}
+        onMakeover={async (next) => {
+          const result = await session.makeover(next);
+          setAvatarConfig(result.profile.avatar);
+          showHint(
+            result.charged > 0
+              ? `Character Makeover complete · 元 ${result.charged} spent`
+              : 'Character appearance is already up to date'
+          );
+        }}
+        onSaveOutfit={async (name, avatar) => {
+          const config = {
+            topStyle: avatar.topStyle,
+            topColor: avatar.topColor,
+            bottomStyle: avatar.bottomStyle ?? 'jeans',
+            bottomColor: avatar.bottomColor,
+            shoeColor: avatar.shoeColor,
+            accessory: avatar.accessory,
+            jewelry: avatar.jewelry ?? 'none',
+            carry: avatar.carry ?? 'none',
+          } as const;
+          if (session.status === 'online') {
+            await session.saveOutfit(name, config);
+            return;
+          }
+          const saved: SavedOutfit = {
+            id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            name,
+            config,
+            createdAt: Date.now(),
+          };
+          setLocalOutfits((current) => {
+            const next = [saved, ...current];
+            try { localStorage.setItem('loftlife_outfits_local_v2', JSON.stringify(next)); } catch { /* device storage is optional */ }
+            return next;
+          });
+        }}
+        onDeleteOutfit={async (id) => {
+          if (session.status === 'online') {
+            await session.deleteOutfit(id);
+            return;
+          }
+          setLocalOutfits((current) => {
+            const next = current.filter((outfit) => outfit.id !== id);
+            try { localStorage.setItem('loftlife_outfits_local_v2', JSON.stringify(next)); } catch { /* device storage is optional */ }
+            return next;
+          });
+        }}
         onClose={() => setAvatarModalOpen(false)}
       />
 

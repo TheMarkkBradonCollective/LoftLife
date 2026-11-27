@@ -29,7 +29,7 @@ Other scripts:
 | `npm run build` | Production build to `dist/` |
 | `npm run assets:previews` | Render every catalog preview PNG from its actual 3D model (`--force`, `--only=`, `--category=`) |
 | `npm run assets:check` | Re-validate every catalog image against the model signature that produced it |
-| `npm test` | 157 integration/acceptance checks: HTTP API, permissions, economy, parties, voice signalling, transit seats, Cloudflare-issued identity, two-client city movement, 64-player capacity, the shipping Worker/Durable Object path, and the catalog/preview pipeline |
+| `npm test` | 170 integration/acceptance checks: HTTP API, permissions, CUBITS/TG-Banking/cash, economy, parties, voice signalling, transit seats, Cloudflare-issued identity, two-client city movement, 64-player capacity, the shipping Worker/Durable Object path, and the catalog/preview pipeline |
 | `npm run lint` | `tsc --noEmit` |
 
 Catalog assets are generated, not hand-drawn: `shared/catalog/expansion.mjs` is the single record of
@@ -75,6 +75,32 @@ split and the pieces that still need a live Neon sign-in test.
 
 ---
 
+## Product vision
+
+**LoftLife is a living 3D social gaming world.** Its guiding principles are:
+
+- **Explore a world, not a lobby:** a coherent, believable city with districts, streets, landmarks,
+  destinations and interiors designed to feel connected.
+- **Play without forced roleplay:** players choose how to spend their time; roleplay is not required
+  to enjoy the world.
+- **Interact with the world:** visible objects and places should be evaluated for meaningful,
+  consistent interactions rather than serving only as decoration.
+- **Give every destination a purpose:** locations should offer something to explore, something to
+  interact with, or something to do with other players.
+- **Create and share:** customizable characters, personal spaces, buildable destinations and
+  collaborative experiences are core gameplay, not side features.
+- **Make multiplayer feel alive:** accurate presence, synchronized movement and interactions,
+  proximity voice, parties and shared activities must work reliably across devices.
+
+The design shorthand is **FiveM-inspired world immersion + HighRise-inspired social creativity +
+LoftLife gameplay and interaction**. These are inspirations, not templates to copy.
+
+See the new root [`plan.md`](plan.md) for the complete product vision, design rules, feature pillars,
+known gaps, priorities and long-term roadmap. The more implementation-specific status remains in
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+---
+
 ## What works right now
 
 **Game (pre-existing, preserved)**
@@ -93,9 +119,12 @@ split and the pieces that still need a live Neon sign-in test.
 **Online (added in this build)**
 - Accounts, sessions, rate limiting; first account on a fresh database becomes admin.
 - Persistent character, wardrobe ownership, suite decoration, inventory, wallet.
-- Economy: **YUANZI (元子)** and **TONGBAO (通宝)**, append-only ledger, idempotent purchases,
-  a server-priced shop (**344 world assets** + 6 wardrobe pieces, prices read from the shared
-  catalog), a live per-item 3D inspector in the shop, and a daily reward.
+- Economy: **CUBITS** digital wallet, **TG-Banking** account + payment card, physical cash, ATMs
+  at Hotel Plaza and Market Hall, and a server-priced general store accepting wallet, card or cash.
+- Legacy **YUANZI (元子)** and **TONGBAO (通宝)** wallets, append-only ledger, idempotent purchases
+  and a daily reward remain intact. No exchange rate or automatic conversion is applied.
+- Furniture/wardrobe shop: **344 world assets** + 6 wardrobe pieces at shared-catalog prices, with
+  transparent previews, search, category filters and a live per-item 3D inspector.
 - Player-owned worlds: create, decorate, publish, five access modes
   (public / private / invite-only / friends-only / collaborative), collaborator build rights.
 - Friends, friend requests, blocking, player search, city chat, direct messages, proximity chat
@@ -147,7 +176,7 @@ deployment steps but was not run here (no bucket credentials in this environment
 server/            API + realtime (plain ESM JavaScript, no build step)
   db.mjs           SQLite schema, transactions, audit log
   auth.mjs         scrypt passwords, sessions, rate limiting
-  economy.mjs      wallets, ledger, shop, purchases, daily reward
+  economy.mjs      wallets, ledger, TG-Banking, cash/ATMs, shops, daily reward
   worlds.mjs       suites + player worlds, access rules, collaborators
   social.mjs       profiles, friends, blocks, chat, reports
   parties.mjs      in-memory party object, invites, membership

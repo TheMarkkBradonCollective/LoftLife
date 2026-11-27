@@ -2,7 +2,17 @@
  * Typed client for the LoftLife API. All requests are same-origin (/api) and
  * proxied by Vite in development, so there is no CORS surface.
  */
-import type { AvatarConfig, LightingMood, PlacedItem, RoomSurfaceConfig } from '../game/types';
+import type {
+  AccessoryId,
+  AvatarConfig,
+  BottomStyleId,
+  CarryId,
+  JewelryId,
+  LightingMood,
+  PlacedItem,
+  RoomSurfaceConfig,
+  TopStyleId,
+} from '../game/types';
 
 const TOKEN_KEY = 'loftlife_session_token_v1';
 
@@ -73,6 +83,66 @@ export interface Profile {
 export interface Wallet {
   yuanzi: number;
   tongbao: number;
+  cubits: number;
+  cash: number;
+}
+
+export interface BankAccount {
+  accountNumber: string;
+  balance: number;
+  cardLast4: string;
+  cardStatus: string;
+  cardBrand: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface BankPayment {
+  id: string;
+  kind: 'deposit' | 'withdrawal' | 'payment';
+  method: 'wallet' | 'card' | 'cash';
+  amount: number;
+  currency: 'cubits';
+  merchant: string | null;
+  ref: string | null;
+  atmId: string | null;
+  createdAt: number;
+}
+
+export interface BankOverview {
+  account: BankAccount;
+  card: { brand: string; last4: string; status: string; number: string };
+  wallet: Wallet;
+  payments: BankPayment[];
+  atms: Array<{ id: string; label: string; district: string }>;
+  limits: { minAmount: number; maxAmount: number; dailyLimit: number };
+}
+
+/** Wardrobe-only content of a saved outfit; foundations are never included. */
+export interface OutfitConfig {
+  topStyle: TopStyleId;
+  topColor: string;
+  bottomStyle: BottomStyleId;
+  bottomColor: string;
+  shoeColor: string;
+  accessory: AccessoryId;
+  jewelry: JewelryId;
+  carry: CarryId;
+}
+
+export interface SavedOutfit {
+  id: string;
+  name: string;
+  config: OutfitConfig;
+  createdAt: number;
+}
+
+export interface MakeoverResult {
+  profile: Profile;
+  wallet: Wallet;
+  charged: number;
+  duplicate: boolean;
+  changed: string[];
 }
 
 export interface InventoryEntry {
@@ -287,13 +357,14 @@ export type WorldBuildOp =
 
 export interface ShopEntry {
   id: string;
-  kind: 'furniture' | 'clothing';
+  kind: 'furniture' | 'clothing' | 'general';
   price: number;
-  currency: 'yuanzi' | 'tongbao';
+  currency: 'yuanzi' | 'tongbao' | 'cubits';
   label?: string;
   category?: string;
   subcategory?: string;
   description?: string;
+  merchant?: string;
   /** Transparent catalog preview rendered from the item's own 3D model. */
   preview?: string | null;
 }
@@ -327,7 +398,8 @@ export interface FriendEntry {
 
 export interface LedgerEntry {
   id: string;
-  currency: 'yuanzi' | 'tongbao';
+  currency: 'yuanzi' | 'tongbao' | 'cubits' | 'cash';
+  account?: 'wallet' | 'bank' | 'cash';
   delta: number;
   balanceAfter: number;
   reason: string;
@@ -451,7 +523,9 @@ export const api = {
       user: SessionUser;
       profile: Profile;
       wallet: Wallet;
+      bank?: BankOverview;
       inventory: InventoryEntry[];
+      outfits: SavedOutfit[];
       suite: SuiteState;
     }>('/auth/me'),
 
@@ -470,16 +544,54 @@ export const api = {
     voice?: VoicePreferences;
   }) => request<Profile>('/profile', { method: 'PATCH', body }),
 
-  shop: () => request<{ furniture: ShopEntry[]; clothing: ShopEntry[] }>('/shop', { auth: false }),
+  shop: () =>
+    request<{ furniture: ShopEntry[]; clothing: ShopEntry[]; general: ShopEntry[] }>('/shop', {
+      auth: false,
+    }),
 
-  purchase: (catalogId: string, idempotencyKey: string) =>
+  /** Paid foundational makeover; the server owns the price and the idempotency. */
+  characterMakeover: (avatar: AvatarConfig, idempotencyKey: string) =>
+    request<MakeoverResult>('/character/makeover', {
+      method: 'POST',
+      body: { avatar, idempotencyKey },
+    }),
+
+  outfits: () => request<SavedOutfit[]>('/outfits'),
+
+  saveOutfit: (name: string, config: OutfitConfig) =>
+    request<SavedOutfit>('/outfits', { method: 'POST', body: { name, config } }),
+
+  deleteOutfit: (id: string) =>
+    request<{ deleted: boolean; id: string }>(`/outfits/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+
+  purchase: (catalogId: string, idempotencyKey: string, paymentMethod: 'wallet' | 'card' | 'cash' = 'wallet') =>
     request<{
       item: ShopEntry;
       duplicate: boolean;
       wallet: Wallet;
+      bank?: BankAccount;
+      receipt?: BankPayment;
       inventory: InventoryEntry[];
-      ledgerId: string;
-    }>('/economy/purchase', { method: 'POST', body: { catalogId, idempotencyKey } }),
+      ledgerId?: string;
+    }>('/economy/purchase', { method: 'POST', body: { catalogId, idempotencyKey, paymentMethod } }),
+
+  bank: () => request<BankOverview>('/bank'),
+
+  bankDeposit: (body: {
+    amount: number;
+    source: 'wallet' | 'cash';
+    atmId?: string;
+    idempotencyKey: string;
+  }) => request<BankOverview & { receipt: BankPayment; duplicate: boolean }>('/bank/deposit', { method: 'POST', body }),
+
+  bankWithdraw: (body: {
+    amount: number;
+    target: 'wallet' | 'cash';
+    atmId?: string;
+    idempotencyKey: string;
+  }) => request<BankOverview & { receipt: BankPayment; duplicate: boolean }>('/bank/withdraw', { method: 'POST', body }),
 
   claimDaily: () =>
     request<{ wallet: Wallet; nextClaimAt: number }>('/economy/daily', { method: 'POST' }),

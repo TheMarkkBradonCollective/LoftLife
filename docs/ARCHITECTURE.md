@@ -40,8 +40,10 @@ local development and automated parity tests.
 | `users` | identity, role, suspension | unique `handle`, unique `email` (case-insensitive) |
 | `sessions` | bearer tokens | stored as SHA-256 digest, 30-day TTL |
 | `profiles` | display name, avatar JSON, bio | 1:1 with user |
-| `wallets` | `yuanzi`, `tongbao` | `CHECK (>= 0)` |
-| `ledger` | append-only history | unique partial index on `idempotency_key` |
+| `wallets` | `yuanzi`, `tongbao`, `cubits`, `cash` | `CHECK (>= 0)` |
+| `ledger` | append-only history, with `account` wallet/bank/cash | unique partial index on `idempotency_key`; update/delete triggers |
+| `bank_accounts` | TG-Banking account, card and deposited CUBITS | one per user, unique account number, `balance >= 0` |
+| `bank_payments` | immutable deposits, withdrawals and card/cash receipts | append-only; unique `idempotency_key` |
 | `inventory` | furniture/clothing ownership | unique `(user, kind, catalog_id)`, `qty >= 0` |
 | `suites` | the player's hotel room | one per owner |
 | `worlds` | player-created spaces | `access` enum, `published`, `max_visitors`, `status`, `foundation`, layout JSON and revisions |
@@ -65,8 +67,10 @@ it is never trusted blindly.
 - **Input** — `server/validate.mjs` enforces enums, `#rrggbb` colours, integer grid ranges, 200-item
   cap, unique item uids, and that every `catalogId` exists in the server's shop table.
 - **Economy** — price and currency come from the server table. Balance changes only through
-  `applyLedger`, inside `BEGIN IMMEDIATE`. Negative balances are impossible (application check plus
-  SQL `CHECK`). Retries are deduplicated by idempotency key.
+  `applyLedger` / `applyBankLedger`, inside `BEGIN IMMEDIATE`. Negative balances are impossible
+  (application check plus SQL `CHECK`). Retries are deduplicated by idempotency key. CUBITS, cash
+  and bank deposits are separate accounts; cash moves require a server-known ATM id, and ledger /
+  bank-payment history is protected by append-only triggers.
 - **Permissions** — `canEnterWorld` / `canEditWorld` are shared by the REST entry check and the
   WebSocket handshake, so a client cannot bypass the check by connecting directly.
 - **Rate limits** — fixed-window per IP for auth (12/min default) and per socket for pose (30/s) and

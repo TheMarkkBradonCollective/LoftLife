@@ -63,25 +63,33 @@ function createLegGeometry(): THREE.BufferGeometry {
   return geo;
 }
 
-// Contoured human head mesh with subtle jaw/cheekbones
-function createSculptedHeadGeometry(): THREE.BufferGeometry {
+// Contoured human head mesh with subtle jaw/cheekbones. Face shape is a
+// deformation of the same normal-sized cranium so every variant shares the
+// skeleton, hair anchors and eye positions.
+function createSculptedHeadGeometry(shape: AvatarConfig['faceShape'] = 'oval'): THREE.BufferGeometry {
   const geo = new THREE.SphereGeometry(0.118, 28, 24);
   const pos = geo.attributes.position;
+  const square = shape === 'square';
+  const heart = shape === 'heart';
+  const round = shape === 'round';
   for (let i = 0; i < pos.count; i++) {
     let x = pos.getX(i);
     let y = pos.getY(i);
     let z = pos.getZ(i);
 
     // Elongate vertically into oval cranium + jaw
-    y *= 1.18;
+    y *= round ? 1.08 : 1.18;
     // Slight front-back depth
     z *= 1.05;
+    if (shape === 'square') x *= 1.04;
+    if (heart) x *= 1.02;
+    if (round) x *= 1.04;
     // Narrow lower half into jawline & chin
     if (y < 0) {
       const t = Math.min(1, -y / 0.135);
-      x *= 1 - t * 0.34;
+      x *= 1 - t * (square ? 0.16 : heart ? 0.44 : round ? 0.24 : 0.34);
       if (z > 0) {
-        z *= 1 - t * 0.12;
+        z *= 1 - t * (square ? 0.06 : 0.12);
       } else {
         z *= 1 - t * 0.38;
       }
@@ -90,6 +98,7 @@ function createSculptedHeadGeometry(): THREE.BufferGeometry {
         z += 0.012 * (t - 0.55);
       }
     }
+    if (heart && y > 0) x *= 1 + (y / 0.14) * 0.08;
     pos.setXYZ(i, x, y, z);
   }
   geo.computeVertexNormals();
@@ -98,7 +107,12 @@ function createSculptedHeadGeometry(): THREE.BufferGeometry {
 
 const SHARED_TORSO_GEO = createTorsoGeometry();
 const SHARED_LEG_GEO = createLegGeometry();
-const SHARED_HEAD_GEO = createSculptedHeadGeometry();
+const HEAD_GEOMETRIES = new Map<string, THREE.BufferGeometry>();
+function headGeometry(shape: AvatarConfig['faceShape']) {
+  const key = shape ?? 'oval';
+  if (!HEAD_GEOMETRIES.has(key)) HEAD_GEOMETRIES.set(key, createSculptedHeadGeometry(key));
+  return HEAD_GEOMETRIES.get(key)!;
+}
 
 export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
   const root = new THREE.Group();
@@ -156,6 +170,25 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
   }
 
   function rebuildAppearance(cfg: AvatarConfig) {
+    // Height and build change the same compatible skeleton. The head is
+    // counter-scaled so it stays normal-sized instead of stretching with the
+    // torso, and every clothing/accessory anchor follows automatically.
+    const heightScale = { petite: 0.93, average: 1, tall: 1.07 }[cfg.height ?? 'average'];
+    const buildScale = { slim: 0.93, average: 1, athletic: 1.04, curvy: 1.08 }[cfg.build ?? 'average'];
+    const preset = {
+      balanced: { width: 1, shoulder: 1, hip: 1 },
+      soft: { width: 1.02, shoulder: 0.97, hip: 1.04 },
+      athletic: { width: 1.03, shoulder: 1.06, hip: 0.98 },
+      broad: { width: 1.06, shoulder: 1.08, hip: 1.02 },
+    }[cfg.bodyPreset ?? 'balanced'];
+    const bodyWidth = buildScale * preset.width;
+    bodyPivot.scale.set(1, heightScale, 1);
+    pelvis.scale.set(bodyWidth, 1, bodyWidth);
+    headPivot.scale.set(1 / bodyWidth, 1, 1 / bodyWidth);
+    leftArmPivot.position.x = -0.205 * preset.shoulder;
+    rightArmPivot.position.x = 0.205 * preset.shoulder;
+    leftLegPivot.position.x = -0.092 * preset.hip;
+    rightLegPivot.position.x = 0.092 * preset.hip;
     clearGroup(torso);
     torso.add(headPivot, leftArmPivot, rightArmPivot);
     clearGroup(headPivot);
@@ -243,6 +276,7 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
     // --- Contoured Upper Torso ---
     const chest = new THREE.Mesh(SHARED_TORSO_GEO, topMat);
     chest.position.y = 0.045;
+    chest.scale.x = preset.shoulder / preset.width;
     torso.add(chest);
 
     // Style-specific tailoring
@@ -560,7 +594,7 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
     }
 
     // --- Sculpted Human Head & Realistic Facial Features ---
-    const head = new THREE.Mesh(SHARED_HEAD_GEO, skinMat);
+    const head = new THREE.Mesh(headGeometry(cfg.faceShape), skinMat);
     head.position.y = 0.145;
     headPivot.add(head);
 
@@ -598,14 +632,26 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
     const browHeight = browStyle === 'bold' ? 0.008 : browStyle === 'thin' ? 0.003 : 0.0055;
     const browTilt = browStyle === 'arched' ? 0.13 : 0.06;
 
+    const eyeShape = cfg.eyeShape ?? 'almond';
     const buildEye = (x: number): THREE.Mesh => {
       const eyeGroup = new THREE.Group();
       eyeGroup.position.set(x, 0.162, 0.108);
       eyeGroup.rotation.y = x < 0 ? -0.18 : 0.18;
+      if (eyeShape === 'upturned') eyeGroup.rotation.z = x < 0 ? -0.09 : 0.09;
 
       const sclera = new THREE.Mesh(new THREE.SphereGeometry(0.016, 12, 10), scleraMat);
-      sclera.scale.set(1.15, 0.72, 0.48);
+      if (eyeShape === 'round') sclera.scale.set(1.05, 0.95, 0.48);
+      else if (eyeShape === 'hooded') sclera.scale.set(1.18, 0.58, 0.48);
+      else if (eyeShape === 'upturned') sclera.scale.set(1.2, 0.66, 0.48);
+      else sclera.scale.set(1.15, 0.72, 0.48);
       eyeGroup.add(sclera);
+
+      if (eyeShape === 'hooded') {
+        const lid = new THREE.Mesh(new THREE.SphereGeometry(0.019, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), skinMat);
+        lid.scale.set(1.05, 0.55, 0.55);
+        lid.position.set(0, 0.006, 0.001);
+        eyeGroup.add(lid);
+      }
 
       const iris = new THREE.Mesh(new THREE.SphereGeometry(0.0095, 12, 10), irisMat);
       iris.scale.set(1, 1, 0.45);
@@ -639,6 +685,52 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
     lips.rotation.z = Math.PI / 2;
     lips.position.set(0, 0.088, 0.11);
     headPivot.add(lips);
+
+    // --- Facial details (paid foundation) ---
+    const facialDetail = cfg.facialDetail ?? 'none';
+    if (facialDetail === 'freckles') {
+      const freckleMat = new THREE.MeshStandardMaterial({
+        color: skinColor.clone().multiplyScalar(0.78),
+        roughness: 0.8,
+      });
+      for (const [fx, fy] of [
+        [-0.062, 0.108], [-0.046, 0.118], [-0.028, 0.11], [-0.012, 0.12],
+        [0.062, 0.108], [0.046, 0.118], [0.028, 0.11], [0.012, 0.12],
+        [-0.036, 0.101], [0.036, 0.101],
+      ]) {
+        const dot = new THREE.Mesh(new THREE.SphereGeometry(0.0028, 6, 5), freckleMat);
+        dot.position.set(fx, fy, 0.107 + (0.12 - Math.abs(fx)) * 0.22);
+        headPivot.add(dot);
+      }
+    } else if (facialDetail === 'beauty_mark') {
+      const mark = new THREE.Mesh(
+        new THREE.SphereGeometry(0.0032, 6, 5),
+        new THREE.MeshStandardMaterial({ color: 0x4a2c22, roughness: 0.75 })
+      );
+      mark.position.set(0.062, 0.098, 0.117);
+      headPivot.add(mark);
+    } else if (facialDetail === 'scar') {
+      const scar = new THREE.Mesh(
+        new THREE.BoxGeometry(0.0025, 0.026, 0.002),
+        new THREE.MeshStandardMaterial({ color: skinColor.clone().multiplyScalar(0.7), roughness: 0.6 })
+      );
+      scar.position.set(-0.058, 0.145, 0.113);
+      scar.rotation.z = 0.32;
+      headPivot.add(scar);
+    } else if (facialDetail === 'blush') {
+      const blushMat = new THREE.MeshStandardMaterial({
+        color: skinColor.clone().lerp(new THREE.Color('#d9757f'), 0.36),
+        roughness: 0.7,
+        transparent: true,
+        opacity: 0.7,
+      });
+      for (const bx of [-0.072, 0.072]) {
+        const patch = new THREE.Mesh(new THREE.SphereGeometry(0.02, 10, 8), blushMat);
+        patch.scale.set(1.1, 0.5, 0.18);
+        patch.position.set(bx, 0.115, 0.103);
+        headPivot.add(patch);
+      }
+    }
 
     // --- Facial hair ---
     const facialHair = cfg.facialHair ?? 'none';
@@ -676,13 +768,15 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
     }
 
     // --- Volumetric Realistic Hair Styles ---
+    // The shared scalp cap stops above the brow line. Style-specific volumes
+    // add fringe and length below it, so eyes and facial features stay visible.
     const hairCap = new THREE.Mesh(
-      new THREE.SphereGeometry(0.126, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.58),
+      new THREE.SphereGeometry(0.126, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.47),
       hairMat
     );
-    hairCap.scale.set(1.03, 1.15, 1.08);
-    hairCap.position.set(0, 0.16, -0.012);
-    hairCap.rotation.x = -0.22;
+    hairCap.scale.set(1.03, 1.12, 1.08);
+    hairCap.position.set(0, 0.168, -0.012);
+    hairCap.rotation.x = -0.12;
     headPivot.add(hairCap);
 
     if (cfg.hairStyle === 'bob') {

@@ -1,35 +1,115 @@
-import React, { useEffect, useState } from 'react';
-import { X, Check, Lock } from 'lucide-react';
-import { HAIR_COLORS, OUTFIT_COLORS } from '../game/catalog';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  ArrowLeft,
+  Check,
+  ChevronRight,
+  CircleDollarSign,
+  DoorClosed,
+  Droplets,
+  Eye,
+  Footprints,
+  Grid2X2,
+  Lock,
+  Moon,
+  Scissors,
+  Shirt,
+  Sparkles,
+  Sun,
+  Trash2,
+  UserRound,
+  WandSparkles,
+  X,
+} from 'lucide-react';
+import { HAIR_COLORS, OUTFIT_COLORS, SKIN_TONES } from '../game/catalog';
+import { CHARACTER_MAKEOVER, DEFAULT_AVATAR } from '../../shared/character.mjs';
 import { sfx } from '../game/audio';
-import { api, type ShopEntry } from '../net/api';
+import { api, type SavedOutfit, type ShopEntry, type Wallet } from '../net/api';
 import type {
   AccessoryId,
   AvatarConfig,
+  BodyPresetId,
   BottomStyleId,
+  BuildId,
   CarryId,
   EyebrowStyleId,
+  EyeShapeId,
   EyeStyleId,
+  FaceShapeId,
+  FacialDetailId,
   FacialHairId,
   HairStyleId,
+  HeightId,
   JewelryId,
   MakeupStyleId,
   TopStyleId,
 } from '../game/types';
+import { CharacterPreview } from './CharacterPreview';
+
+export type StudioMode = 'mirror' | 'salon' | 'closet' | 'studio';
+type Category = 'body' | 'face' | 'hair' | 'makeup' | 'wardrobe' | 'outfits';
 
 interface AvatarModalProps {
   open: boolean;
   config: AvatarConfig;
-  mode: 'hair' | 'closet';
-  outfitStorageKey: string;
-  /** Clothing ids the account owns; unowned pieces are locked in the studio. */
+  mode: StudioMode;
   ownedClothing?: string[];
-  onChange: (next: AvatarConfig) => void;
+  outfits?: SavedOutfit[];
+  wallet?: Wallet;
+  /** Applies a free change (hair, makeup, outfit). */
+  onApply: (next: AvatarConfig) => void | Promise<void>;
+  /** Runs the paid foundational service. */
+  onMakeover: (next: AvatarConfig) => Promise<void>;
+  onSaveOutfit: (name: string, config: AvatarConfig) => Promise<void>;
+  onDeleteOutfit: (id: string) => Promise<void>;
   onClose: () => void;
 }
 
-/** Always-free basics so a new character is never stuck in a locked state. */
-const FREE_CLOTHING = new Set(['tee', 'none']);
+const MAKEOVER_PRICE = CHARACTER_MAKEOVER.price;
+const FOUNDATIONAL_FIELDS: (keyof AvatarConfig)[] = [
+  'skinTone',
+  'bodyPreset',
+  'height',
+  'build',
+  'faceShape',
+  'eyeShape',
+  'eyeStyle',
+  'eyebrows',
+  'facialHair',
+  'facialDetail',
+];
+const FREE_CLOTHING = new Set(['tee', 'jeans', 'none']);
+
+const MODE_META: Record<StudioMode, { title: string; subtitle: string; categories: Category[] }> = {
+  mirror: {
+    title: 'Bathroom Mirror',
+    subtitle: 'Hair and makeup changes are free in your suite.',
+    categories: ['hair', 'makeup'],
+  },
+  salon: {
+    title: 'LoftLife Salon',
+    subtitle: 'Hair and makeup are free. Foundational changes use the paid makeover service.',
+    categories: ['body', 'face', 'hair', 'makeup'],
+  },
+  closet: {
+    title: 'Bedroom Closet',
+    subtitle: 'Wear pieces you own, then save unlimited outfits to your account.',
+    categories: ['wardrobe', 'outfits'],
+  },
+  studio: {
+    title: 'Character Studio',
+    subtitle: 'Preview the full look. Foundational changes require a paid Character Makeover.',
+    categories: ['body', 'face', 'hair', 'makeup'],
+  },
+};
+
+const CATEGORY_META: Record<Category, { label: string; icon: React.ReactNode }> = {
+  body: { label: 'Body', icon: <UserRound className="h-3.5 w-3.5" /> },
+  face: { label: 'Face', icon: <Eye className="h-3.5 w-3.5" /> },
+  hair: { label: 'Hair', icon: <Scissors className="h-3.5 w-3.5" /> },
+  makeup: { label: 'Makeup', icon: <Droplets className="h-3.5 w-3.5" /> },
+  wardrobe: { label: 'Wardrobe', icon: <Shirt className="h-3.5 w-3.5" /> },
+  outfits: { label: 'Outfits', icon: <Grid2X2 className="h-3.5 w-3.5" /> },
+};
 
 const HAIR_STYLES: { id: HairStyleId; label: string }[] = [
   { id: 'bob', label: 'Classic Bob' },
@@ -112,13 +192,13 @@ const EYEBROWS: { id: EyebrowStyleId; label: string }[] = [
   { id: 'arched', label: 'Arched' },
 ];
 
-const EYE_STYLES: { id: EyeStyleId; label: string }[] = [
-  { id: 'warm_brown', label: 'Warm Brown' },
-  { id: 'deep_brown', label: 'Deep Brown' },
-  { id: 'hazel', label: 'Hazel' },
-  { id: 'green', label: 'Green' },
-  { id: 'blue', label: 'Blue' },
-  { id: 'gray', label: 'Gray' },
+const EYE_STYLES: { id: EyeStyleId; label: string; swatch: string }[] = [
+  { id: 'warm_brown', label: 'Warm Brown', swatch: '#6b4b2f' },
+  { id: 'deep_brown', label: 'Deep Brown', swatch: '#3b2418' },
+  { id: 'hazel', label: 'Hazel', swatch: '#7a6a35' },
+  { id: 'green', label: 'Green', swatch: '#3f6b4a' },
+  { id: 'blue', label: 'Blue', swatch: '#3b6f9e' },
+  { id: 'gray', label: 'Gray', swatch: '#6b7a86' },
 ];
 
 const FACIAL_HAIR: { id: FacialHairId; label: string }[] = [
@@ -129,507 +209,829 @@ const FACIAL_HAIR: { id: FacialHairId; label: string }[] = [
   { id: 'beard', label: 'Full Beard' },
 ];
 
-interface SavedOutfit {
-  id: string;
-  name: string;
-  topStyle: TopStyleId;
-  topColor: string;
-  bottomStyle?: BottomStyleId;
-  bottomColor: string;
-  shoeColor: string;
-  accessory: AccessoryId;
-  jewelry?: JewelryId;
-  carry?: CarryId;
-}
+const BODY_PRESETS: { id: BodyPresetId; label: string; hint: string }[] = [
+  { id: 'balanced', label: 'Balanced', hint: 'Even shoulders and hips' },
+  { id: 'soft', label: 'Soft', hint: 'Rounded silhouette' },
+  { id: 'athletic', label: 'Athletic', hint: 'Broader shoulders' },
+  { id: 'broad', label: 'Broad', hint: 'Solid frame' },
+];
+
+const HEIGHTS: { id: HeightId; label: string; hint: string }[] = [
+  { id: 'petite', label: 'Petite', hint: 'Shorter frame' },
+  { id: 'average', label: 'Average', hint: 'Standard height' },
+  { id: 'tall', label: 'Tall', hint: 'Longer frame' },
+];
+
+const BUILDS: { id: BuildId; label: string; hint: string }[] = [
+  { id: 'slim', label: 'Slim', hint: 'Lean build' },
+  { id: 'average', label: 'Average', hint: 'Natural build' },
+  { id: 'athletic', label: 'Athletic', hint: 'Toned build' },
+  { id: 'curvy', label: 'Curvy', hint: 'Fuller build' },
+];
+
+const FACE_SHAPES: { id: FaceShapeId; label: string }[] = [
+  { id: 'oval', label: 'Oval' },
+  { id: 'square', label: 'Square' },
+  { id: 'heart', label: 'Heart' },
+  { id: 'round', label: 'Round' },
+];
+
+const EYE_SHAPES: { id: EyeShapeId; label: string }[] = [
+  { id: 'almond', label: 'Almond' },
+  { id: 'round', label: 'Round' },
+  { id: 'hooded', label: 'Hooded' },
+  { id: 'upturned', label: 'Upturned' },
+];
+
+const FACIAL_DETAILS: { id: FacialDetailId; label: string }[] = [
+  { id: 'none', label: 'None' },
+  { id: 'freckles', label: 'Freckles' },
+  { id: 'beauty_mark', label: 'Beauty mark' },
+  { id: 'scar', label: 'Scar' },
+  { id: 'blush', label: 'Blush' },
+];
+
+const MAKEUP: { id: MakeupStyleId; label: string; hint: string }[] = [
+  { id: 'none', label: 'None', hint: 'Bare' },
+  { id: 'natural', label: 'Natural', hint: 'Soft definition' },
+  { id: 'soft', label: 'Soft', hint: 'Warm glow' },
+  { id: 'bold', label: 'Bold', hint: 'Statement look' },
+];
+
+const BOTTOM_COLORS = [
+  { label: 'Denim Navy', hex: '#364152' },
+  { label: 'Charcoal', hex: '#26282e' },
+  { label: 'Khaki', hex: '#c7b08e' },
+  { label: 'Olive', hex: '#556652' },
+  { label: 'Cream', hex: '#e8e2d7' },
+  { label: 'Rust', hex: '#9e5440' },
+];
+
+const SHOE_COLORS = [
+  { label: 'White', hex: '#eae4d8' },
+  { label: 'Black', hex: '#26282e' },
+  { label: 'Tan', hex: '#c7b08e' },
+  { label: 'Brown', hex: '#7a5236' },
+  { label: 'Olive', hex: '#556652' },
+  { label: 'Burgundy', hex: '#7a2632' },
+  { label: 'Blue', hex: '#3b5c86' },
+  { label: 'Pink', hex: '#d697a0' },
+];
+
+const outfitFrom = (avatar: AvatarConfig) => ({
+  topStyle: avatar.topStyle,
+  topColor: avatar.topColor,
+  bottomStyle: avatar.bottomStyle ?? 'jeans',
+  bottomColor: avatar.bottomColor,
+  shoeColor: avatar.shoeColor,
+  accessory: avatar.accessory,
+  jewelry: avatar.jewelry ?? 'none',
+  carry: avatar.carry ?? 'none',
+});
 
 export const AvatarModal: React.FC<AvatarModalProps> = ({
   open,
   config,
   mode,
-  outfitStorageKey,
   ownedClothing = [],
-  onChange,
+  outfits = [],
+  wallet,
+  onApply,
+  onMakeover,
+  onSaveOutfit,
+  onDeleteOutfit,
   onClose,
 }) => {
-  const [clothingShop, setClothingShop] = useState<ShopEntry[]>([]);
+  const meta = MODE_META[mode];
+  const [draft, setDraft] = useState<AvatarConfig>(config);
+  const [category, setCategory] = useState<Category>(meta.categories[0]);
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    try {
+      return localStorage.getItem('loftlife_studio_theme') === 'light' ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
+  const [shop, setShop] = useState<ShopEntry[]>([]);
   const [outfitName, setOutfitName] = useState('My Outfit');
-  const [savedOutfits, setSavedOutfits] = useState<SavedOutfit[]>([]);
-  useEffect(() => {
-    try { const raw = localStorage.getItem(`loftlife_outfits_${outfitStorageKey}`); setSavedOutfits(raw ? JSON.parse(raw) : []); }
-    catch { setSavedOutfits([]); }
-  }, [outfitStorageKey]);
-  const persistOutfits = (next: SavedOutfit[]) => {
-    setSavedOutfits(next);
-    try { localStorage.setItem(`loftlife_outfits_${outfitStorageKey}`, JSON.stringify(next)); } catch { /* Keep the current session usable if storage is full. */ }
-  };
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
 
-  // Prices are server-owned; the studio only renders them.
+  useEffect(() => {
+    if (!open) return;
+    setDraft(config);
+    setCategory(MODE_META[mode].categories[0]);
+    setError(null);
+    setFlash(null);
+  }, [open, config, mode]);
+
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     api
       .shop()
       .then((result) => {
-        if (!cancelled) setClothingShop(result.clothing ?? []);
+        if (!cancelled) setShop(result.clothing ?? []);
       })
       .catch(() => {
-        // Without prices the lock badges simply stay price-less.
+        // Prices are a display convenience; ownership still comes from the account.
       });
     return () => {
       cancelled = true;
     };
   }, [open]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('loftlife_studio_theme', theme);
+    } catch {
+      // A blocked storage API only loses the preference.
+    }
+  }, [theme]);
+
+  const owned = useMemo(() => new Set([...FREE_CLOTHING, ...ownedClothing]), [ownedClothing]);
+  const isLocked = (id: string) => !owned.has(id);
+  const priceFor = (id: string) => shop.find((entry) => entry.id === id);
+
+  const foundationChanged = useMemo(
+    () =>
+      FOUNDATIONAL_FIELDS.filter(
+        (field) => (draft[field] ?? DEFAULT_AVATAR[field]) !== (config[field] ?? DEFAULT_AVATAR[field])
+      ),
+    [draft, config]
+  );
+
   if (!open) return null;
 
-  const owned = new Set([...FREE_CLOTHING, ...ownedClothing]);
-  const isLocked = (id: string) => !owned.has(id);
-  const priceFor = (id: string) => clothingShop.find((entry) => entry.id === id);
+  const dark = theme === 'dark';
+  const shell = dark
+    ? 'bg-[#0a0f0c] text-slate-100 border-white/12'
+    : 'bg-[#fbfaf6] text-slate-900 border-black/10';
+  const header = dark ? 'border-white/10 bg-[#0e1511]' : 'border-black/8 bg-white';
+  const muted = dark ? 'text-slate-400' : 'text-slate-500';
+  const panel = dark ? 'border-white/10 bg-white/[0.035]' : 'border-black/8 bg-white';
+  const subtle = dark ? 'bg-white/[0.04]' : 'bg-black/[0.035]';
 
   const update = (patch: Partial<AvatarConfig>) => {
     sfx.playClick();
-    onChange({ ...config, ...patch });
+    setError(null);
+    setDraft((current) => ({ ...current, ...patch }));
+  };
+
+  const optionClass = (active: boolean, locked = false) =>
+    `min-h-[38px] rounded-xl border px-2.5 py-2 text-left text-[11px] font-semibold transition ${
+      active
+        ? 'border-[#39ff14] bg-[#39ff14] text-[#061006] shadow-[0_0_0_1px_rgba(57,255,20,.35)]'
+        : locked
+          ? dark
+            ? 'cursor-not-allowed border-white/6 bg-black/20 text-slate-600'
+            : 'cursor-not-allowed border-black/5 bg-black/[0.03] text-slate-400'
+          : dark
+            ? 'border-white/10 bg-[#111814] text-slate-200 hover:border-[#39ff14]/45'
+            : 'border-black/8 bg-white text-slate-700 hover:border-emerald-500/50'
+    }`;
+
+  const swatchClass = (active: boolean) =>
+    `relative flex h-8 w-8 items-center justify-center rounded-full border-2 transition ${
+      active ? 'scale-110 border-[#39ff14] ring-2 ring-[#39ff14]/30' : 'border-white/25 hover:scale-105'
+    }`;
+
+  const apply = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      if (foundationChanged.length > 0) {
+        await onMakeover(draft);
+        setFlash('Character Makeover complete');
+      } else {
+        await onApply(draft);
+      }
+      sfx.playClick();
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not save the character');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveOutfit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await onSaveOutfit(outfitName.trim() || 'My Outfit', draft);
+      setFlash('Outfit saved to your account');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not save the outfit');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteOutfit = async (id: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await onDeleteOutfit(id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not delete the outfit');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const wearOutfit = (outfit: SavedOutfit) => {
+    update({
+      topStyle: outfit.config.topStyle,
+      topColor: outfit.config.topColor,
+      bottomStyle: outfit.config.bottomStyle,
+      bottomColor: outfit.config.bottomColor,
+      shoeColor: outfit.config.shoeColor,
+      accessory: outfit.config.accessory,
+      jewelry: outfit.config.jewelry,
+      carry: outfit.config.carry,
+    });
+    setFlash(`Wearing ${outfit.name}`);
+  };
+
+  const sectionTitle = (title: string, hint?: string) => (
+    <div className="mb-2 flex items-end justify-between gap-3">
+      <span className="text-[10px] font-bold uppercase tracking-[0.16em]">{title}</span>
+      {hint && <span className={`text-right text-[10px] ${muted}`}>{hint}</span>}
+    </div>
+  );
+
+  const renderOptionGrid = <T extends string>(
+    items: { id: T; label: string; hint?: string }[],
+    current: T | undefined,
+    onPick: (id: T) => void,
+    columns = 3
+  ) => (
+    <div className={`grid gap-1.5 ${columns === 4 ? 'grid-cols-4' : columns === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          onClick={() => onPick(item.id)}
+          className={optionClass(current === item.id)}
+        >
+          <span className="block leading-tight">{item.label}</span>
+          {item.hint && <span className="mt-0.5 block text-[9px] font-normal opacity-65">{item.hint}</span>}
+        </button>
+      ))}
+    </div>
+  );
+
+  const renderSwatches = (
+    colors: { label: string; hex: string }[],
+    active: string,
+    onPick: (hex: string) => void
+  ) => (
+    <div className="flex flex-wrap gap-2">
+      {colors.map((color) => (
+        <button
+          key={color.hex}
+          type="button"
+          title={color.label}
+          aria-label={color.label}
+          onClick={() => onPick(color.hex)}
+          className={swatchClass(active === color.hex)}
+          style={{ backgroundColor: color.hex }}
+        >
+          {active === color.hex && (
+            <Check className={`h-3.5 w-3.5 ${color.hex === '#eae4d8' || color.hex === '#e8e2d7' ? 'text-slate-900' : 'text-white'}`} />
+          )}
+        </button>
+      ))}
+    </div>
+  );
+
+  const clothingButton = (id: string, label: string) => {
+    const locked = isLocked(id);
+    const price = priceFor(id);
+    return (
+      <button
+        key={id}
+        type="button"
+        disabled={locked}
+        title={locked ? `Buy ${label} at LoftLife Threads` : label}
+        onClick={() => {
+          if (!locked) update({ topStyle: id as TopStyleId });
+        }}
+        className={optionClass(draft.topStyle === id, locked)}
+      >
+        <span className="flex items-center gap-1.5">
+          {locked && <Lock className="h-3 w-3 shrink-0" />}
+          <span className="truncate">{label}</span>
+        </span>
+        {locked && price && (
+          <span className="mt-0.5 block text-[9px] font-normal text-amber-500">
+            {price.currency === 'tongbao' ? '宝' : '元'} {price.price}
+          </span>
+        )}
+      </button>
+    );
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-end p-4 sm:p-6 pointer-events-none">
-      <div className="pointer-events-auto w-full max-w-[380px] max-h-[86vh] flex flex-col bg-[#0b100d] text-slate-100 rounded-2xl border border-[#39ff14]/40 neon-panel-glow overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#39ff14]/15 bg-[#0f1612]">
-          <div>
-            <h2 className="font-display text-lg font-semibold tracking-tight text-white">
-              {mode === 'hair' ? 'Bathroom Mirror' : 'Bedroom Closet'}
-            </h2>
-            <p className="text-xs text-slate-400">{mode === 'hair' ? 'Change your hairstyle and hair color' : 'Change into clothing you already own'}</p>
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/65 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+      <div
+        className={`flex h-full w-full flex-col overflow-hidden border shadow-2xl sm:h-[min(880px,92vh)] sm:max-w-[1120px] sm:rounded-3xl lg:grid lg:grid-cols-[minmax(0,1fr)_440px] ${shell}`}
+      >
+        {/* Live preview — top on phones, left on desktop. */}
+        <aside className={`relative flex flex-col gap-2 border-b p-3 lg:border-b-0 lg:border-r ${dark ? 'border-white/8 bg-[#07100b]' : 'border-black/8 bg-[#f0efe9]'}`}>
+          <CharacterPreview
+            key={theme}
+            config={draft}
+            theme={theme}
+            className="h-[230px] w-full sm:h-[300px] lg:h-auto lg:flex-1"
+          />
+          <div className={`flex flex-wrap items-center justify-between gap-2 rounded-xl px-3 py-2 text-[10px] ${subtle}`}>
+            <span className={muted}>
+              {mode === 'closet' ? 'Owned wardrobe' : 'Normal proportions · shared skeleton'}
+            </span>
+            <span className={`font-semibold ${dark ? 'text-[#8dff79]' : 'text-emerald-700'}`}>
+              {mode === 'closet' ? `${owned.size} wardrobe options` : 'Live 3D'}
+            </span>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              sfx.playClick();
-              onClose();
-            }}
-            aria-label="Close character studio"
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+        </aside>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-          {mode === 'hair' && (
-            <>
-          {/* Hairstyle */}
-          <div className="space-y-2">
-            <span className="block text-xs font-medium text-slate-300">Hairstyle</span>
-            <div className="grid grid-cols-3 gap-1.5">
-              {HAIR_STYLES.map((style) => {
-                const active = config.hairStyle === style.id;
-                return (
-                  <button
-                    key={style.id}
-                    type="button"
-                    onClick={() => update({ hairStyle: style.id })}
-                    className={`px-2.5 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap truncate ${
-                      active
-                        ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]'
-                        : 'bg-[#101713] text-slate-200 border-white/12 hover:border-[#39ff14]/45'
-                    }`}
-                  >
-                    {style.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Hair Color */}
-          <div className="space-y-2">
-            <span className="block text-xs font-medium text-slate-300">Hair Color</span>
-            <div className="flex flex-wrap gap-2">
-              {HAIR_COLORS.map((c) => {
-                const active = config.hairColor === c.hex;
-                return (
-                  <button
-                    key={c.hex}
-                    type="button"
-                    title={c.label}
-                    onClick={() => update({ hairColor: c.hex })}
-                    className={`w-7 h-7 rounded-full border-2 flex items-center justify-center transition-transform ${
-                      active
-                        ? 'border-[#39ff14] scale-110 ring-2 ring-[#39ff14]/35'
-                        : 'border-white/20 hover:scale-105'
-                    }`}
-                    style={{ backgroundColor: c.hex }}
-                  >
-                    {active && <Check className="w-3 h-3 text-white drop-shadow" />}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Makeup is a cosmetic preset changed at the bathroom mirror. */}
-          <div className="space-y-2">
-            <span className="block text-xs font-medium text-slate-300">Makeup</span>
-            <div className="grid grid-cols-3 gap-2">
-              {([{id:'none',label:'None'},{id:'natural',label:'Natural'},{id:'soft',label:'Soft'},{id:'bold',label:'Bold'}] as {id:MakeupStyleId;label:string}[]).map((style) => (
-                <button key={style.id} type="button" onClick={() => update({ makeupStyle: style.id })} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${(config.makeupStyle ?? 'natural') === style.id ? 'border-[#39ff14] bg-[#39ff14] text-[#051205]' : 'border-white/12 bg-[#101713] text-slate-200'}`}>{style.label}</button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-2 border-t border-white/10 pt-4">
-            <span className="block text-xs font-medium text-slate-300">Eyebrow Shape</span>
-            <div className="grid grid-cols-4 gap-1.5">
-              {EYEBROWS.map((style) => {
-                const active = (config.eyebrows ?? 'natural') === style.id;
-                return (
-                  <button
-                    key={style.id}
-                    type="button"
-                    onClick={() => update({ eyebrows: style.id })}
-                    className={`rounded-lg border px-1.5 py-2 text-[10px] font-semibold ${active ? 'border-[#39ff14] bg-[#39ff14] text-[#051205]' : 'border-white/12 bg-[#101713] text-slate-200'}`}
-                  >
-                    {style.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <span className="block text-xs font-medium text-slate-300">Eye Color</span>
-            <div className="grid grid-cols-3 gap-1.5">
-              {EYE_STYLES.map((style) => {
-                const active = (config.eyeStyle ?? 'warm_brown') === style.id;
-                const swatch = { warm_brown: '#6b4b2f', deep_brown: '#3b2418', hazel: '#7a6a35', green: '#3f6b4a', blue: '#3b6f9e', gray: '#6b7a86' }[style.id];
-                return (
-                  <button
-                    key={style.id}
-                    type="button"
-                    onClick={() => update({ eyeStyle: style.id })}
-                    className={`flex items-center gap-1.5 rounded-lg border px-2 py-2 text-[10px] font-semibold ${active ? 'border-[#39ff14] bg-[#39ff14]/15 text-white' : 'border-white/12 bg-[#101713] text-slate-300'}`}
-                  >
-                    <span className="h-2.5 w-2.5 rounded-full ring-1 ring-white/30" style={{ backgroundColor: swatch }} />
-                    <span className="truncate">{style.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <span className="block text-xs font-medium text-slate-300">Facial Hair</span>
-            <div className="grid grid-cols-3 gap-1.5">
-              {FACIAL_HAIR.map((style) => {
-                const active = (config.facialHair ?? 'none') === style.id;
-                return (
-                  <button
-                    key={style.id}
-                    type="button"
-                    onClick={() => update({ facialHair: style.id })}
-                    className={`rounded-lg border px-2 py-2 text-[10px] font-semibold ${active ? 'border-[#39ff14] bg-[#39ff14] text-[#051205]' : 'border-white/12 bg-[#101713] text-slate-200'}`}
-                  >
-                    {style.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-            </>
-          )}
-
-          {mode === 'closet' && (
-            <>
-          {/* Top Outfit Style */}
-          <div className="space-y-2">
-            <span className="block text-xs font-medium text-slate-300">Top Style</span>
-            <div className="grid grid-cols-2 gap-1.5">
-              {TOP_STYLES.map((top) => {
-                const active = config.topStyle === top.id;
-                const locked = isLocked(top.id);
-                const price = priceFor(top.id);
-                return (
-                  <button
-                    key={top.id}
-                    type="button"
-                    disabled={locked}
-                    title={
-                      locked
-                        ? `Buy ${top.label} in the Wardrobe shop${price ? ` (${price.currency === 'tongbao' ? '宝' : '元'} ${price.price})` : ''}`
-                        : top.label
-                    }
-                    onClick={() => {
-                      if (locked) return;
-                      update({ topStyle: top.id });
-                    }}
-                    className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap flex items-center justify-center gap-1 ${
-                      active
-                        ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]'
-                        : locked
-                        ? 'bg-[#0c110e] text-slate-500 border-white/8 cursor-not-allowed'
-                        : 'bg-[#101713] text-slate-200 border-white/12 hover:border-[#39ff14]/45'
-                    }`}
-                  >
-                    {locked && <Lock className="w-3 h-3" />}
-                    <span>{top.label}</span>
-                    {locked && price && (
-                      <span className="text-[10px] font-mono-tabular text-amber-300/80">
-                        {price.currency === 'tongbao' ? '宝' : '元'} {price.price}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Top Color */}
-          <div className="space-y-2">
-            <span className="block text-xs font-medium text-slate-300">Top Color</span>
-            <div className="flex flex-wrap gap-2">
-              {OUTFIT_COLORS.map((c) => {
-                const active = config.topColor === c.hex;
-                return (
-                  <button
-                    key={c.hex}
-                    type="button"
-                    title={c.label}
-                    onClick={() => update({ topColor: c.hex })}
-                    className={`w-7 h-7 rounded-full border-2 flex items-center justify-center transition-transform ${
-                      active
-                        ? 'border-[#39ff14] scale-110 ring-2 ring-[#39ff14]/35'
-                        : 'border-white/20 hover:scale-105'
-                    }`}
-                    style={{ backgroundColor: c.hex }}
-                  >
-                    {active && (
-                      <Check
-                        className={`w-3 h-3 ${
-                          c.hex === '#eae4d8' ? 'text-slate-900' : 'text-white'
-                        }`}
-                      />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Bottom Style */}
-          <div className="space-y-2">
-            <span className="block text-xs font-medium text-slate-300">Bottom Style</span>
-            <div className="grid grid-cols-3 gap-1.5">
-              {BOTTOM_STYLES.map((style) => {
-                const active = (config.bottomStyle ?? 'jeans') === style.id;
-                return (
-                  <button
-                    key={style.id}
-                    type="button"
-                    onClick={() => update({ bottomStyle: style.id })}
-                    className={`rounded-lg border px-1.5 py-2 text-[10px] font-semibold ${active ? 'border-[#39ff14] bg-[#39ff14] text-[#051205]' : 'border-white/12 bg-[#101713] text-slate-200'}`}
-                  >
-                    {style.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Bottoms Color */}
-          <div className="space-y-2">
-            <span className="block text-xs font-medium text-slate-300">Bottoms Color</span>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { label: 'Denim Navy', hex: '#364152' },
-                { label: 'Charcoal', hex: '#26282e' },
-                { label: 'Khaki', hex: '#c7b08e' },
-                { label: 'Olive', hex: '#556652' },
-                { label: 'Cream', hex: '#e8e2d7' },
-                { label: 'Rust', hex: '#9e5440' },
-              ].map((c) => {
-                const active = config.bottomColor === c.hex;
-                return (
-                  <button
-                    key={c.hex}
-                    type="button"
-                    title={c.label}
-                    onClick={() => update({ bottomColor: c.hex })}
-                    className={`w-7 h-7 rounded-full border-2 flex items-center justify-center transition-transform ${
-                      active
-                        ? 'border-[#39ff14] scale-110 ring-2 ring-[#39ff14]/35'
-                        : 'border-white/20 hover:scale-105'
-                    }`}
-                    style={{ backgroundColor: c.hex }}
-                  >
-                    {active && (
-                      <Check
-                        className={`w-3 h-3 ${
-                          c.hex === '#e8e2d7' ? 'text-slate-900' : 'text-white'
-                        }`}
-                      />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Shoes */}
-          <div className="space-y-2">
-            <span className="block text-xs font-medium text-slate-300">Shoe Color</span>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { label: 'White', hex: '#eae4d8' },
-                { label: 'Black', hex: '#26282e' },
-                { label: 'Tan', hex: '#c7b08e' },
-                { label: 'Brown', hex: '#7a5236' },
-                { label: 'Olive', hex: '#556652' },
-                { label: 'Burgundy', hex: '#7a2632' },
-                { label: 'Blue', hex: '#3b5c86' },
-                { label: 'Pink', hex: '#d697a0' },
-              ].map((c) => {
-                const active = config.shoeColor === c.hex;
-                return (
-                  <button
-                    key={c.hex}
-                    type="button"
-                    title={c.label}
-                    onClick={() => update({ shoeColor: c.hex })}
-                    className={`w-7 h-7 rounded-full border-2 flex items-center justify-center ${active ? 'border-[#39ff14] scale-110 ring-2 ring-[#39ff14]/35' : 'border-white/20 hover:scale-105'}`}
-                    style={{ backgroundColor: c.hex }}
-                  >
-                    {active && <Check className={`w-3 h-3 ${c.hex === '#eae4d8' ? 'text-slate-900' : 'text-white'}`} />}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Accessory */}
-          <div className="space-y-2">
-            <span className="block text-xs font-medium text-slate-300">Accessory</span>
-            <div className="grid grid-cols-2 gap-1.5">
-              {ACCESSORIES.map((acc) => {
-                const active = config.accessory === acc.id;
-                const locked = isLocked(acc.id);
-                const price = priceFor(acc.id);
-                return (
-                  <button
-                    key={acc.id}
-                    type="button"
-                    disabled={locked}
-                    title={
-                      locked
-                        ? `Buy ${acc.label} in the Wardrobe shop${price ? ` (${price.currency === 'tongbao' ? '宝' : '元'} ${price.price})` : ''}`
-                        : acc.label
-                    }
-                    onClick={() => {
-                      if (locked) return;
-                      update({ accessory: acc.id });
-                    }}
-                    className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap flex items-center justify-center gap-1 ${
-                      active
-                        ? 'bg-[#39ff14] text-[#051205] border-[#39ff14]'
-                        : locked
-                        ? 'bg-[#0c110e] text-slate-500 border-white/8 cursor-not-allowed'
-                        : 'bg-[#101713] text-slate-200 border-white/12 hover:border-[#39ff14]/45'
-                    }`}
-                  >
-                    {locked && <Lock className="w-3 h-3" />}
-                    <span>{acc.label}</span>
-                    {locked && price && (
-                      <span className="text-[10px] font-mono-tabular text-amber-300/80">
-                        {price.currency === 'tongbao' ? '宝' : '元'} {price.price}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Jewelry */}
-          <div className="space-y-2">
-            <span className="block text-xs font-medium text-slate-300">Jewelry</span>
-            <div className="grid grid-cols-3 gap-1.5">
-              {JEWELRY.map((item) => {
-                const active = (config.jewelry ?? 'none') === item.id;
-                const locked = isLocked(item.id);
-                const price = priceFor(item.id);
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    disabled={locked}
-                    title={locked ? `Buy ${item.label} at LoftLife Threads` : item.label}
-                    onClick={() => { if (!locked) update({ jewelry: item.id }); }}
-                    className={`flex items-center justify-center gap-1 rounded-lg border px-1.5 py-2 text-[10px] font-semibold ${active ? 'border-[#39ff14] bg-[#39ff14] text-[#051205]' : locked ? 'border-white/8 bg-[#0c110e] text-slate-500' : 'border-white/12 bg-[#101713] text-slate-200'}`}
-                  >
-                    {locked && <Lock className="w-3 h-3" />}
-                    <span className="truncate">{item.label}</span>
-                    {locked && price && <span className="text-[9px] text-amber-300/80">{price.currency === 'tongbao' ? '宝' : '元'}{price.price}</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Bags */}
-          <div className="space-y-2">
-            <span className="block text-xs font-medium text-slate-300">Bag / Carry</span>
-            <div className="grid grid-cols-4 gap-1.5">
-              {CARRY.map((item) => {
-                const active = (config.carry ?? 'none') === item.id;
-                const locked = isLocked(item.id);
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    disabled={locked}
-                    title={locked ? `Buy ${item.label} at LoftLife Threads` : item.label}
-                    onClick={() => { if (!locked) update({ carry: item.id }); }}
-                    className={`flex items-center justify-center gap-1 rounded-lg border px-1.5 py-2 text-[10px] font-semibold ${active ? 'border-[#39ff14] bg-[#39ff14] text-[#051205]' : locked ? 'border-white/8 bg-[#0c110e] text-slate-500' : 'border-white/12 bg-[#101713] text-slate-200'}`}
-                  >
-                    {locked && <Lock className="w-3 h-3" />}
-                    <span className="truncate">{item.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="space-y-2 border-t border-white/10 pt-4">
-            <div className="text-xs font-semibold text-slate-300">Saved Outfits</div>
-            <div className="flex gap-2">
-              <input value={outfitName} onChange={(event) => setOutfitName(event.target.value)} maxLength={32} aria-label="Outfit name" className="min-w-0 flex-1 rounded-lg border border-white/12 bg-black/30 px-3 py-2 text-xs text-white" />
-              <button type="button" onClick={() => { const name = outfitName.trim() || 'My Outfit'; persistOutfits([...savedOutfits, { id: crypto.randomUUID(), name, topStyle: config.topStyle, topColor: config.topColor, bottomStyle: config.bottomStyle, bottomColor: config.bottomColor, shoeColor: config.shoeColor, accessory: config.accessory, jewelry: config.jewelry, carry: config.carry }]); }} className="rounded-lg bg-[#39ff14] px-3 py-2 text-xs font-bold text-[#051205]">Save</button>
-            </div>
-            {savedOutfits.length === 0 ? <p className="text-[11px] text-slate-500">Save as many outfit combinations as you like on this device.</p> : savedOutfits.map((outfit) => (
-              <div key={outfit.id} className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 p-2">
-                <span className="min-w-0 flex-1 truncate text-xs text-slate-200">{outfit.name}</span>
-                <button type="button" onClick={() => update({ topStyle: outfit.topStyle, topColor: outfit.topColor, bottomStyle: outfit.bottomStyle, bottomColor: outfit.bottomColor, shoeColor: outfit.shoeColor, accessory: outfit.accessory, jewelry: outfit.jewelry, carry: outfit.carry })} className="rounded-md bg-white/10 px-2 py-1 text-[11px]">Wear</button>
-                <button type="button" aria-label={`Delete ${outfit.name}`} onClick={() => persistOutfits(savedOutfits.filter((item) => item.id !== outfit.id))} className="rounded-md bg-white/10 px-2 py-1 text-[11px] text-red-300">Delete</button>
+        <section className="flex min-h-0 flex-1 flex-col">
+          <header className={`flex items-start gap-3 border-b px-4 py-3.5 sm:px-5 ${header}`}>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h2 className="truncate font-display text-base font-bold tracking-tight">{meta.title}</h2>
+                {categoriesIncludeMakeover(meta.categories) && (
+                  <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-amber-500">
+                    Makeover
+                  </span>
+                )}
               </div>
-            ))}
-          </div>
-            </>
-          )}
-        </div>
+              <p className={`mt-0.5 text-[10px] leading-relaxed ${muted}`}>{meta.subtitle}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setTheme(dark ? 'light' : 'dark')}
+                aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
+                className={`flex h-8 w-8 items-center justify-center rounded-lg ${dark ? 'text-slate-300 hover:bg-white/10' : 'text-slate-600 hover:bg-black/5'}`}
+              >
+                {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close character studio"
+                className={`flex h-8 w-8 items-center justify-center rounded-lg ${dark ? 'text-slate-300 hover:bg-white/10' : 'text-slate-600 hover:bg-black/5'}`}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </header>
 
-        <div className="px-5 py-3 border-t border-[#39ff14]/15 bg-[#0f1612] flex justify-end">
-          <button
-            type="button"
-            onClick={() => {
-              sfx.playClick();
-              onClose();
-            }}
-            className="px-4 py-2 text-xs font-bold bg-[#39ff14] text-[#051205] rounded-lg hover:bg-[#5bff3b] transition-colors neon-btn-glow"
+          <nav
+            className={`flex shrink-0 gap-1 overflow-x-auto border-b px-3 py-2 sm:px-4 ${dark ? 'border-white/8' : 'border-black/8'}`}
+            aria-label="Character customization categories"
           >
-            Done
-          </button>
-        </div>
+            {meta.categories.map((id) => {
+              const active = category === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setCategory(id);
+                    setError(null);
+                    sfx.playClick();
+                  }}
+                  className={`flex min-h-[34px] shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-semibold transition ${
+                    active
+                      ? 'bg-[#39ff14] text-[#061006]'
+                      : dark
+                        ? 'text-slate-300 hover:bg-white/8'
+                        : 'text-slate-600 hover:bg-black/5'
+                  }`}
+                >
+                  {CATEGORY_META[id].icon}
+                  {CATEGORY_META[id].label}
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+            {(error || flash) && (
+              <div
+                className={`mb-3 rounded-xl border px-3 py-2 text-[11px] ${
+                  error
+                    ? 'border-red-400/30 bg-red-500/10 text-red-500'
+                    : 'border-emerald-400/30 bg-emerald-500/10 text-emerald-600'
+                }`}
+              >
+                {error ?? flash}
+              </div>
+            )}
+
+            {category === 'body' && (
+              <div className="space-y-5">
+                <div>
+                  {sectionTitle('Body preset', 'Affects the same compatible skeleton')}
+                  {renderOptionGrid(BODY_PRESETS, draft.bodyPreset ?? 'balanced', (id) => update({ bodyPreset: id }), 2)}
+                </div>
+                <div>
+                  {sectionTitle('Height')}
+                  {renderOptionGrid(HEIGHTS, draft.height ?? 'average', (id) => update({ height: id }))}
+                </div>
+                <div>
+                  {sectionTitle('Body build')}
+                  {renderOptionGrid(BUILDS, draft.build ?? 'average', (id) => update({ build: id }), 2)}
+                </div>
+                <div>
+                  {sectionTitle('Skin tone')}
+                  {renderSwatches(SKIN_TONES, draft.skinTone, (hex) => update({ skinTone: hex }))}
+                </div>
+                <PaidNotice dark={dark} muted={muted} />
+              </div>
+            )}
+
+            {category === 'face' && (
+              <div className="space-y-5">
+                <div>
+                  {sectionTitle('Facial structure')}
+                  {renderOptionGrid(FACE_SHAPES, draft.faceShape ?? 'oval', (id) => update({ faceShape: id }), 4)}
+                </div>
+                <div>
+                  {sectionTitle('Eye shape')}
+                  {renderOptionGrid(EYE_SHAPES, draft.eyeShape ?? 'almond', (id) => update({ eyeShape: id }), 4)}
+                </div>
+                <div>
+                  {sectionTitle('Eye colour')}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {EYE_STYLES.map((eye) => {
+                      const active = (draft.eyeStyle ?? 'warm_brown') === eye.id;
+                      return (
+                        <button
+                          key={eye.id}
+                          type="button"
+                          onClick={() => update({ eyeStyle: eye.id })}
+                          className={optionClass(active)}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/30"
+                              style={{ backgroundColor: eye.swatch }}
+                            />
+                            <span className="truncate">{eye.label}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  {sectionTitle('Eyebrows')}
+                  {renderOptionGrid(EYEBROWS, draft.eyebrows ?? 'natural', (id) => update({ eyebrows: id }), 4)}
+                </div>
+                <div>
+                  {sectionTitle('Facial details')}
+                  {renderOptionGrid(FACIAL_DETAILS, draft.facialDetail ?? 'none', (id) => update({ facialDetail: id }), 3)}
+                </div>
+                <div>
+                  {sectionTitle('Facial hair')}
+                  {renderOptionGrid(FACIAL_HAIR, draft.facialHair ?? 'none', (id) => update({ facialHair: id }), 3)}
+                </div>
+                <PaidNotice dark={dark} muted={muted} />
+              </div>
+            )}
+
+            {category === 'hair' && (
+              <div className="space-y-5">
+                <div>
+                  {sectionTitle('Hairstyle')}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {HAIR_STYLES.map((style) => (
+                      <button
+                        key={style.id}
+                        type="button"
+                        onClick={() => update({ hairStyle: style.id })}
+                        className={optionClass(draft.hairStyle === style.id)}
+                      >
+                        <span className="block truncate">{style.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  {sectionTitle('Hair colour')}
+                  {renderSwatches(HAIR_COLORS, draft.hairColor, (hex) => update({ hairColor: hex }))}
+                </div>
+                <p className={`rounded-xl border px-3 py-2 text-[10px] leading-relaxed ${panel} ${muted}`}>
+                  Hair is always free at your bathroom mirror or the salon. It is not part of the paid
+                  foundational makeover.
+                </p>
+              </div>
+            )}
+
+            {category === 'makeup' && (
+              <div className="space-y-5">
+                <div>
+                  {sectionTitle('Makeup look')}
+                  {renderOptionGrid(MAKEUP, draft.makeupStyle ?? 'none', (id) => update({ makeupStyle: id }), 2)}
+                </div>
+                <div className={`rounded-xl border p-3 ${panel}`}>
+                  <div className="flex items-start gap-2">
+                    <Sparkles className={`mt-0.5 h-4 w-4 shrink-0 ${dark ? 'text-[#8dff79]' : 'text-emerald-600'}`} />
+                    <p className={`text-[10px] leading-relaxed ${muted}`}>
+                      Makeup is a cosmetic preset you can change freely at the bathroom mirror or a
+                      professional salon. It never changes your foundational face.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {category === 'wardrobe' && (
+              <div className="space-y-5">
+                <div>
+                  {sectionTitle('Top', 'Only owned pieces can be worn')}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {TOP_STYLES.map((top) => clothingButton(top.id, top.label))}
+                  </div>
+                </div>
+                <div>
+                  {sectionTitle('Top colour')}
+                  {renderSwatches(OUTFIT_COLORS, draft.topColor, (hex) => update({ topColor: hex }))}
+                </div>
+                <div>
+                  {sectionTitle('Bottom')}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {BOTTOM_STYLES.map((bottom) => {
+                      const locked = isLocked(bottom.id);
+                      return (
+                        <button
+                          key={bottom.id}
+                          type="button"
+                          disabled={locked}
+                          onClick={() => update({ bottomStyle: bottom.id })}
+                          className={optionClass((draft.bottomStyle ?? 'jeans') === bottom.id, locked)}
+                        >
+                          {locked ? bottom.label : bottom.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  {sectionTitle('Bottom colour')}
+                  {renderSwatches(BOTTOM_COLORS, draft.bottomColor, (hex) => update({ bottomColor: hex }))}
+                </div>
+                <div>
+                  {sectionTitle('Shoes')}
+                  {renderSwatches(SHOE_COLORS, draft.shoeColor, (hex) => update({ shoeColor: hex }))}
+                </div>
+                <div>
+                  {sectionTitle('Accessory')}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {ACCESSORIES.map((acc) => {
+                      const locked = isLocked(acc.id);
+                      return (
+                        <button
+                          key={acc.id}
+                          type="button"
+                          disabled={locked}
+                          onClick={() => update({ accessory: acc.id })}
+                          className={optionClass(draft.accessory === acc.id, locked)}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            {locked && <Lock className="h-3 w-3" />}
+                            {acc.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  {sectionTitle('Jewelry')}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {JEWELRY.map((item) => {
+                      const locked = isLocked(item.id);
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          disabled={locked}
+                          onClick={() => update({ jewelry: item.id })}
+                          className={optionClass((draft.jewelry ?? 'none') === item.id, locked)}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            {locked && <Lock className="h-3 w-3" />}
+                            {item.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  {sectionTitle('Bag / carry')}
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {CARRY.map((item) => {
+                      const locked = isLocked(item.id);
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          disabled={locked}
+                          onClick={() => update({ carry: item.id })}
+                          className={optionClass((draft.carry ?? 'none') === item.id, locked)}
+                        >
+                          <span className="flex items-center justify-center gap-1">
+                            {locked && <Lock className="h-3 w-3" />}
+                            {item.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <p className={`rounded-xl border px-3 py-2 text-[10px] leading-relaxed ${panel} ${muted}`}>
+                  <Lock className="mr-1 inline h-3 w-3" />
+                  Locked pieces are purchased at LoftLife Threads. Ownership follows your account to
+                  every device.
+                </p>
+              </div>
+            )}
+
+            {category === 'outfits' && (
+              <div className="space-y-4">
+                <div className={`rounded-xl border p-3 ${panel}`}>
+                  {sectionTitle('Save current outfit', `${outfits.length} saved`)}
+                  <div className="flex gap-2">
+                    <input
+                      value={outfitName}
+                      onChange={(event) => setOutfitName(event.target.value)}
+                      maxLength={32}
+                      aria-label="Outfit name"
+                      className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-xs outline-none ${
+                        dark
+                          ? 'border-white/12 bg-black/30 text-white focus:border-[#39ff14]/60'
+                          : 'border-black/10 bg-white text-slate-900 focus:border-emerald-500'
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void saveOutfit()}
+                      className="rounded-lg bg-[#39ff14] px-3 py-2 text-xs font-bold text-[#061006] disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                  </div>
+                  <p className={`mt-2 text-[10px] ${muted}`}>
+                    Unlimited outfits, synced to your account. Foundations are not saved in an outfit.
+                  </p>
+                </div>
+
+                {outfits.length === 0 ? (
+                  <div className={`rounded-xl border border-dashed px-4 py-8 text-center ${panel}`}>
+                    <Shirt className={`mx-auto h-6 w-6 ${muted}`} />
+                    <p className={`mt-2 text-xs font-semibold ${muted}`}>No saved outfits yet</p>
+                    <p className={`mt-1 text-[10px] ${muted}`}>Build a look and save it here.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {outfits.map((outfit) => (
+                      <div key={outfit.id} className={`flex items-center gap-2 rounded-xl border p-2.5 ${panel}`}>
+                        <span
+                          className="h-8 w-8 shrink-0 rounded-lg border border-white/20"
+                          style={{
+                            background: `linear-gradient(135deg, ${outfit.config.topColor} 0 50%, ${outfit.config.bottomColor} 50% 100%)`,
+                          }}
+                          aria-hidden="true"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs font-semibold">{outfit.name}</span>
+                          <span className={`block truncate text-[9px] ${muted}`}>
+                            {outfit.config.topStyle.replace(/_/g, ' ')} · {outfit.config.bottomStyle.replace(/_/g, ' ')}
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => wearOutfit(outfit)}
+                          className={`rounded-lg px-2.5 py-1.5 text-[10px] font-bold ${
+                            dark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-black/5 text-slate-800 hover:bg-black/10'
+                          }`}
+                        >
+                          Wear
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          aria-label={`Delete ${outfit.name}`}
+                          onClick={() => void deleteOutfit(outfit.id)}
+                          className="rounded-lg p-1.5 text-red-400 hover:bg-red-500/10 disabled:opacity-40"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <footer className={`shrink-0 border-t px-4 py-3 sm:px-5 ${header}`}>
+            {foundationChanged.length > 0 && (
+              <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2">
+                <span className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-600">
+                  <WandSparkles className="h-3.5 w-3.5" />
+                  Foundational change: {foundationChanged.map((field) => String(field)).join(', ')}
+                </span>
+                <span className="shrink-0 text-[10px] font-bold text-amber-600">元 {MAKEOVER_PRICE}</span>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft(config);
+                  setError(null);
+                  sfx.playClick();
+                }}
+                className={`flex min-h-[38px] items-center gap-1.5 rounded-xl px-3 text-[11px] font-semibold ${
+                  dark ? 'text-slate-300 hover:bg-white/8' : 'text-slate-600 hover:bg-black/5'
+                }`}
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Reset
+              </button>
+              <span className={`ml-auto hidden text-[10px] sm:block ${muted}`}>
+                {wallet ? `元 ${wallet.yuanzi} · 宝 ${wallet.tongbao}` : 'Offline character'}
+              </span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void apply()}
+                className="flex min-h-[38px] flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#39ff14] px-4 text-xs font-bold text-[#061006] transition hover:bg-[#5bff3b] disabled:opacity-50 sm:flex-none"
+              >
+                {busy ? (
+                  'Saving…'
+                ) : foundationChanged.length > 0 ? (
+                  <>
+                    <CircleDollarSign className="h-3.5 w-3.5" />
+                    Makeover · 元 {MAKEOVER_PRICE}
+                  </>
+                ) : (
+                  <>
+                    Apply changes
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </>
+                )}
+              </button>
+              {mode === 'closet' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    sfx.playClick();
+                    onClose();
+                  }}
+                  className={`flex min-h-[38px] items-center gap-1.5 rounded-xl px-3 text-[11px] font-semibold ${
+                    dark ? 'text-slate-300 hover:bg-white/8' : 'text-slate-600 hover:bg-black/5'
+                  }`}
+                  title="Leave the closet"
+                >
+                  <DoorClosed className="h-3.5 w-3.5" />
+                  Done
+                </button>
+              )}
+            </div>
+          </footer>
+        </section>
       </div>
     </div>
   );
 };
+
+function categoriesIncludeMakeover(categories: Category[]) {
+  return categories.includes('body') || categories.includes('face');
+}
+
+function PaidNotice({ dark, muted }: { dark: boolean; muted: string }) {
+  return (
+    <div
+      className={`flex items-start gap-2 rounded-xl border px-3 py-2 ${
+        dark ? 'border-amber-400/20 bg-amber-400/[0.06]' : 'border-amber-500/20 bg-amber-50'
+      }`}
+    >
+      <Footprints className={`mt-0.5 h-4 w-4 shrink-0 ${dark ? 'text-amber-400' : 'text-amber-600'}`} />
+      <p className={`text-[10px] leading-relaxed ${muted}`}>
+        Foundational features are a paid customization. After creation, changing them applies a{' '}
+        <strong className={dark ? 'text-amber-300' : 'text-amber-700'}>元 {MAKEOVER_PRICE} Character Makeover</strong>.
+        Hair and makeup remain free.
+      </p>
+    </div>
+  );
+}
