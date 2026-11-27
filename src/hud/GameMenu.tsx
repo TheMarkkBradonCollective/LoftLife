@@ -249,7 +249,7 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
       return;
     }
     let cancelled = false;
-    api.adminConsole().then(() => {
+    api.adminAccess().then(() => {
       if (!cancelled) setAdminAvailable(true);
     }).catch(() => {
       if (!cancelled) setAdminAvailable(false);
