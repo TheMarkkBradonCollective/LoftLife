@@ -476,6 +476,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       onSnapshot: (players, _instanceId, vehicles) => {
         const self = selfConnRef.current;
         setRemotePlayers(players.filter((player) => player.connId !== self));
+        setInstance((current) => current ? { ...current, count: players.length } : current);
         setTransitVehicles(vehicles);
         const me = players.find((player) => player.connId === self);
         if (self && me && !me.riding) {
@@ -620,7 +621,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
     };
     poll();
-    const timer = window.setInterval(poll, 30_000);
+    const timer = window.setInterval(poll, 5_000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
