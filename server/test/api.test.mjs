@@ -339,6 +339,53 @@ test('suite saves validate furniture and persist', async () => {
   assert.equal(me.json.suite.mood, 'night');
 });
 
+test('multi-storey suites persist levels and per-storey finishes', async () => {
+  const account = await newAccount();
+  const body = {
+    name: 'Stacked Loft',
+    items: [
+      { uid: 'g1', catalogId: 'plush_sofa', gx: 2, gz: 2, rot: 0, color: '#e6dfd3' },
+      { uid: 'u1', catalogId: 'plush_sofa', gx: 2, gz: 2, rot: 0, color: '#e6dfd3', level: 1 },
+      { uid: 's1', catalogId: 'stairs_straight', gx: 5, gz: 5, rot: 0, color: '#e6dfd3' },
+    ],
+    surfaces: {
+      floor: 'terrazzo',
+      wall: 'sage_plaster',
+      floors: [
+        { floor: 'terrazzo', wall: 'sage_plaster' },
+        { floor: 'concrete', wall: 'charcoal_loft' },
+      ],
+    },
+    mood: 'night',
+  };
+  const saved = await api('PUT', '/api/suite', { token: account.token, body });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.json.surfaces.floors.length, 2);
+
+  const me = await api('GET', '/api/auth/me', { token: account.token });
+  const levels = me.json.suite.items.map((item) => item.level).sort();
+  assert.deepEqual(levels, [0, 0, 1]);
+  assert.equal(me.json.suite.surfaces.floors[1].floor, 'concrete');
+
+  const tooHigh = await api('PUT', '/api/suite', {
+    token: account.token,
+    body: {
+      ...body,
+      items: [{ uid: 'x1', catalogId: 'plush_sofa', gx: 1, gz: 1, rot: 0, color: '#e6dfd3', level: 4 }],
+    },
+  });
+  assert.equal(tooHigh.status, 400);
+
+  const badStyle = await api('PUT', '/api/suite', {
+    token: account.token,
+    body: {
+      ...body,
+      surfaces: { ...body.surfaces, floors: [{ floor: 'bogus', wall: 'warm_chalk' }] },
+    },
+  });
+  assert.equal(badStyle.status, 400);
+});
+
 test('world access modes gate entry and editing', async () => {
   const owner = await newAccount();
   const friend = await newAccount();

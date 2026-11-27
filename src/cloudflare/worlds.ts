@@ -1,4 +1,5 @@
 import { EXPANSION_PRICES } from '../../shared/catalog/expansion.mjs';
+import { MAX_LEVELS } from '../../shared/building.mjs';
 import { invitationsAllowedWith } from './platform';
 import {
   DEFAULT_FOUNDATION_ID,
@@ -122,7 +123,7 @@ async function view(sql: Sql, world: World, user: User | null, state = false) {
   }
   return result;
 }
-function sanitizeState(body: Record<string, unknown>) {
+export function sanitizeState(body: Record<string, unknown>) {
   const furniture = new Set([
     'plush_sofa','sectional_sofa','lounge_chair','bar_stool','cozy_bed','dining_set','espresso_bar','dual_desk',
     'coffee_table','side_desk','record_console','media_tv','fireplace','bookshelf','arc_lamp','table_lamp',
@@ -132,7 +133,7 @@ function sanitizeState(body: Record<string, unknown>) {
   const floors = new Set(['oak_parquet','walnut_herringbone','terrazzo','concrete','boucle_carpet']);
   const walls = new Set(['warm_chalk','sage_plaster','terracotta','slate_blue','charcoal_loft','soft_blush']);
   const moods = new Set(['morning','golden','night']);
-  if (!Array.isArray(body.items) || body.items.length > 200) return null;
+  if (!Array.isArray(body.items) || body.items.length > 320) return null;
   const seen = new Set<string>();
   const items: World[] = [];
   for (let i=0;i<body.items.length;i++) {
@@ -141,13 +142,25 @@ function sanitizeState(body: Record<string, unknown>) {
     const uid = typeof raw.uid === 'string' ? raw.uid.slice(0,64) : `it_${i}`;
     if (seen.has(uid) || ![raw.gx,raw.gz,raw.rot].every(Number.isInteger)) return null;
     if (Number(raw.gx)<0 || Number(raw.gx)>14 || Number(raw.gz)<0 || Number(raw.gz)>14 || Number(raw.rot)<0 || Number(raw.rot)>3) return null;
+    const level = raw.level === undefined ? 0 : Number(raw.level);
+    if (!Number.isInteger(level) || level < 0 || level >= MAX_LEVELS) return null;
     seen.add(uid);
-    items.push({ uid, catalogId: raw.catalogId, gx: raw.gx, gz: raw.gz, rot: raw.rot, color: typeof raw.color==='string' && /^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color.toLowerCase() : '#e6dfd3', ...(raw.wall==='north'||raw.wall==='west'?{wall:raw.wall}:{}), ...(typeof raw.active==='boolean'?{active:raw.active}:{}) });
+    items.push({ uid, catalogId: raw.catalogId, gx: raw.gx, gz: raw.gz, rot: raw.rot, level, color: typeof raw.color==='string' && /^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color.toLowerCase() : '#e6dfd3', ...(raw.wall==='north'||raw.wall==='west'?{wall:raw.wall}:{}), ...(typeof raw.active==='boolean'?{active:raw.active}:{}) });
   }
   const surfaces = body.surfaces && typeof body.surfaces==='object' ? body.surfaces as World : {};
   const mood = String(body.mood ?? 'morning');
   if (!floors.has(String(surfaces.floor)) || !walls.has(String(surfaces.wall)) || !moods.has(mood)) return null;
-  return { items, surfaces: { floor: surfaces.floor, wall: surfaces.wall }, mood };
+  const rawLevels = Array.isArray(surfaces.floors) ? surfaces.floors : [];
+  if (surfaces.floors !== undefined && (rawLevels.length === 0 || rawLevels.length > MAX_LEVELS)) return null;
+  const levelStyles = rawLevels.map((entry) => {
+    const value = entry && typeof entry === 'object' ? entry as World : {};
+    return { floor: String(value.floor), wall: String(value.wall) };
+  });
+  for (const style of levelStyles) {
+    if (!floors.has(style.floor) || !walls.has(style.wall)) return null;
+  }
+  if (levelStyles[0]) levelStyles[0] = { floor: String(surfaces.floor), wall: String(surfaces.wall) };
+  return { items, surfaces: { floor: surfaces.floor, wall: surfaces.wall, floors: levelStyles }, mood };
 }
 
 export async function handleWorldRoute(request: Request, sql: Sql, user: User | null, realtime?: RealtimeBinding): Promise<Response | null> {

@@ -252,3 +252,37 @@ A release is ready when:
 ---
 
 **North star:** if players can see it, consider how they can interact with it. If they can visit it, give them something worth doing there. Build a world people want to explore together — without making roleplay mandatory.
+
+## 10. Delivery status — catalog + multi-floor build
+
+Status is literal: **Done** means implemented here and covered by an automated check; **Blocked**
+names missing external access; **Next** is unstarted. Deeper detail lives in
+[docs/CATALOG-EXPANSION.md](docs/CATALOG-EXPANSION.md) and
+[docs/BUILDING-MULTIFLOOR.md](docs/BUILDING-MULTIFLOOR.md).
+
+| Area | Status | Evidence |
+| --- | --- | --- |
+| 344-item catalog (271 new items, 95 model kinds) | Done | `shared/catalog/expansion.mjs`, `server/test/catalog-expansion.test.mjs` |
+| 1,434 transparent previews rendered from the actual models | Done | `npm run assets:check` |
+| Preview ↔ model provenance (signature + image hash) | Done | `shared/catalog/preview-manifest.json` + manifest tests |
+| Catalog search, filters, collections, live 3D inspector | Done | `src/hud/BuildPanel.tsx`, `src/components/ShopModal.tsx`, `ModelInspector.tsx` |
+| One price table for client, Node API and Cloudflare edge | Done | `server/economy.mjs`, `src/cloudflare/{economy,worker,worlds}.ts` |
+| Multi-storey construction (4 levels, per-floor styles, rooftop) | Done | `shared/building.mjs`, `src/game/floorShells.ts`, `docs/BUILDING-MULTIFLOOR.md` |
+| Stairs as storey transitions + storey-local collision | Done | `src/components/RoomViewport.tsx`, transition tests |
+| Multi-storey persistence incl. Worker parity | Done | `server/validate.mjs`, `server/test/multifloor.test.mjs`, API round-trip test |
+| Wall-run joining for structural pieces | Partial | bounding-box alignment only; no mitred curves |
+| Catalog schema + generated seed | Done, not applied | `migrations/0009_catalog_expansion.sql`, `scripts/export-catalog-sql.mjs` |
+| R2 preview upload | Blocked | `npm run assets:upload` needs `CATALOG_R2_BUCKET` + `CLOUDFLARE_API_TOKEN` |
+| Neon migration + seed | Blocked | `npm run db:seed` needs `DATABASE_URL` |
+| Cloudflare deployment | Blocked | no token here; `wrangler deploy --dry-run` passes |
+
+### Next
+
+1. Expand the clothing catalog with new garment rig geometry (shoes, swimwear, outerwear) plus
+   character-rendered previews; wire records through `shared/character.mjs`.
+2. Mitred geometry for curved/angled wall corners.
+3. Per-storey room outlines, atriums, animated stair traversal.
+4. Broadcast storey with player presence so visitors render on the right floor.
+5. Apply Neon migration/seed and upload previews to R2 once credentials exist; serve preview URLs
+   from R2 in the Worker.
+6. Physical-device validation of the storey controls and HUD on Android phones/tablets.

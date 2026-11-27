@@ -101,6 +101,17 @@ the clothing system is unchanged and a garment render would misrepresent it.
   the WebGL context on unmount or item change.
 - Catalog filtering is memoised and runs over a plain array; no per-render allocations of models.
 
+## Storage pipeline
+
+- `npm run db:seed` applies `migrations/0009_catalog_expansion.sql` and the generated seed
+  (`migrations/catalog-seed.generated.sql`) row by row, using upserts keyed on `id`. Re-running is
+  idempotent and never touches wallets, inventory or purchases.
+- `npm run assets:upload` uploads every preview plus the manifest to
+  `r2://<bucket>/catalog/v1/<category>/<file>.png` with immutable cache headers.
+- Both scripts refuse to run without their credentials and print the exact blocker; neither has
+  been applied in this environment (`DATABASE_URL`, `CATALOG_R2_BUCKET` and
+  `CLOUDFLARE_API_TOKEN` are unset), so production storage remains outstanding.
+
 ## Verification
 
 `server/test/catalog-expansion.test.mjs` (9 checks) fails the suite when any of the following is
@@ -125,13 +136,16 @@ the 9 above and all pre-existing API/multiplayer/permissions checks), `npm run a
 
 ## Known limitations
 
-- **Multi-floor editing is not implemented.** Stairs, mezzanines, balconies and railings exist as
-  correctly-scaled, placeable models, but the room editor still has one 14×14 floor per suite and
-  three placement layers (floor, rug, wall). There is no second storey, no stair-to-floor link and
-  no vertical navigation in build mode. Ceiling fixtures mount at wall height via `mount:'ceiling'`
-  rather than a real ceiling layer.
-- **Clothing was not expanded.** The 6 wardrobe pieces, rig and outfit flow are untouched; no new
-  garments, shoes or accessories were added, and clothing shows no catalog image.
+- **Multi-floor editing is implemented** for up to four storeys: per-storey finishes, real slab and
+  wall geometry, a rooftop level, storey-local collision and stairs that move the avatar between
+  floors. Remaining multi-floor limits: every storey shares the 14×14 m footprint (no atriums or
+  per-storey outlines), stair traversal is a one-storey step rather than animated climbing, and
+  visitor presence does not yet carry a storey. See
+  [BUILDING-MULTIFLOOR.md](BUILDING-MULTIFLOOR.md).
+- **Clothing was not expanded.** The existing wardrobe (14 tops, 7 bottoms, 8 accessories, 5
+  jewellery pieces, 4 bags), rig and outfit flow are untouched; no new garments, shoes, swimwear or
+  outerwear were added, and clothing shows no catalog image. This is tracked as the first *Next*
+  item in [plan.md](../plan.md).
 - **Curved/angled walls do not auto-join.** They place and rotate on the grid, but there is no
   automatic corner/edge snapping or trimming.
 - **Escalators and elevators are static models**, not moving transport. The existing tram/taxi

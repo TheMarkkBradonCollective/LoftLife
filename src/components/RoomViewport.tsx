@@ -19,6 +19,8 @@ import {
   isWorldPosWalkable,
   snapGrid,
 } from '../game/gridMath';
+import { itemsOnLevel, levelElevation } from '../../shared/building.mjs';
+import { buildFloorShell, shellSurfaceFor, type FloorShell } from '../game/floorShells';
 import {
   CITY_LAYOUT,
   getCityLocationLabel,
@@ -129,6 +131,11 @@ interface RoomViewportProps {
   mode: GameMode;
   items: PlacedItem[];
   surfaces: RoomSurfaceConfig;
+  /** Storey being edited or walked (0 = ground). */
+  buildLevel?: number;
+  /** Per-storey finishes; index 0 mirrors `surfaces`. */
+  levelFloors?: { floor: RoomSurfaceConfig['floor']; wall: RoomSurfaceConfig['wall'] }[];
+  onLevelChange?: (level: number) => void;
   mood: LightingMood;
   avatarConfig: AvatarConfig;
   activeEmote: EmoteType;
@@ -265,6 +272,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   mode,
   items,
   surfaces,
+  buildLevel = 0,
+  levelFloors,
+  onLevelChange,
   mood,
   avatarConfig,
   activeEmote,
@@ -353,7 +363,11 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     activeResident,
     viewMode,
     mode,
-    items: activeItems,
+    items: itemsOnLevel(activeItems, buildLevel),
+    itemsAll: activeItems,
+    buildLevel,
+    levelFloors,
+    onLevelChange,
     surfaces: activeSurfaces,
     mood: activeMood,
     avatarConfig,
@@ -417,7 +431,11 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     activeResident,
     viewMode,
     mode,
-    items: activeItems,
+    items: itemsOnLevel(activeItems, buildLevel),
+    itemsAll: activeItems,
+    buildLevel,
+    levelFloors,
+    onLevelChange,
     surfaces: activeSurfaces,
     mood: activeMood,
     avatarConfig,
@@ -495,6 +513,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     residentNpcRig: AvatarRig;
     remoteRigs: Map<string, RemoteRigEntry>;
     roomHandles: ReturnType<typeof buildRoomArchitecture>;
+    floorShells: Map<number, FloorShell>;
+    rebuildFloorShells: (
+      styles: { floor: RoomSurfaceConfig['floor']; wall: RoomSurfaceConfig['wall'] }[],
+      count: number,
+      active: number
+    ) => void;
     lobbyHandles: ReturnType<typeof buildHotelLobby>;
     hallwayHandles: ReturnType<typeof buildHotelHallway>;
     mainWorld: ReturnType<typeof buildMainWorld>;
@@ -689,6 +713,35 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     );
     roomContainer.add(roomHandles.roomGroup);
 
+    // Stacked storeys: real slabs, walls and railings at fixed elevations.
+    const floorShells = new Map<number, FloorShell>();
+    const rebuildFloorShells = (
+      styles: { floor: RoomSurfaceConfig['floor']; wall: RoomSurfaceConfig['wall'] }[],
+      count: number,
+      active: number
+    ) => {
+      for (const shell of floorShells.values()) shell.dispose();
+      floorShells.clear();
+      const base = {
+        floor: styles[0]?.floor ?? propsRef.current.surfaces.floor,
+        wall: styles[0]?.wall ?? propsRef.current.surfaces.wall,
+      };
+      for (let level = 1; level < count; level += 1) {
+        const shell = buildFloorShell(level, shellSurfaceFor({ ...base, floors: styles }, level), {
+          maxAnisotropy,
+          rooftop: level === count - 1,
+        });
+        shell.group.visible = level <= active;
+        floorShells.set(level, shell);
+        roomContainer.add(shell.group);
+      }
+    };
+    rebuildFloorShells(
+      propsRef.current.levelFloors ?? [propsRef.current.surfaces],
+      Math.max(1, propsRef.current.levelFloors?.length ?? 1),
+      propsRef.current.buildLevel
+    );
+
     const furnitureRoot = new THREE.Group();
     roomContainer.add(furnitureRoot);
 
@@ -811,6 +864,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       residentNpcRig,
       remoteRigs: new Map<string, RemoteRigEntry>(),
       roomHandles,
+      floorShells,
+      rebuildFloorShells,
       lobbyHandles,
       hallwayHandles,
       mainWorld,
@@ -1706,10 +1761,10 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
       if (cat.layer === 'wall') {
         const wallPlanes: { mesh: THREE.Mesh; wall: NonNullable<PlacedItem['wall']> }[] = [
-          { mesh: roomHandles.northWallRaycastPlane, wall: 'north' },
-          { mesh: roomHandles.southWallRaycastPlane, wall: 'south' },
-          { mesh: roomHandles.westWallRaycastPlane, wall: 'west' },
-          { mesh: roomHandles.eastWallRaycastPlane, wall: 'east' },
+          { mesh: wallPlaneFor('north'), wall: 'north' },
+          { mesh: wallPlaneFor('south'), wall: 'south' },
+          { mesh: wallPlaneFor('west'), wall: 'west' },
+          { mesh: wallPlaneFor('east'), wall: 'east' },
         ];
         const wallHits = raycaster.intersectObjects(wallPlanes.map((entry) => entry.mesh));
         if (wallHits.length > 0) {
@@ -1732,7 +1787,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           }
         }
       } else {
-        const floorHits = raycaster.intersectObject(roomHandles.floorRaycastPlane);
+        const floorHits = raycaster.intersectObject(activeFloorPlane());
         if (floorHits.length > 0) {
           foundHit = true;
           const pt = floorHits[0].point;
@@ -1771,6 +1826,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         rot: cat.layer === 'wall' ? wallRotationFor(wall) : rot,
         wall,
         color: '#ffffff',
+        level: propsRef.current.buildLevel,
       });
       targetGhost.visible = true;
       targetGhost.position.set(t.x, t.y + 0.01, t.z);
@@ -1784,6 +1840,20 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         }
       });
     }
+
+    const activeFloorPlane = () =>
+      floorShells.get(propsRef.current.buildLevel)?.floorPlane ?? roomHandles.floorRaycastPlane;
+    const wallPlaneFor = (side: 'north' | 'south' | 'east' | 'west') => {
+      const shell = floorShells.get(propsRef.current.buildLevel);
+      if (shell) return shell.wallPlanes[side];
+      return side === 'north'
+        ? roomHandles.northWallRaycastPlane
+        : side === 'south'
+        ? roomHandles.southWallRaycastPlane
+        : side === 'east'
+        ? roomHandles.eastWallRaycastPlane
+        : roomHandles.westWallRaycastPlane;
+    };
 
     const onPointerDown = (e: PointerEvent) => {
       downX = e.clientX;
@@ -2247,6 +2317,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
               rot: cat?.layer === 'wall' ? wallRotationFor(wall) : rot,
               wall,
               color: pColor,
+              level: propsRef.current.buildLevel,
               active: cat?.interactive ? true : undefined,
             });
           } else {
@@ -2400,7 +2471,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         }
       }
 
-      const floorHits = raycaster.intersectObject(roomHandles.floorRaycastPlane);
+      const floorHits = raycaster.intersectObject(activeFloorPlane());
       // Play View never accepts point-and-click movement; touch taps there are
       // interactions only. Isometric remains the click/tap-to-walk mode.
       if (propsRef.current.viewMode !== 'play' && floorHits.length > 0) {
@@ -2413,7 +2484,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           av.path = path;
           propsRef.current.onEmoteChange('walk');
           const dest = path[path.length - 1];
-          rippleMesh.position.set(dest.x, 0.03, dest.z);
+          rippleMesh.position.set(dest.x, 0.03 + levelElevation(propsRef.current.buildLevel), dest.z);
           rippleLife = 1.0;
           sfx.playClick();
         }
@@ -2481,6 +2552,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     }
 
     let lastStreetLabel = '';
+    let stairCooldown = 0;
 
     /** Keep rendered buses/stops in sync with the latest server state. */
     function syncTransit() {
@@ -2568,6 +2640,10 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       const currentView = propsRef.current.viewMode;
       const currentMode = propsRef.current.mode;
       const currentItems = propsRef.current.items;
+      const storeyElevation =
+        propsRef.current.location === 'room' || propsRef.current.location === 'resident_room'
+          ? levelElevation(propsRef.current.buildLevel)
+          : 0;
       const canWalk =
         !propsRef.current.modalOpen && (currentLoc !== 'room' || currentMode === 'walk');
       let isMoving = false;
@@ -2623,6 +2699,39 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         const safe = findNearestWalkable(av.x, av.z, av.x, av.z, currentLoc, currentItems);
         av.x = safe.x;
         av.z = safe.z;
+      }
+
+      // Vertical navigation: standing on a staircase on this storey climbs to
+      // the next one; a staircase on the storey below (same tile) descends.
+      stairCooldown = Math.max(0, stairCooldown - delta);
+      if (canWalk && !av.seatedUid && currentLoc === 'room' && stairCooldown === 0) {
+        const totalLevels = Math.max(1, propsRef.current.levelFloors?.length ?? 1);
+        const level = propsRef.current.buildLevel;
+        const stairAt = (candidateLevel: number) =>
+          propsRef.current.itemsAll?.find((item) => {
+            if ((item.level ?? 0) !== candidateLevel) return false;
+            const cat = getCatalogItem(item.catalogId);
+            if (!cat?.model || cat.model.kind !== 'stairs') return false;
+            const [ew, ed] = getEffectiveSize(item.catalogId, item.rot);
+            const minX = -GRID_SIZE / 2 + item.gx - 0.2;
+            const maxX = minX + ew + 0.4;
+            const minZ = -GRID_SIZE / 2 + item.gz - 0.2;
+            const maxZ = minZ + ed + 0.4;
+            return av.x > minX && av.x < maxX && av.z > minZ && av.z < maxZ;
+          });
+        const upStair = stairAt(level);
+        const downStair = level > 0 ? stairAt(level - 1) : undefined;
+        if (upStair && level + 1 < totalLevels) {
+          stairCooldown = 1.4;
+          propsRef.current.onLevelChange?.(level + 1);
+          propsRef.current.onWalkHint?.(`Climbed to Level ${level + 2}`);
+          sfx.playStep();
+        } else if (downStair && level > 0) {
+          stairCooldown = 1.4;
+          propsRef.current.onLevelChange?.(level - 1);
+          propsRef.current.onWalkHint?.(level === 1 ? 'Back on the ground floor' : `Went down to Level ${level}`);
+          sfx.playStep();
+        }
       }
 
       // 1. Input. Both views use camera-relative WASD movement; Isometric
@@ -3080,7 +3189,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         const rightZ = -Math.sin(handles.playCam.yaw);
 
         const targetX = av.x + rightX * 0.34;
-        const targetY = av.y + 1.32 + av.jumpY * 0.45;
+        const targetY = av.y + 1.32 + av.jumpY * 0.45 + storeyElevation;
         const targetZ = av.z + rightZ * 0.34;
 
         // The distance eases so Z is a smooth zoom, never a cut.
@@ -3168,6 +3277,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         _lookTarget.set(targetX, targetY, targetZ);
         camera.lookAt(_lookTarget);
       } else {
+        if (!handles.cameraAnim.active && !propsRef.current.followCharacter) {
+          const targetY = 0.85 + storeyElevation;
+          const deltaY = targetY - controls.target.y;
+          controls.target.y = THREE.MathUtils.damp(controls.target.y, targetY, 6, delta);
+          camera.position.y += deltaY * (1 - Math.exp(-6 * delta));
+        }
         if (handles.cameraAnim.active) {
           camera.position.x = THREE.MathUtils.damp(
             camera.position.x,
@@ -3218,7 +3333,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           const follow = followCamera({
             camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
             target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
-            focus: { x: av.x, y: av.y + 1.0, z: av.z },
+            focus: { x: av.x, y: av.y + 1.0 + storeyElevation, z: av.z },
             delta,
           });
           camera.position.set(follow.camera.x, follow.camera.y, follow.camera.z);
@@ -3300,7 +3415,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         }
       }
 
-      avatarRig.root.position.set(av.x, av.y, av.z);
+      avatarRig.root.position.set(av.x, av.y + (av.seatedUid ? 0 : storeyElevation), av.z);
       avatarRig.root.rotation.y = av.yaw;
       avatarRig.shadowPlane.visible = !av.seatedUid;
 
@@ -3956,6 +4071,16 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       }
     }
   }, [activeItems, movingUid, location]);
+
+  // Rebuild stacked storeys when the stack changes, and show at most the active
+  // storey plus the ones below it (upper floors never occlude the build view).
+  useEffect(() => {
+    const h = sceneHandlesRef.current;
+    if (!h) return;
+    const styles = levelFloors ?? surfaces.floors ?? [surfaces];
+    h.rebuildFloorShells(styles, Math.max(1, styles.length), buildLevel);
+    for (const [level, shell] of h.floorShells) shell.group.visible = level <= buildLevel;
+  }, [levelFloors, surfaces, buildLevel]);
 
   // Sync Placement Ghost
   useEffect(() => {

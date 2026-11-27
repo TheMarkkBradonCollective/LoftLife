@@ -5,6 +5,7 @@
  */
 import { badRequest } from './errors.mjs';
 import { isKnownFurniture } from './economy.mjs';
+import { MAX_LEVELS } from '../shared/building.mjs';
 import {
   ACCESSORIES,
   BODY_PRESETS,
@@ -71,7 +72,9 @@ export const WORLD_STATUSES = ['live', 'available', 'offline', 'build_mode', 'bu
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 const GRID_SIZE = 14;
-const MAX_ITEMS = 200;
+// A property may span up to MAX_LEVELS storeys; the cap is per property so a
+// four-floor build still has room for a full catalogue in every room.
+const MAX_ITEMS = 320;
 
 const str = (value, max) =>
   typeof value === 'string' ? value.slice(0, max) : undefined;
@@ -142,12 +145,28 @@ export function sanitizeOutfit(input) {
 }
 
 export function sanitizeSurfaces(input) {
-  if (input === undefined) return { floor: 'oak_parquet', wall: 'warm_chalk' };
+  if (input === undefined) {
+    const ground = { floor: 'oak_parquet', wall: 'warm_chalk' };
+    return { ...ground, floors: [ground] };
+  }
   if (!input || typeof input !== 'object') throw badRequest('surfaces must be an object');
-  return {
-    floor: oneOf(input.floor, FLOOR_STYLES, 'surfaces.floor'),
-    wall: oneOf(input.wall, WALL_STYLES, 'surfaces.wall'),
-  };
+  const floor = oneOf(input.floor, FLOOR_STYLES, 'surfaces.floor');
+  const wall = oneOf(input.wall, WALL_STYLES, 'surfaces.wall');
+  const rawFloors = input.floors;
+  if (rawFloors === undefined) return { floor, wall, floors: [{ floor, wall }] };
+  if (!Array.isArray(rawFloors) || rawFloors.length === 0 || rawFloors.length > MAX_LEVELS) {
+    throw badRequest(`surfaces.floors must be an array of 1..${MAX_LEVELS} levels`);
+  }
+  const floors = rawFloors.map((entry, index) => {
+    if (!entry || typeof entry !== 'object') throw badRequest(`surfaces.floors[${index}] must be an object`);
+    return {
+      floor: oneOf(entry.floor, FLOOR_STYLES, `surfaces.floors[${index}].floor`),
+      wall: oneOf(entry.wall, WALL_STYLES, `surfaces.floors[${index}].wall`),
+    };
+  });
+  // The legacy single-floor fields always describe the ground storey.
+  floors[0] = { floor, wall };
+  return { floor, wall, floors };
 }
 
 const intInRange = (value, min, max, field) => {
@@ -181,6 +200,7 @@ export function sanitizeItems(input) {
       gz: intInRange(raw.gz, 0, GRID_SIZE, `items[${index}].gz`),
       rot: intInRange(raw.rot, 0, 3, `items[${index}].rot`),
       color: hex(raw.color, '#e6dfd3'),
+      level: intInRange(raw.level ?? 0, 0, MAX_LEVELS - 1, `items[${index}].level`),
     };
     if (raw.wall === 'north' || raw.wall === 'south' || raw.wall === 'east' || raw.wall === 'west') {
       item.wall = raw.wall;
