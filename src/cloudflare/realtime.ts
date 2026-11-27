@@ -441,8 +441,7 @@ export class LoftLifeRealtime {
       }
     }
 
-    const peers = this.ctx.getWebSockets();
-    const active = peers.map((peer) => peer.deserializeAttachment() as Player | undefined).filter((p): p is Player => Boolean(p && p.instanceId === instanceId && !('pending' in (p as object))));
+    const active = this.players(instanceId);
     if (active.length >= capacity) {
       error(ws, 'instance_full', 'This instance is full');
       ws.close(1013, 'instance_full');
