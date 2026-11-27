@@ -319,7 +319,7 @@ test('worker: two guests share TheCity, see movement and city chat', async () =>
   }));
   const duplicateReady = firstMessage(duplicatePair, 'ready');
   assert.equal(duplicateReady.instance.count, 2, 'reconnecting the same account does not inflate the count');
-  assert.equal(guestA.pair.server.readyState, 3, 'the old account socket is replaced');
+  assert.equal(guestA.pair.server.readyState, 1, 'guest sessions may connect from a second device');
   const deduplicatedPresence = await durable.fetch(new Request('https://loftlife-internal/internal/presence'));
   assert.equal((await deduplicatedPresence.json()).online, 2);
 
