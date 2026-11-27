@@ -52,6 +52,8 @@ const ALLOWED_LOCATIONS = new Set([
   'hallway',
   'room',
   'resident_room',
+  'airport',
+  'clothing_store',
   'transit',
 ]);
 const LOCAL_RANGES = { whisper: 4, say: 14, shout: 35 };

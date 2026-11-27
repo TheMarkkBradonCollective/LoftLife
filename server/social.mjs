@@ -55,11 +55,17 @@ export function readProfile(userId) {
 
 /** A player may only wear clothes the account actually owns. */
 function assertWardrobeOwned(userId, avatar) {
-  if (!DEFAULT_OWNED_CLOTHING.includes(avatar.topStyle) && !ownsItem(userId, 'clothing', avatar.topStyle)) {
-    throw forbidden(`You do not own the "${avatar.topStyle}" top — buy it in the Wardrobe shop`);
-  }
-  if (!DEFAULT_OWNED_CLOTHING.includes(avatar.accessory) && !ownsItem(userId, 'clothing', avatar.accessory)) {
-    throw forbidden(`You do not own the "${avatar.accessory}" accessory`);
+  const checked = [
+    ['top', avatar.topStyle],
+    ['accessory', avatar.accessory],
+    ['jewelry', avatar.jewelry ?? 'none'],
+    ['bag', avatar.carry ?? 'none'],
+  ];
+  for (const [kind, id] of checked) {
+    if (id === 'none') continue;
+    if (!DEFAULT_OWNED_CLOTHING.includes(id) && !ownsItem(userId, 'clothing', id)) {
+      throw forbidden(`You do not own the "${id}" ${kind} — buy it in the Wardrobe shop`);
+    }
   }
 }
 

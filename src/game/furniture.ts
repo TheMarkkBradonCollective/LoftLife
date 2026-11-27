@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { buildExtraFurniture } from './furnitureExtra';
 import { createArtTexture, createRugTexture, createVinylTexture } from './textures';
 import type { PlacedItem } from './types';
 
@@ -1318,6 +1319,15 @@ export function buildFurnitureGroup(
       group.userData.neonTubeMat = tubeMat;
       break;
     }
+
+    default: {
+      const extra = buildExtraFurniture(placed.catalogId, placed, {
+        isGhost: opts.isGhost,
+        isSoftwareGl: opts.isSoftwareGl,
+      });
+      if (extra) group.add(extra);
+      break;
+    }
   }
 
   if (opts.isGhost) {
@@ -1427,5 +1437,16 @@ export function updateFurnitureAnimations(
         m.emissiveIntensity = isActive ? 0.8 : 0;
       });
     }
+  } else {
+    // Expanded collection: TVs, monitors, lamps, fire pit and mirror lighting
+    // share one generic emissive hook.
+    const mats = group.userData.emissiveMats as THREE.MeshStandardMaterial[] | undefined;
+    if (mats) {
+      mats.forEach((m) => {
+        m.emissiveIntensity = isActive ? 1.05 : 0.04;
+      });
+    }
+    const light = group.userData.light as THREE.PointLight | undefined;
+    if (light) light.intensity = isActive ? 1.8 : 0;
   }
 }

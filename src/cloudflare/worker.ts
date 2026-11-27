@@ -77,14 +77,22 @@ const STARTER_SUITE = {
 };
 const DEFAULT_AVATAR = {
   name: 'Newcomer', skinTone: '#e8b48f', hairStyle: 'bob', hairColor: '#2f2119',
-  topStyle: 'tee', topColor: '#e6dfd3', bottomColor: '#2b3a2a',
-  shoeColor: '#1b1b1b', accessory: 'none',
+  topStyle: 'tee', topColor: '#e6dfd3', bottomStyle: 'jeans', bottomColor: '#2b3a2a',
+  shoeColor: '#1b1b1b', accessory: 'none', jewelry: 'none', carry: 'none',
+  facialHair: 'none', eyebrows: 'natural', eyeStyle: 'warm_brown', makeupStyle: 'none',
 };
 const DEFAULT_CLOTHING = ['tee', 'none'];
 const AVATAR_ENUMS = {
-  hairStyle: ['bob', 'afro', 'ponytail', 'sidepart', 'buns', 'spiky'],
-  topStyle: ['hoodie', 'blazer', 'tee', 'turtleneck'],
-  accessory: ['none', 'glasses', 'headphones', 'beanie'],
+  hairStyle: ['bob', 'afro', 'ponytail', 'sidepart', 'buns', 'spiky', 'long_waves', 'buzz', 'curls', 'locs', 'pixie', 'middle_part', 'top_knot', 'shoulder_waves', 'braids', 'undercut', 'fade', 'curtain'],
+  topStyle: ['hoodie', 'blazer', 'tee', 'turtleneck', 'button_shirt', 'sweater', 'jacket', 'tank', 'varsity', 'raincoat', 'suit', 'dress', 'crop_hoodie', 'cardigan'],
+  bottomStyle: ['jeans', 'chinos', 'shorts', 'skirt', 'joggers', 'dress_pants', 'cargo'],
+  accessory: ['none', 'glasses', 'headphones', 'beanie', 'cap', 'bucket_hat', 'sunglasses', 'scarf'],
+  jewelry: ['none', 'chain', 'watch', 'earrings', 'bracelet'],
+  carry: ['none', 'backpack', 'purse', 'tote'],
+  facialHair: ['none', 'stubble', 'beard', 'goatee', 'mustache'],
+  eyebrows: ['natural', 'bold', 'thin', 'arched'],
+  eyeStyle: ['warm_brown', 'deep_brown', 'hazel', 'green', 'blue', 'gray'],
+  makeupStyle: ['none', 'natural', 'soft', 'bold'],
 };
 function safeAvatar(input: unknown, name: string) {
   const raw = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
@@ -95,12 +103,18 @@ function safeAvatar(input: unknown, name: string) {
     skinTone: hex(raw.skinTone, DEFAULT_AVATAR.skinTone),
     hairStyle: pick('hairStyle', DEFAULT_AVATAR.hairStyle),
     hairColor: hex(raw.hairColor, DEFAULT_AVATAR.hairColor),
-    makeupStyle: ['natural','soft','bold'].includes(String(raw.makeupStyle)) ? raw.makeupStyle as 'natural'|'soft'|'bold' : 'natural',
     topStyle: pick('topStyle', DEFAULT_AVATAR.topStyle),
     topColor: hex(raw.topColor, DEFAULT_AVATAR.topColor),
+    bottomStyle: pick('bottomStyle', DEFAULT_AVATAR.bottomStyle),
     bottomColor: hex(raw.bottomColor, DEFAULT_AVATAR.bottomColor),
     shoeColor: hex(raw.shoeColor, DEFAULT_AVATAR.shoeColor),
     accessory: pick('accessory', DEFAULT_AVATAR.accessory),
+    jewelry: pick('jewelry', DEFAULT_AVATAR.jewelry),
+    carry: pick('carry', DEFAULT_AVATAR.carry),
+    facialHair: pick('facialHair', DEFAULT_AVATAR.facialHair),
+    eyebrows: pick('eyebrows', DEFAULT_AVATAR.eyebrows),
+    eyeStyle: pick('eyeStyle', DEFAULT_AVATAR.eyeStyle),
+    makeupStyle: pick('makeupStyle', DEFAULT_AVATAR.makeupStyle),
   };
 }
 async function provisionGameAccount(sql: Sql, account: AccountRow, avatarInput?: unknown) {

@@ -483,8 +483,10 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     loftCenter,
     loftDoorPos,
     airportCenter,
-    airportDeparturePos,
-    airportShopPos,
+    airportDoorPos,
+    airportEntrancePos,
+    clothingStoreCenter,
+    clothingStoreDoorPos,
     salonPos,
   } = CITY_LAYOUT;
 
@@ -722,7 +724,11 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
       continue;
     }
 
-    if (blk.kind === 'loft_hotel' || blk.kind === 'airport') {
+    if (
+      blk.kind === 'loft_hotel' ||
+      blk.kind === 'airport' ||
+      blk.kind === 'clothing_store'
+    ) {
       pushSlantedPrism(sidewalkAcc, blk.uMin + 0.4, blk.uMax - 0.4, blk.zMin + 0.4, blk.zMax - 0.4, 0.14, 0.17, 6, 6, true);
       continue;
     }
@@ -1348,21 +1354,47 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     loftPortalGroup.add(storeWin);
   }
 
-  // Upper Hotel Tower (Floors 2..6)
-  const hotelUpper = new THREE.Mesh(new THREE.BoxGeometry(11.6, 17.5, 4.6), hotelFacadeMat);
-  hotelUpper.position.set(0, 12.95, -2.1);
+  // Upper Hotel Tower: floors 2..7 (six residential storeys) over the lobby.
+  // 3.4 m per storey plus the ground-floor lobby gives a believable 7-floor
+  // landmark rather than the old four-storey block.
+  const hotelUpper = new THREE.Mesh(new THREE.BoxGeometry(11.6, 20.5, 4.6), hotelFacadeMat);
+  hotelUpper.position.set(0, 14.45, -2.1);
   hotelUpper.castShadow = true;
   hotelUpper.receiveShadow = true;
   loftPortalGroup.add(hotelUpper);
 
+  // Balcony ledges mark each of the six residential floors.
+  for (let floor = 0; floor < 6; floor++) {
+    const y = 4.45 + floor * 3.4;
+    const ledge = new THREE.Mesh(new THREE.BoxGeometry(12.0, 0.16, 0.42), limestoneMat);
+    ledge.position.set(0, y, 0.22);
+    loftPortalGroup.add(ledge);
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(11.9, 0.5, 0.06), brassMat);
+    rail.position.set(0, y + 0.35, 0.4);
+    loftPortalGroup.add(rail);
+  }
+  // Vertical limestone/brass mullions give the tower a vertical rhythm.
+  for (const sx of [-5.7, 5.7]) {
+    const mullion = new THREE.Mesh(new THREE.BoxGeometry(0.22, 20.2, 0.18), brassMat);
+    mullion.position.set(sx, 14.45, 0.24);
+    loftPortalGroup.add(mullion);
+  }
+
   // Setback Penthouse Floor & Crown
   const hotelPenthouse = new THREE.Mesh(new THREE.BoxGeometry(8.8, 3.8, 3.6), hotelFacadeMat);
-  hotelPenthouse.position.set(0, 23.6, -2.1);
+  hotelPenthouse.position.set(0, 27.0, -2.1);
   loftPortalGroup.add(hotelPenthouse);
 
   const hotelCornice = new THREE.Mesh(new THREE.BoxGeometry(12.1, 0.65, 4.9), limestoneMat);
-  hotelCornice.position.set(0, 21.8, -2.1);
+  hotelCornice.position.set(0, 25.05, -2.1);
   loftPortalGroup.add(hotelCornice);
+
+  const rooftopBeacon = new THREE.Mesh(
+    new THREE.SphereGeometry(0.16, 10, 10),
+    new THREE.MeshStandardMaterial({ color: 0x39ff14, emissive: 0x39ff14, emissiveIntensity: 1.2 })
+  );
+  rooftopBeacon.position.set(0, 29.1, -2.1);
+  loftPortalGroup.add(rooftopBeacon);
 
   // Marquee Sign
   const marqueeCanvas = document.createElement('canvas');
@@ -1388,6 +1420,24 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
   );
   marqueeMesh.position.set(0, 3.55, 0.42);
   loftPortalGroup.add(marqueeMesh);
+
+  // Seven-floor / 65-suite plaque under the marquee.
+  const hotelPlaqueCanvas = document.createElement('canvas');
+  hotelPlaqueCanvas.width = 512;
+  hotelPlaqueCanvas.height = 64;
+  const hpctx = hotelPlaqueCanvas.getContext('2d')!;
+  hpctx.fillStyle = '#101613';
+  hpctx.fillRect(0, 0, 512, 64);
+  hpctx.fillStyle = '#e8dcc2';
+  hpctx.font = '600 24px sans-serif';
+  hpctx.textAlign = 'center';
+  hpctx.fillText('7 FLOORS  ·  65 SUITES  ·  LOBBY & RESIDENCES', 256, 40);
+  const plaque = new THREE.Mesh(
+    new THREE.PlaneGeometry(4.9, 0.62),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(hotelPlaqueCanvas) })
+  );
+  plaque.position.set(0, 3.02, 0.44);
+  loftPortalGroup.add(plaque);
 
   // Warm interior lobby vestibule glow
   const lobbyBack = new THREE.Mesh(
@@ -1490,6 +1540,119 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
   entryMat.position.set(0, 0.018, 0.95);
   loftPortalGroup.add(entryMat);
 
+  // Hotel forecourt: pale stone paving, clipped topiary, brass bollards,
+  // benches and flagpoles. The entrance used to open onto a bare sidewalk
+  // slab; this gives the porte-cochere a readable, lived-in arrival court.
+  const forecourtMat = new THREE.MeshStandardMaterial({
+    color: 0xb9b1a2,
+    roughness: 0.88,
+    metalness: 0.02,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  });
+  const forecourtPaving = new THREE.Mesh(new THREE.PlaneGeometry(11.4, 6.6), forecourtMat);
+  forecourtPaving.rotation.x = -Math.PI / 2;
+  forecourtPaving.position.set(0, 0.025, 3.35);
+  forecourtPaving.receiveShadow = true;
+  loftPortalGroup.add(forecourtPaving);
+
+  const planterMat = new THREE.MeshStandardMaterial({ color: 0x8e8578, roughness: 0.82 });
+  const hedgeMat = new THREE.MeshStandardMaterial({ color: 0x315b3c, roughness: 0.92 });
+  for (const sx of [-4.6, 4.6]) {
+    const planter = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.68, 1.25), planterMat);
+    planter.position.set(sx, 0.34, 2.0);
+    planter.castShadow = true;
+    planter.receiveShadow = true;
+    loftPortalGroup.add(planter);
+    const hedge = new THREE.Mesh(new THREE.IcosahedronGeometry(0.62, 1), hedgeMat);
+    hedge.scale.set(1, 1.15, 1);
+    hedge.position.set(sx, 1.05, 2.0);
+    hedge.castShadow = true;
+    loftPortalGroup.add(hedge);
+    obstacles.push({ type: 'circle', x: loftDoorPos.x + sx, z: loftDoorPos.z + 2.0, r: 0.78 });
+  }
+
+  for (const sx of [-2.65, 2.65]) {
+    for (const pz of [1.15, 2.45, 3.75]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.07, 0.92, 10), brassMat);
+      post.position.set(sx, 0.46, pz);
+      post.castShadow = true;
+      loftPortalGroup.add(post);
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 8), brassMat);
+      cap.position.set(sx, 0.94, pz);
+      loftPortalGroup.add(cap);
+    }
+  }
+
+  const benchWoodMat = new THREE.MeshStandardMaterial({ color: 0x4a3427, roughness: 0.8 });
+  for (const sx of [-5.7, 5.7]) {
+    const bench = new THREE.Group();
+    bench.position.set(sx, 0.16, 3.55);
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.09, 2.0), benchWoodMat);
+    seat.position.y = 0.4;
+    seat.castShadow = true;
+    bench.add(seat);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.5, 2.0), benchWoodMat);
+    back.position.set(sx > 0 ? 0.27 : -0.27, 0.72, 0);
+    back.castShadow = true;
+    bench.add(back);
+    for (const lz of [-0.78, 0.78]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.4, 0.08), brassMat);
+      leg.position.set(0, 0.2, lz);
+      bench.add(leg);
+    }
+    loftPortalGroup.add(bench);
+    obstacles.push({ type: 'box', x: loftDoorPos.x + sx, z: loftDoorPos.z + 3.55, hw: 0.4, hd: 1.05 });
+  }
+
+  const flagMatGreen = new THREE.MeshStandardMaterial({
+    color: 0x1f4232,
+    roughness: 0.7,
+    side: THREE.DoubleSide,
+  });
+  for (const sx of [-6.9, 6.9]) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 6.2, 10), brassMat);
+    pole.position.set(sx, 3.1, 1.2);
+    pole.castShadow = true;
+    loftPortalGroup.add(pole);
+    const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.85), flagMatGreen);
+    flag.position.set(sx + (sx > 0 ? 0.78 : -0.78), 5.55, 1.2);
+    flag.rotation.y = Math.PI / 2;
+    loftPortalGroup.add(flag);
+  }
+
+  // Brass bellhop luggage cart beside the entrance.
+  const cart = new THREE.Group();
+  cart.position.set(4.05, 0.16, 3.55);
+  const cartDeck = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.08, 0.62), hotelDarkMat);
+  cartDeck.position.y = 0.24;
+  cart.add(cartDeck);
+  for (const cx of [-0.46, 0.46]) {
+    for (const cz of [-0.27, 0.27]) {
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.06, 12), hotelDarkMat);
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(cx, 0.11, cz);
+      cart.add(wheel);
+    }
+  }
+  for (const cx of [-0.46, 0.46]) {
+    const upright = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.2, 8), brassMat);
+    upright.position.set(cx, 0.84, -0.27);
+    cart.add(upright);
+  }
+  const cartHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.95, 8), brassMat);
+  cartHandle.rotation.z = Math.PI / 2;
+  cartHandle.position.set(0, 1.42, -0.27);
+  cart.add(cartHandle);
+  const caseMat = new THREE.MeshStandardMaterial({ color: 0x7d5b3a, roughness: 0.7 });
+  const suitcase = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.4, 0.44), caseMat);
+  suitcase.position.set(0, 0.48, 0.02);
+  suitcase.castShadow = true;
+  cart.add(suitcase);
+  loftPortalGroup.add(cart);
+  obstacles.push({ type: 'box', x: loftDoorPos.x + 4.05, z: loftDoorPos.z + 3.55, hw: 0.55, hd: 0.4 });
+
   worldGroup.add(loftPortalGroup);
 
   // Obstacles & Camera Occluders for Hotel Piers + Tower
@@ -1521,7 +1684,7 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
       z0: loftDoorPos.z - 4.4,
       z1: loftDoorPos.z + 0.2,
       y0: 4.2,
-      y1: 22.0,
+      y1: 28.5,
     }
   );
 
@@ -1571,46 +1734,302 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
   obstacles.push({ type: 'box', x: djX, z: djZ - 0.2, hw: 0.8, hd: 0.4 });
 
 
-  // 10a. Walk-up airport terminal at the edge of TheCity.
+  // 10a. TheCity International Airport — a three-block terminal complex.
+  // The entrance faces north toward the city; the building and apron extend
+  // south beyond the street grid. The interior is a separate walkable scene.
   const airportGroup = new THREE.Group();
-  airportGroup.position.set(airportCenter.x, 0.15, airportCenter.z);
-  const airportWallMat = new THREE.MeshStandardMaterial({ color: 0xdce5e8, roughness: 0.72 });
-  const airportGlassMat = new THREE.MeshPhysicalMaterial({ color: 0x9ac9d8, roughness: 0.12, metalness: 0.08, transparent: true, opacity: 0.72 });
-  const airportRoofMat = new THREE.MeshStandardMaterial({ color: 0x28343b, roughness: 0.45, metalness: 0.25 });
-  const terminalBody = new THREE.Mesh(new THREE.BoxGeometry(14, 4.2, 7), airportWallMat);
-  terminalBody.position.set(0, 2.1, -1.0); terminalBody.castShadow = true; terminalBody.receiveShadow = true; airportGroup.add(terminalBody);
-  const terminalRoof = new THREE.Mesh(new THREE.BoxGeometry(14.6, 0.35, 7.6), airportRoofMat);
-  terminalRoof.position.set(0, 4.3, -1.0); airportGroup.add(terminalRoof);
-  const terminalGlass = new THREE.Mesh(new THREE.BoxGeometry(10.8, 2.1, 0.08), airportGlassMat);
-  terminalGlass.position.set(0, 2.15, 2.54); airportGroup.add(terminalGlass);
-  const signCanvas = document.createElement('canvas'); signCanvas.width = 640; signCanvas.height = 128;
-  const signCtx = signCanvas.getContext('2d')!; signCtx.fillStyle = '#17232a'; signCtx.fillRect(0,0,640,128);
-  signCtx.fillStyle = '#f4fbff'; signCtx.font = 'bold 54px sans-serif'; signCtx.textAlign = 'center'; signCtx.fillText('THECITY AIRPORT',320,82);
-  const airportSign = new THREE.Mesh(new THREE.PlaneGeometry(8.2,1.65),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(signCanvas)}));
-  airportSign.position.set(0,3.35,2.61); airportGroup.add(airportSign);
-  const terminalLights = new THREE.Mesh(new THREE.BoxGeometry(11.2,0.08,0.12),new THREE.MeshStandardMaterial({color:0x39ff14,emissive:0x39ff14,emissiveIntensity:0.6}));
-  terminalLights.position.set(0,4.02,2.68); airportGroup.add(terminalLights);
-  const planeMat = new THREE.MeshStandardMaterial({color:0xf4f5f2,roughness:0.38,metalness:0.12});
-  const planeBody = new THREE.Mesh(new THREE.CylinderGeometry(0.48,0.58,8.2,12),planeMat);
-  planeBody.rotation.x = Math.PI/2; planeBody.position.set(9.2,1.0,-1.5); airportGroup.add(planeBody);
-  const planeWing = new THREE.Mesh(new THREE.BoxGeometry(5.8,0.16,1.05),planeMat);
-  planeWing.position.set(9.2,1.0,-1.2); airportGroup.add(planeWing);
-  const makeAirportKiosk = (x: number, label: string, color: number) => {
-    const kiosk = new THREE.Group(); kiosk.position.set(x,0,4.7);
-    const base = new THREE.Mesh(new THREE.BoxGeometry(2.2,1.2,0.9),airportRoofMat); base.position.y=0.6; kiosk.add(base);
-    const counter = new THREE.Mesh(new THREE.BoxGeometry(2.25,0.12,0.95),new THREE.MeshStandardMaterial({color:0xe8edf0,roughness:0.35})); counter.position.y=1.23; kiosk.add(counter);
-    const panel = new THREE.Mesh(new THREE.BoxGeometry(2.1,0.5,0.08),new THREE.MeshStandardMaterial({color,emissive:color,emissiveIntensity:0.16})); panel.position.set(0,1.75,0.48); kiosk.add(panel);
-    const canvas = document.createElement('canvas'); canvas.width=320; canvas.height=80;
-    const ctx=canvas.getContext('2d')!; ctx.fillStyle='#10191f'; ctx.fillRect(0,0,320,80); ctx.fillStyle='#fff'; ctx.font='bold 30px sans-serif'; ctx.textAlign='center'; ctx.fillText(label,160,52);
-    const labelMesh=new THREE.Mesh(new THREE.PlaneGeometry(2,0.5),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(canvas)})); labelMesh.position.set(0,1.75,0.53); kiosk.add(labelMesh);
-    airportGroup.add(kiosk);
+  airportGroup.position.set(airportDoorPos.x, 0.15, airportDoorPos.z);
+  airportGroup.rotation.y = Math.PI;
+  airportGroup.userData.isAirportTerminal = true;
+  const airportWallMat = new THREE.MeshStandardMaterial({ color: 0xe4e7e6, roughness: 0.62, metalness: 0.08 });
+  const airportGlassMat = new THREE.MeshPhysicalMaterial({ color: 0x9fc4d4, roughness: 0.08, metalness: 0.16, transparent: true, opacity: 0.55 });
+  const airportRoofMat = new THREE.MeshStandardMaterial({ color: 0x2b343b, roughness: 0.4, metalness: 0.32 });
+  const airportSteelMat = new THREE.MeshStandardMaterial({ color: 0x9aa3ab, roughness: 0.28, metalness: 0.82 });
+  const airportGreenMat = new THREE.MeshStandardMaterial({ color: 0x39ff14, emissive: 0x39ff14, emissiveIntensity: 0.55, roughness: 0.3 });
+  const airportBlueMat = new THREE.MeshStandardMaterial({ color: 0x2a6f9e, emissive: 0x1d5c86, emissiveIntensity: 0.35, roughness: 0.4 });
+  const airportAdd = (mesh: THREE.Object3D, x: number, y: number, z: number, ry = 0) => {
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = ry;
+    airportGroup.add(mesh);
+    return mesh;
   };
-  makeAirportKiosk(-4.4,'CLOTHING',0x39ff14);
-  makeAirportKiosk(4.4,'DEPARTURES',0x55aaff);
+
+  // Main terminal volume (50 m wide, 14 m tall, 27 m deep).
+  airportAdd(new THREE.Mesh(new THREE.BoxGeometry(50, 14, 27), airportWallMat), 0, 7, -16.5);
+  airportAdd(new THREE.Mesh(new THREE.BoxGeometry(54, 0.7, 31), airportRoofMat), 0, 14.4, -16.5);
+  airportAdd(new THREE.Mesh(new THREE.BoxGeometry(38, 3.2, 20), airportGlassMat), 0, 16.0, -18.5);
+  airportAdd(new THREE.Mesh(new THREE.BoxGeometry(40, 0.5, 22), airportRoofMat), 0, 17.8, -18.5);
+  // Curved-ish front glass, split around the 5.2 m entrance.
+  for (const [x0, x1] of [
+    [-24, -2.6],
+    [2.6, 24],
+  ]) {
+    const pane = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, 6.4, 0.16), airportGlassMat);
+    airportAdd(pane, (x0 + x1) / 2, 4.5, -2.92);
+    for (let x = x0 + 2.4; x < x1; x += 2.6) {
+      airportAdd(new THREE.Mesh(new THREE.BoxGeometry(0.1, 6.5, 0.22), airportSteelMat), x, 4.5, -2.84);
+    }
+  }
+  airportAdd(new THREE.Mesh(new THREE.BoxGeometry(52, 0.22, 0.28), airportSteelMat), 0, 1.4, -2.84);
+  airportAdd(new THREE.Mesh(new THREE.BoxGeometry(52, 0.22, 0.28), airportSteelMat), 0, 7.5, -2.84);
+  // Entrance doors, animated in updateWorld.
+  const airportDoorLeftPivot = new THREE.Group();
+  airportDoorLeftPivot.position.set(-2.6, 0, -2.8);
+  const airportDoorRightPivot = new THREE.Group();
+  airportDoorRightPivot.position.set(2.6, 0, -2.8);
+  for (const [pivot, dir] of [
+    [airportDoorLeftPivot, 1],
+    [airportDoorRightPivot, -1],
+  ] as const) {
+    const glass = new THREE.Mesh(new THREE.BoxGeometry(2.5, 3.4, 0.12), airportGlassMat);
+    glass.position.set(dir * 1.25, 1.7, 0);
+    pivot.add(glass);
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.1, 0.16), airportSteelMat);
+    rail.position.set(dir * 1.25, 3.4, 0);
+    pivot.add(rail);
+    airportGroup.add(pivot);
+  }
+
+  // Canopy, sign and drop-off lane.
+  airportAdd(new THREE.Mesh(new THREE.BoxGeometry(16, 0.5, 6.2), airportRoofMat), 0, 6.4, 0.6);
+  for (const sx of [-6.4, 6.4]) {
+    airportAdd(new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 6.2, 10), airportSteelMat), sx, 3.1, 2.2);
+  }
+  const airportSignCanvas = document.createElement('canvas');
+  airportSignCanvas.width = 1024;
+  airportSignCanvas.height = 160;
+  const asignCtx = airportSignCanvas.getContext('2d')!;
+  asignCtx.fillStyle = '#101c23';
+  asignCtx.fillRect(0, 0, 1024, 160);
+  asignCtx.strokeStyle = '#39ff14';
+  asignCtx.lineWidth = 8;
+  asignCtx.strokeRect(6, 6, 1012, 148);
+  asignCtx.fillStyle = '#ffffff';
+  asignCtx.font = 'bold 62px sans-serif';
+  asignCtx.textAlign = 'center';
+  asignCtx.fillText('THECITY INTERNATIONAL', 512, 78);
+  asignCtx.fillStyle = '#39ff14';
+  asignCtx.font = '600 30px sans-serif';
+  asignCtx.fillText('TERMINAL 1  ·  DEPARTURES  ·  ARRIVALS', 512, 126);
+  const airportSign = new THREE.Mesh(
+    new THREE.PlaneGeometry(11, 1.7),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(airportSignCanvas) })
+  );
+  airportAdd(airportSign, 0, 6.0, 3.72);
+  airportAdd(new THREE.Mesh(new THREE.BoxGeometry(11.2, 0.1, 0.12), airportGreenMat), 0, 5.15, 3.78);
+
+  // Drop-off road and parked cars north of the entrance.
+  airportAdd(new THREE.Mesh(new THREE.BoxGeometry(46, 0.04, 6.0), new THREE.MeshStandardMaterial({ color: 0x353b40, roughness: 0.92 })), 0, 0.02, 7.0);
+  for (let i = 0; i < 5; i++) {
+    const car = new THREE.Group();
+    const carColor = [0x39465c, 0xb9bec4, 0x2f5d3f, 0x9e5440, 0x262930][i];
+    const carMat = new THREE.MeshStandardMaterial({ color: carColor, roughness: 0.32, metalness: 0.42 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.8, 1.8), carMat);
+    body.position.y = 0.6;
+    car.add(body);
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.7, 1.55), airportGlassMat);
+    cabin.position.set(-0.2, 1.25, 0);
+    car.add(cabin);
+    for (const sx of [-1.4, 1.4]) for (const sz of [-0.85, 0.85]) {
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.22, 12), airportRoofMat);
+      wheel.rotation.x = Math.PI / 2;
+      wheel.position.set(sx, 0.32, sz);
+      car.add(wheel);
+    }
+    airportAdd(car, -17 + i * 8.5, 0.02, 8.2);
+  }
+
+  // Control tower.
+  airportAdd(new THREE.Mesh(new THREE.BoxGeometry(5.2, 28, 5.2), airportWallMat), -20, 14, -29);
+  airportAdd(new THREE.Mesh(new THREE.BoxGeometry(8.4, 3.2, 8.4), airportGlassMat), -20, 29.2, -29);
+  airportAdd(new THREE.Mesh(new THREE.BoxGeometry(9.2, 0.6, 9.2), airportRoofMat), -20, 31.0, -29);
+  airportAdd(new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 5.0, 8), airportSteelMat), -20, 33.8, -29);
+  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 10), airportGreenMat);
+  airportAdd(beacon, -20, 36.4, -29);
+
+  // Apron, two aircraft and jet bridges behind the terminal.
+  airportAdd(new THREE.Mesh(new THREE.PlaneGeometry(90, 34), new THREE.MeshStandardMaterial({ color: 0x6f767a, roughness: 0.94 })), 0, 0.01, -39, 0);
+  const planeMat = new THREE.MeshStandardMaterial({ color: 0xf2f4f3, roughness: 0.34, metalness: 0.22 });
+  const airlineMat = new THREE.MeshStandardMaterial({ color: 0x2a6f9e, roughness: 0.4, metalness: 0.2 });
+  const buildAircraft = (x: number, z: number) => {
+    const plane = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(1.55, 1.8, 26, 16), planeMat);
+    body.rotation.z = Math.PI / 2;
+    body.position.y = 2.0;
+    plane.add(body);
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(1.6, 4.2, 16), planeMat);
+    nose.rotation.z = -Math.PI / 2;
+    nose.position.set(15.0, 2.0, 0);
+    plane.add(nose);
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(8.2, 0.3, 2.6), planeMat);
+    wing.position.set(0, 1.9, 0);
+    plane.add(wing);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.4, 4.2, 5.4), airlineMat);
+    tail.position.set(-12.0, 3.6, 0);
+    plane.add(tail);
+    const stabilizer = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.22, 6.2), planeMat);
+    stabilizer.position.set(-11.0, 2.2, 0);
+    plane.add(stabilizer);
+    // Engines
+    for (const sz of [-2.0, 2.0]) {
+      const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.9, 3.0, 12), airportSteelMat);
+      engine.rotation.x = Math.PI / 2;
+      engine.position.set(2.0, 1.0, sz);
+      plane.add(engine);
+    }
+    plane.position.set(x, 0, z);
+    return plane;
+  };
+  airportGroup.add(buildAircraft(14, -38), buildAircraft(-16, -42));
+  for (const sx of [-10, 10]) {
+    const bridge = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.8, 9), airportWallMat);
+    airportAdd(bridge, sx, 2.0, -31);
+    const bridgeGlass = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.4, 8.6), airportGlassMat);
+    airportAdd(bridgeGlass, sx, 2.2, -31);
+  }
+
+  // Rooftop mechanical plant and signage masts.
+  for (const [x, z] of [
+    [-14, -20],
+    [8, -22],
+    [18, -12],
+  ]) {
+    airportAdd(new THREE.Mesh(new THREE.BoxGeometry(4, 2.2, 3.4), airportSteelMat), x, 15.7, z);
+  }
+  for (const x of [-8, 8]) {
+    airportAdd(new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 7, 8), airportSteelMat), x, 18.2, -6);
+  }
+
   worldGroup.add(airportGroup);
-  obstacles.push({type:'box',x:airportCenter.x,z:airportCenter.z-1.0,hw:7.15,hd:3.65});
-  obstacles.push({type:'box',x:airportShopPos.x,z:airportShopPos.z-1.7,hw:1.2,hd:0.48});
-  obstacles.push({type:'box',x:airportDeparturePos.x,z:airportDeparturePos.z-1.7,hw:1.2,hd:0.48});
+  obstacles.push({ type: 'box', x: airportDoorPos.x, z: airportDoorPos.z + 16.5, hw: 25.5, hd: 14.2 });
+  for (const sx of [-6.4, 6.4]) {
+    obstacles.push({ type: 'box', x: airportDoorPos.x - sx, z: airportDoorPos.z - 2.2, hw: 0.3, hd: 0.3 });
+  }
+  // Camera occluder covering the terminal mass.
+  const airportU = worldToU(airportDoorPos.x, airportDoorPos.z + 16.5);
+  cameraOccluders.push({
+    u0: airportU - 26,
+    u1: airportU + 26,
+    z0: airportDoorPos.z + 2.4,
+    z1: airportDoorPos.z + 31,
+    y0: 0,
+    y1: 18,
+  });
+
+  // 10b. LoftLife Threads — separate retail building and entrance.
+  const storeGroup = new THREE.Group();
+  storeGroup.position.set(clothingStoreDoorPos.x, 0.15, clothingStoreDoorPos.z);
+  storeGroup.userData.isClothingStore = true;
+  const storeWallMat = new THREE.MeshStandardMaterial({ color: 0xe8dfd2, roughness: 0.68 });
+  const storeAccentMat = new THREE.MeshStandardMaterial({ color: 0x23302a, roughness: 0.5, metalness: 0.18 });
+  const storeGlassMat = new THREE.MeshPhysicalMaterial({ color: 0xcfe7ef, roughness: 0.06, metalness: 0.1, transparent: true, opacity: 0.48 });
+  const storeWoodMat = new THREE.MeshStandardMaterial({ color: 0x6b4730, roughness: 0.48 });
+  const storeAdd = (mesh: THREE.Object3D, x: number, y: number, z: number, ry = 0) => {
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = ry;
+    storeGroup.add(mesh);
+  };
+  storeAdd(new THREE.Mesh(new THREE.BoxGeometry(15, 8.6, 10), storeWallMat), 0, 4.3, -5.2);
+  storeAdd(new THREE.Mesh(new THREE.BoxGeometry(12.6, 2.8, 8.2), storeWallMat), 0, 10.0, -5.2);
+  storeAdd(new THREE.Mesh(new THREE.BoxGeometry(15.4, 0.45, 10.4), storeAccentMat), 0, 8.7, -5.2);
+  // Ground-floor glazing with a central door.
+  for (const [x0, x1] of [
+    [-6.6, -1.7],
+    [1.7, 6.6],
+  ]) {
+    storeAdd(new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, 3.4, 0.14), storeGlassMat), (x0 + x1) / 2, 2.1, -0.24);
+    for (let x = x0 + 1.1; x < x1; x += 1.6) {
+      storeAdd(new THREE.Mesh(new THREE.BoxGeometry(0.09, 3.5, 0.2), storeAccentMat), x, 2.1, -0.18);
+    }
+  }
+  storeAdd(new THREE.Mesh(new THREE.BoxGeometry(3.4, 3.5, 0.12), storeGlassMat), 0, 1.8, -0.2);
+  storeAdd(new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.16, 0.2), storeAccentMat), 0, 3.55, -0.14);
+  // Half-open door leaves.
+  for (const sx of [-1, 1]) {
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(1.5, 3.2, 0.08), storeGlassMat);
+    storeAdd(leaf, sx * 1.5, 1.65, 0.05, sx * 0.55);
+  }
+  // Storefront sign, awning and window mannequins.
+  const storeSignCanvas = document.createElement('canvas');
+  storeSignCanvas.width = 768;
+  storeSignCanvas.height = 192;
+  const sctx = storeSignCanvas.getContext('2d')!;
+  sctx.fillStyle = '#1b2620';
+  sctx.fillRect(0, 0, 768, 192);
+  sctx.strokeStyle = '#d9c8a6';
+  sctx.lineWidth = 7;
+  sctx.strokeRect(7, 7, 754, 178);
+  sctx.fillStyle = '#f7f3ea';
+  sctx.font = 'bold 58px sans-serif';
+  sctx.textAlign = 'center';
+  sctx.fillText('LOFTLIFE THREADS', 384, 88);
+  sctx.fillStyle = '#39ff14';
+  sctx.font = '600 26px sans-serif';
+  sctx.fillText('CITY STYLE  ·  EVERYDAY WEAR', 384, 136);
+  const storeSign = new THREE.Mesh(
+    new THREE.PlaneGeometry(9.4, 2.35),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(storeSignCanvas) })
+  );
+  storeAdd(storeSign, 0, 4.4, 0.52);
+  storeAdd(new THREE.Mesh(new THREE.BoxGeometry(10.2, 0.2, 2.4), storeAccentMat), 0, 3.25, 0.72);
+  for (const sx of [-4.2, 4.2]) {
+    storeAdd(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 3.2, 8), storeAccentMat), sx, 1.6, 1.5);
+  }
+  // Simple window mannequins.
+  for (const [mx, color] of [
+    [-4.6, 0xc86b51],
+    [-2.8, 0x3f6b56],
+    [3.2, 0x39465c],
+    [4.8, 0xd49a45],
+  ] as const) {
+    const mannequin = new THREE.Group();
+    const garment = new THREE.MeshStandardMaterial({ color, roughness: 0.8 });
+    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.16, 0.65, 10), garment);
+    torso.position.y = 1.3;
+    mannequin.add(torso);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 10), new THREE.MeshStandardMaterial({ color: 0xe7ddd2, roughness: 0.5 }));
+    head.position.y = 1.75;
+    mannequin.add(head);
+    const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.18, 1.0, 10), storeAccentMat);
+    stand.position.y = 0.5;
+    mannequin.add(stand);
+    storeAdd(mannequin, mx, 0.05, 0.3);
+  }
+  // Planter and bench beside the doors.
+  for (const sx of [-6.9, 6.9]) {
+    storeAdd(new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.3, 0.6, 12), storeWoodMat), sx, 0.3, 1.5);
+    storeAdd(new THREE.Mesh(new THREE.IcosahedronGeometry(0.62, 1), new THREE.MeshStandardMaterial({ color: 0x4f7d4a, roughness: 0.82 })), sx, 1.1, 1.5);
+  }
+  worldGroup.add(storeGroup);
+  obstacles.push({ type: 'box', x: clothingStoreDoorPos.x, z: clothingStoreDoorPos.z - 5.2, hw: 7.6, hd: 5.2 });
+  storeAdd(new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.12, 0.5), storeWoodMat), 8.4, 0.5, 0.4);
+  obstacles.push({ type: 'box', x: clothingStoreDoorPos.x + 8.4, z: clothingStoreDoorPos.z + 0.4, hw: 0.9, hd: 0.3 });
+  const storeU = worldToU(clothingStoreDoorPos.x, clothingStoreDoorPos.z - 5.2);
+  cameraOccluders.push({
+    u0: storeU - 8,
+    u1: storeU + 8,
+    z0: clothingStoreDoorPos.z - 10.4,
+    z1: clothingStoreDoorPos.z,
+    y0: 0,
+    y1: 11.5,
+  });
+
+  // Store entrance threshold marking.
+  const storeThreshold = new THREE.Mesh(
+    new THREE.BoxGeometry(3.4, 0.03, 1.4),
+    new THREE.MeshStandardMaterial({ color: 0x39ff14, emissive: 0x39ff14, emissiveIntensity: 0.25 })
+  );
+  storeThreshold.position.set(clothingStoreDoorPos.x, 0.16, clothingStoreDoorPos.z + 0.7);
+  worldGroup.add(storeThreshold);
+
+  // Airport pavement threshold stripe.
+  const airportThreshold = new THREE.Mesh(
+    new THREE.BoxGeometry(4.8, 0.03, 1.6),
+    new THREE.MeshStandardMaterial({ color: 0x39ff14, emissive: 0x39ff14, emissiveIntensity: 0.25 })
+  );
+  airportThreshold.position.set(airportDoorPos.x, 0.16, airportDoorPos.z - 1.2);
+  worldGroup.add(airportThreshold);
+
 
   // 10b. Walk-up salon in the central plaza district.
   const salonGroup = new THREE.Group();
@@ -1775,7 +2194,7 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     return mainDoorUnlocked;
   }
 
-  const loftDoorEntryPos = { x: loftDoorPos.x, z: loftDoorPos.z + 2.0 };
+  const loftDoorEntryPos = { x: loftDoorPos.x, z: loftDoorPos.z + 2.2 };
   const loftDoorThresholdPos = { x: loftDoorPos.x, z: loftDoorPos.z - 0.18 };
 
   function updateWorld(
