@@ -21,7 +21,7 @@ function parse(value: unknown, fallback: unknown) {
   if (typeof value !== 'string') return fallback;
   try { return JSON.parse(value); } catch { return fallback; }
 }
-async function permission(sql: Sql, world: World, user: User | null) {
+export async function permission(sql: Sql, world: World, user: User | null) {
   let role: string | null = null;
   if (user) {
     if (world.owner_id === user.id) role = 'owner';

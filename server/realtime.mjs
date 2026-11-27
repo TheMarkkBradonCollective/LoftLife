@@ -31,12 +31,16 @@ import {
   pendingInvitesFor,
 } from './parties.mjs';
 import {
+  assignTaxiDestination,
   boardRider,
+  boardTaxi,
+  ensureFleet,
   exitRider,
   releasePlayer,
   stepTransit,
   vehiclesFor,
 } from './transit.mjs';
+import { advanceJourney, releaseJourney, startJourney } from './travel.mjs';
 import {
   DOORBELL_REASON_TEXT,
   DOORBELL_TIMEOUT_MS,
@@ -245,6 +249,7 @@ function leaveInstance(player) {
   const instance = instances.get(player.instanceId);
   if (!instance) return;
   releasePlayer(player);
+  releaseJourney(player);
   instance.members.delete(player.connId);
   broadcast(instance, { t: 'leave', connId: player.connId, userId: player.userId }, player.connId);
   if (instance.members.size === 0 && instance.kind === 'world') {
@@ -408,8 +413,9 @@ function clamp(value, limit) {
 }
 
 function handlePose(player, msg) {
-  // While riding transit the server owns the position; client poses are ignored.
-  if (player.riding) return;
+  // While riding transit or travelling the server owns the position; client
+  // poses are ignored so a modified client cannot steer a vehicle.
+  if (player.riding || player.journey) return;
   const nextX = clamp(Number(msg.x), MAX_CITY_COORD);
   const nextZ = clamp(Number(msg.z), MAX_CITY_COORD);
   if (!player.positioned || now() - player.joinedAt < SPAWN_GRACE_MS) {
@@ -764,6 +770,7 @@ function handleTransit(player, msg) {
         lineId: msg.lineId,
         stopId: msg.stopId,
       });
+      ensureFleet(player.instanceId);
       send(player.ws, {
         t: 'transit',
         riding: {
@@ -771,6 +778,46 @@ function handleTransit(player, msg) {
           lineId: result.line.id,
           seat: result.seat,
           label: result.line.label,
+          kind: result.line.kind,
+        },
+        vehicles: vehiclesFor(player.instanceId),
+      });
+    } catch (error) {
+      handlePartyError(player, error);
+    }
+    return;
+  }
+  if (msg.action === 'hailTaxi') {
+    try {
+      const result = boardTaxi(player, player.instanceId, msg.vehicleId);
+      send(player.ws, {
+        t: 'transit',
+        riding: {
+          vehicleId: result.vehicle.id,
+          lineId: 'taxi',
+          seat: result.seat,
+          label: result.line.label,
+          kind: 'taxi',
+        },
+        taxi: result.taxi,
+        vehicles: vehiclesFor(player.instanceId),
+      });
+    } catch (error) {
+      handlePartyError(player, error);
+    }
+    return;
+  }
+  if (msg.action === 'taxiDestination') {
+    try {
+      const result = assignTaxiDestination(player, msg.destinationId);
+      send(player.ws, {
+        t: 'transit',
+        taxi: {
+          state: result.taxi.state,
+          destinationId: result.taxi.destinationId,
+          destinationLabel: result.taxi.destinationLabel,
+          destinations: [],
+          etaSeconds: result.etaSeconds,
         },
         vehicles: vehiclesFor(player.instanceId),
       });
@@ -791,6 +838,30 @@ function handleTransit(player, msg) {
     return;
   }
   fail(player.ws, 'bad_request', 'Unknown transit action');
+}
+
+function handleTravel(player, msg) {
+  if (msg.action === 'start') {
+    try {
+      const journey = startJourney(player, {
+        mode: msg.mode,
+        destinationId: msg.destinationId,
+      });
+      send(player.ws, { t: 'travel', action: 'boarding', journey });
+    } catch (error) {
+      handlePartyError(player, error);
+    }
+    return;
+  }
+  if (msg.action === 'cancel') {
+    if (!player.journey) return;
+    const mode = player.journey.mode;
+    releaseJourney(player);
+    player.location = mode === 'air' ? 'airport' : 'world';
+    send(player.ws, { t: 'travel', action: 'cancelled', mode });
+    return;
+  }
+  fail(player.ws, 'bad_request', 'Unknown travel action');
 }
 
 export function attachRealtime(httpServer) {
@@ -827,6 +898,7 @@ export function attachRealtime(httpServer) {
       riding: null,
       transitLineId: null,
       transitSeat: null,
+      journey: null,
       ip: req.socket.remoteAddress,
       isGuest: false,
       requestedInstance: null,
@@ -955,6 +1027,8 @@ export function attachRealtime(httpServer) {
           return handleVoice(player, instances.get(player.instanceId), msg);
         case 'transit':
           return handleTransit(player, msg);
+        case 'travel':
+          return handleTravel(player, msg);
         case 'leave': {
           leaveInstance(player);
           player.userId = null;
@@ -976,19 +1050,30 @@ export function attachRealtime(httpServer) {
     });
   });
 
+  let lastTick = now();
   const tick = setInterval(() => {
     const timestamp = now();
-    stepTransit(timestamp);
+    const byInstance = new Map();
     for (const instance of instances.values()) {
+      byInstance.set(instance.id, uniquePlayers(instance));
+    }
+    stepTransit(timestamp, lastTick, (instanceId) => byInstance.get(instanceId) ?? []);
+    lastTick = timestamp;
+    for (const instance of instances.values()) {
+      const players = byInstance.get(instance.id) ?? [];
+      for (const player of players) {
+        const event = advanceJourney(player, timestamp);
+        if (event) send(player.ws, event);
+      }
       const vehicles = vehiclesFor(instance.id, timestamp);
-      // A solo rider still needs vehicle state to render the moving bus.
-      if (instance.members.size < 2 && vehicles.length === 0) continue;
-      const players = uniquePlayers(instance).map(playerView);
+      // Ambient buses, trains and taxis always exist, so even a solo player
+      // receives the moving fleet.
+      const views = players.map(playerView);
       broadcast(instance, {
         t: 'snapshot',
         instanceId: instance.id,
         at: timestamp,
-        players,
+        players: views,
         vehicles,
       });
     }

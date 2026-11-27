@@ -98,6 +98,35 @@ export interface SuiteState {
   updatedAt: number;
 }
 
+export interface TransitDestination {
+  id: string;
+  label: string;
+  x: number;
+  z: number;
+  arrival: { x: number; z: number };
+}
+
+export interface TransitHub {
+  id: string;
+  label: string;
+  mode: 'rail';
+  x: number;
+  z: number;
+}
+
+export interface TravelDestination {
+  id: string;
+  label: string;
+  kind: 'city' | 'world';
+  location?: string;
+  spawn?: { x: number; z: number; yaw?: number };
+  worldId?: string;
+  worldName?: string;
+  ownerHandle?: string;
+  access?: WorldAccess;
+  blurb?: string;
+}
+
 export type WorldAccess = 'public' | 'private' | 'invite' | 'friends' | 'collab';
 export type WorldRole = 'owner' | 'co_owner' | 'moderator' | 'builder' | 'member';
 export type WorldStatus = 'live' | 'available' | 'offline' | 'build_mode' | 'build_pending' | 'maintenance';
@@ -453,10 +482,20 @@ export const api = {
       lines: {
         id: string;
         label: string;
-        kind: 'bus';
+        kind: 'bus' | 'rail';
+        color?: string;
         stops: { id: string; name: string; x: number; z: number }[];
       }[];
+      taxis: TransitDestination[];
+      hubs: TransitHub[];
     }>('/transit', { auth: false }),
+
+  /** Server-validated destinations for intercity rail and flights. */
+  travelDestinations: () =>
+    request<{ city: TravelDestination[]; worlds: TravelDestination[] }>(
+      '/travel/destinations',
+      { auth: false }
+    ),
 
   /** Party snapshot for reconnect/resync; actions run over the socket. */
   party: () =>

@@ -174,6 +174,21 @@ export function listWorlds(viewerId, { mine = false, search = '', kind = '' } = 
     .map((row) => serializeWorld(row, viewerId));
 }
 
+/** Worlds a signed-in player can actually enter, for travel destinations. */
+export function travelWorlds(viewerId) {
+  if (!viewerId) return [];
+  const rows = db
+    .prepare(
+      `SELECT * FROM worlds
+       WHERE owner_id = ? OR published = 1
+       ORDER BY updated_at DESC LIMIT 60`
+    )
+    .all(viewerId);
+  return rows
+    .filter((row) => canEnterWorld(row, viewerId))
+    .map((row) => serializeWorld(row, viewerId));
+}
+
 export function getWorld(userId, worldId) {
   const row = worldRow(worldId);
   if (!row) throw notFound('World not found');
