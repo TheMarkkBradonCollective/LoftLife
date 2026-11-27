@@ -27,8 +27,14 @@ Other scripts:
 | `npm run dev` | Vite only (no backend — the app falls back to offline mode) |
 | `npm run server` | API + realtime gateway on `:8787`; also serves `dist/` if built |
 | `npm run build` | Production build to `dist/` |
-| `npm test` | 124 integration/acceptance checks: HTTP API, permissions, economy, parties, voice signalling, transit seats, Cloudflare-issued identity, two-client city movement, 64-player capacity, and the shipping Worker/Durable Object path |
+| `npm run assets:previews` | Render every catalog preview PNG from its actual 3D model (`--force`, `--only=`, `--category=`) |
+| `npm run assets:check` | Re-validate every catalog image against the model signature that produced it |
+| `npm test` | 157 integration/acceptance checks: HTTP API, permissions, economy, parties, voice signalling, transit seats, Cloudflare-issued identity, two-client city movement, 64-player capacity, the shipping Worker/Durable Object path, and the catalog/preview pipeline |
 | `npm run lint` | `tsc --noEmit` |
+
+Catalog assets are generated, not hand-drawn: `shared/catalog/expansion.mjs` is the single record of
+what exists, and `scripts/render-catalog-previews.mjs` renders each item's real Three.js model into
+`public/catalog-previews/`. See [docs/CATALOG-EXPANSION.md](docs/CATALOG-EXPANSION.md).
 
 ### Environment variables
 
@@ -73,8 +79,11 @@ split and the pieces that still need a live Neon sign-in test.
 
 **Game (pre-existing, preserved)**
 - Third-person and isometric camera, WASD + pointer-lock mouse look, sprint, jump, emotes, sitting.
-- Grid-based room builder: 23 furniture items, recolouring, rotate/move/duplicate/delete, undo,
-  5 floor finishes, 6 wall paints, 3 lighting moods, 3 starter layouts.
+- Grid-based room builder: **344 catalog items** (73 original + 271 expansion) covering construction,
+  residential, commercial, nightlife, specialty, event, outdoor and vehicle pieces — with a preview
+  thumbnail per item and per colour variant rendered from that item's own model, search, category and
+  themed-collection filters. Recolour/rotate/move/duplicate/delete, undo, 5 floor finishes, 6 wall
+  paints, 3 lighting moods, 3 starter layouts.
 - Character studio: skin tones, 6 hairstyles, 4 tops, accessories, hair/outfit colours.
 - Main Hotel: lobby, 4 floors, brass elevator, keycard door terminal, numbered suite doors,
   resident NPC suites and greetings.
@@ -85,7 +94,8 @@ split and the pieces that still need a live Neon sign-in test.
 - Accounts, sessions, rate limiting; first account on a fresh database becomes admin.
 - Persistent character, wardrobe ownership, suite decoration, inventory, wallet.
 - Economy: **YUANZI (元子)** and **TONGBAO (通宝)**, append-only ledger, idempotent purchases,
-  a server-priced shop (23 furniture + 6 wardrobe pieces) and a daily reward.
+  a server-priced shop (**344 world assets** + 6 wardrobe pieces, prices read from the shared
+  catalog), a live per-item 3D inspector in the shop, and a daily reward.
 - Player-owned worlds: create, decorate, publish, five access modes
   (public / private / invite-only / friends-only / collaborative), collaborator build rights.
 - Friends, friend requests, blocking, player search, city chat, direct messages, proximity chat
@@ -114,11 +124,20 @@ split and the pieces that still need a live Neon sign-in test.
   exact previous distance and angle in both isometric and third-person views.
 - Wardrobe studio locks unowned clothing with its server price; the 3D viewport is lazy-loaded so
   the sign-in wall no longer ships Three.js.
+- **Asset pipeline**: 1,434 transparent 512×512 PNG previews rendered offline from the same
+  `THREE.Object3D` the game places, with a manifest tying item id → model signature → image hash.
+  `npm test` fails if a preview is missing, opaque, off-centre, unlinked from its model, or priced
+  differently on the server than in the catalog.
 - Reports and admin moderation endpoints; audit log.
 
-**Not implemented yet** (see [docs/ROADMAP.md](docs/ROADMAP.md)): custom uploaded assets, the Unity 6
-Windows/Android clients, server-side collision re-simulation, an earned-income loop, and CI/load
-testing.
+**Not implemented yet** (see [docs/CATALOG-EXPANSION.md](docs/CATALOG-EXPANSION.md#known-limitations) and
+[docs/ROADMAP.md](docs/ROADMAP.md)): multi-floor stacking in the room editor (stair, mezzanine and
+balcony pieces exist and place correctly, but there is still one 14×14 floor per suite), a
+substantially expanded *clothing* line (the wardrobe still has its 6 pieces; garments need new rig
+geometry), automatic wall/fixture snapping for curved and angled pieces, escalator/elevator motion,
+custom uploaded assets, the Unity 6 Windows/Android clients, server-side collision re-simulation, an
+earned-income loop, and CI/load testing. R2 upload of the preview set is implemented as documented
+deployment steps but was not run here (no bucket credentials in this environment).
 
 ---
 
@@ -147,7 +166,11 @@ src/
   components/      AuthGate, 3D viewport, world menu, shop/worlds/settings modals
   game/            city layout, hotel/world builders, furniture, avatar rig, transit, audio
 shared/            pure rules shared by server and client (device detection, HUD presentation)
-docs/              AUDIT.md, ARCHITECTURE.md, ROADMAP.md
+shared/catalog/    expansion.mjs (344-item catalog + model params), preview-manifest.json
+scripts/           render-catalog-previews.mjs, export-catalog-sql.mjs, lib/ (PNG codec, CPU
+                   renderer, headless DOM shim)
+migrations/        Postgres/Neon schema, incl. 0009 catalog metadata + generated seed
+docs/              AUDIT.md, ARCHITECTURE.md, CATALOG-EXPANSION.md, ROADMAP.md, HUD-REDESIGN.md
 ```
 
 ## Documentation
@@ -159,6 +182,8 @@ docs/              AUDIT.md, ARCHITECTURE.md, ROADMAP.md
   screenshots and the verification report.
 - [docs/DEVICE-COMPATIBILITY.md](docs/DEVICE-COMPATIBILITY.md) — runtime/input matrix, HUD rules,
   mobile renderer budget and the device test report.
+- [docs/CATALOG-EXPANSION.md](docs/CATALOG-EXPANSION.md) — the 344-item catalog, model kinds,
+  preview-rendering pipeline, database/storage changes, verification and known limitations.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased plan with current status.
 - [docs/MULTIPLAYER-VALIDATION.md](docs/MULTIPLAYER-VALIDATION.md) — multiplayer and
   production validation: what the automated checks prove, what still needs a deployed run.

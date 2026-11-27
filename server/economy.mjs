@@ -8,6 +8,7 @@
  */
 import { db, newId, now, tx, audit } from './db.mjs';
 import { ApiError, badRequest, conflict, notFound } from './errors.mjs';
+import { EXPANSION_BY_ID, EXPANSION_PRICES } from '../shared/catalog/expansion.mjs';
 
 export const CURRENCIES = /** @type {const} */ (['yuanzi', 'tongbao']);
 
@@ -87,6 +88,12 @@ export const FURNITURE_PRICES = {
   plant_small: 25,
   tv_console: 360,
   wall_art_set: 85,
+  // Construction, business, nightlife, specialty, event, outdoor and vehicle
+  // catalog — prices come from the shared catalog so the client, the shop and
+  // room validation can never disagree about what exists or what it costs.
+  ...Object.fromEntries(
+    Object.entries(EXPANSION_PRICES).map(([id, entry]) => [id, entry.price])
+  ),
 };
 
 /** Premium wardrobe pieces are priced in the secondary currency (Tongbao). */
@@ -127,12 +134,22 @@ const CLOTHING_DEFS = {
 /** Free starting wardrobe so a new character is never locked out of dressing. */
 export const DEFAULT_OWNED_CLOTHING = ['tee', 'none'];
 
-export const FURNITURE_SHOP = Object.entries(FURNITURE_PRICES).map(([id, price]) => ({
-  id,
-  kind: 'furniture',
-  price,
-  currency: 'yuanzi',
-}));
+export const FURNITURE_SHOP = Object.entries(FURNITURE_PRICES).map(([id, price]) => {
+  const entry = EXPANSION_BY_ID[id];
+  return {
+    id,
+    kind: 'furniture',
+    price,
+    currency: entry?.currency ?? 'yuanzi',
+    label: entry?.name,
+    category: entry?.category,
+    subcategory: entry?.subcategory,
+    description: entry?.description,
+    // Every catalog item ships a preview rendered from its own model; legacy
+    // pieces use the same naming convention.
+    preview: `/${entry?.previewBase ?? `catalog-previews/${id}`}.png`,
+  };
+});
 
 export const CLOTHING_SHOP = Object.entries(CLOTHING_DEFS).map(([id, def]) => ({
   id,

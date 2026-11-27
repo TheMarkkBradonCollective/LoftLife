@@ -16,7 +16,9 @@
     "check:city": "node scripts/check-city-venues.mjs",
     "check:hotel": "node scripts/check-hotel-airport.mjs",
     "check:transit": "node scripts/check-transit-network.mjs",
-    "check:worlds": "node scripts/check-world-layout.mjs"
+    "check:worlds": "node scripts/check-world-layout.mjs",
+    "assets:previews": "node scripts/render-catalog-previews.mjs",
+    "assets:check": "node scripts/render-catalog-previews.mjs --validate-only"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -6,6 +6,7 @@ import type {
   WallStyleId,
 } from './types';
 import { EXTRA_FURNITURE } from './furnitureCatalogExtra';
+import { EXPANSION_CATALOG } from './catalogExpansion';
 
 export const GRID_SIZE = 14; // 14 x 14m Grand Hotel Penthouse Suite
 export const PLAYER_SUITE_NUMBER = '402';
@@ -374,6 +375,11 @@ export const FURNITURE_CATALOG: FurnitureCatalogItem[] = [
 // The expanded collection lands here so every existing id and preset above is
 // untouched. See furnitureCatalogExtra.ts for the added categories.
 FURNITURE_CATALOG.push(...EXTRA_FURNITURE);
+
+// The construction / business / nightlife / outdoor / vehicle catalog. Records
+// come from shared/catalog/expansion.mjs so the server prices and validates
+// exactly the items the client can place.
+FURNITURE_CATALOG.push(...EXPANSION_CATALOG);
 
 export const FLOOR_STYLES: { id: FloorStyleId; label: string; color: string }[] = [
   { id: 'oak_parquet', label: 'Warm Oak', color: '#c89b67' },
@@ -757,4 +763,8 @@ export const HOTEL_RESIDENTS: import('./types').ActiveResident[] = [
 
 export function getCatalogItem(id: string): FurnitureCatalogItem | undefined {
   return FURNITURE_CATALOG.find((item) => item.id === id);
+}
+
+export function catalogItemsByCategory(category: FurnitureCatalogItem['category']) {
+  return FURNITURE_CATALOG.filter((item) => item.category === category);
 }
