@@ -5,6 +5,8 @@ import {
   CITY_SLOPE,
   DIAGONAL_LETTERS,
   HORIZONTAL_COUNT,
+  M_STREET_INDEX,
+  STREET_HIERARCHY,
   ordinalStreet,
   uzToWorldX,
   worldToU,
@@ -481,11 +483,14 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     zHalfWidths,
     uIsMajor,
     zIsMajor,
+    uClasses,
+    zClasses,
     blocks,
     bounds,
     signalIntersections,
     busStops,
     metroLineZ,
+    waterfront,
     loftCenter,
     loftDoorPos,
     airportCenter,
@@ -500,13 +505,13 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
   const skyDome = createSkyDome();
   worldGroup.add(skyDome.mesh);
 
-  // 1. Continuous Ground & Asphalt Street Bed
+  // 1. Ground plate, river and district surface layers.
   const outerGround = new THREE.Mesh(
-    new THREE.PlaneGeometry(1600, 1600),
-    new THREE.MeshStandardMaterial({ color: 0x384339, roughness: 0.96 })
+    new THREE.PlaneGeometry(1800, 1800),
+    new THREE.MeshStandardMaterial({ color: 0x33402f, roughness: 0.97 })
   );
   outerGround.rotation.x = -Math.PI / 2;
-  outerGround.position.y = -0.08;
+  outerGround.position.y = -0.09;
   worldGroup.add(outerGround);
 
   const citySpanU = bounds.uMax - bounds.uMin + 24;
@@ -517,10 +522,10 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
   pushSlantedPrism(
     asphaltAcc,
     bounds.uMin - 12,
-    bounds.uMax + 12,
-    bounds.zMin - 12,
-    bounds.zMax + 12,
-    -0.06,
+    waterfront.uEdge,
+    bounds.zMin - 14,
+    bounds.zMax + 14,
+    -0.07,
     0.0,
     12,
     12,
@@ -537,7 +542,52 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
   asphaltMesh.receiveShadow = true;
   worldGroup.add(asphaltMesh);
 
-  // Invisible raycast plane covering entire A-Z & 1st-30th city
+  // The river runs the full length of the eastern edge beyond Z Street.
+  const waterAcc = createAccumulator();
+  pushSlantedTopQuad(
+    waterAcc,
+    waterfront.uEdge + 0.1,
+    waterfront.uEdge + 320,
+    waterfront.z0,
+    waterfront.z1,
+    waterfront.level
+  );
+  const riverMesh = new THREE.Mesh(
+    finalizeAccumulator(waterAcc),
+    new THREE.MeshPhysicalMaterial({
+      color: 0x2f6f86,
+      roughness: 0.16,
+      metalness: 0.28,
+      clearcoat: 0.9,
+      transparent: true,
+      opacity: 0.92,
+    })
+  );
+  riverMesh.receiveShadow = true;
+  worldGroup.add(riverMesh);
+
+  // Stone river wall and promenade railing.
+  const riverWallAcc = createAccumulator();
+  pushSlantedPrism(
+    riverWallAcc,
+    waterfront.uEdge - 1.6,
+    waterfront.uEdge + 0.1,
+    waterfront.z0,
+    waterfront.z1,
+    -1.6,
+    0.08,
+    3,
+    3,
+    true
+  );
+  const riverWall = new THREE.Mesh(
+    finalizeAccumulator(riverWallAcc),
+    new THREE.MeshStandardMaterial({ color: 0x6f7168, roughness: 0.9 })
+  );
+  riverWall.receiveShadow = true;
+  worldGroup.add(riverWall);
+
+  // Invisible raycast plane covering the whole walkable city.
   const groundRaycastPlane = new THREE.Mesh(
     new THREE.PlaneGeometry(citySpanU + 450, citySpanZ + 120),
     new THREE.MeshBasicMaterial({ visible: false })
@@ -546,31 +596,99 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
   groundRaycastPlane.position.set(0, 0.02, 0);
   worldGroup.add(groundRaycastPlane);
 
-  // 2. Realistic Lane Markings: Double Yellow Centerlines, White Dashed Multi-Lanes & Crosswalks
+  // 2. Street hierarchy markings: boulevard lanes, avenue turn lanes,
+  //    residential parking bays, crosswalks and the M Street median.
   const yellowLineAcc = createAccumulator();
   const whiteLineAcc = createAccumulator();
+  const medianCurbAcc = createAccumulator();
+  const medianGreenAcc = createAccumulator();
+  const treeCoords: { x: number; z: number; scale: number }[] = [];
+  const lampCoords: { x: number; z: number; rotY: number }[] = [];
+  const benchCoords: { x: number; z: number; rotY: number }[] = [];
+  const planterCoords: { x: number; z: number; scale: number }[] = [];
+  const shrubCoords: { x: number; z: number; scale: number }[] = [];
+  const parkedCarCoords: { x: number; z: number; rotY: number; color: number }[] = [];
+  const containerCoords: { x: number; z: number; rotY: number; color: number }[] = [];
+  const waterTankCoords: { x: number; z: number; y: number; scale: number }[] = [];
+  const playgroundAcc = createAccumulator();
+  const plazaArtAcc = createAccumulator();
+  const greenRoofAcc = createAccumulator();
+  const balconyAcc = createAccumulator();
+  const loadingDockAcc = createAccumulator();
+  const stringLightCoords: { x: number; y: number; z: number }[] = [];
+  const detailLineAcc = createAccumulator();
+
+  const M_U = uLines[M_STREET_INDEX];
+  const BOULEVARD_MEDIAN_HALF = 1.6;
+
+  function dashAlongU(
+    acc: MeshAccumulator,
+    u: number,
+    z0: number,
+    z1: number,
+    dash = 2.8,
+    gap = 4.2,
+    width = 0.12
+  ) {
+    for (let z = z0; z < z1 - 1.2; z += dash + gap) {
+      pushSlantedTopQuad(acc, u - width / 2, u + width / 2, z, Math.min(z + dash, z1), 0.013);
+    }
+  }
+
+  function dashAlongZ(
+    acc: MeshAccumulator,
+    z: number,
+    u0: number,
+    u1: number,
+    dash = 2.8,
+    gap = 4.2,
+    width = 0.12
+  ) {
+    for (let u = u0; u < u1 - 1.2; u += dash + gap) {
+      pushSlantedTopQuad(acc, u, Math.min(u + dash, u1), z - width / 2, z + width / 2, 0.013);
+    }
+  }
 
   for (let i = 0; i < DIAGONAL_LETTERS.length; i++) {
     const u = uLines[i];
     const hw = uHalfWidths[i];
-    // Double yellow centerline (skip intersection boxes)
-    for (let row = 0; row < HORIZONTAL_COUNT - 1; row++) {
-      const zStart = zLines[row] + zHalfWidths[row] + 2.6;
-      const zEnd = zLines[row + 1] - zHalfWidths[row + 1] - 2.6;
-      if (zEnd <= zStart) continue;
-      pushSlantedTopQuad(yellowLineAcc, u - 0.14, u - 0.04, zStart, zEnd, 0.012);
-      pushSlantedTopQuad(yellowLineAcc, u + 0.04, u + 0.14, zStart, zEnd, 0.012);
+    const cls = uClasses[i];
 
-      // Multi-lane white dashes on 4-lane major avenues
-      if (uIsMajor[i]) {
-        for (const laneSep of [-hw * 0.5, hw * 0.5]) {
-          for (let z = zStart; z < zEnd - 2.0; z += 5.5) {
+    for (let row = 0; row < HORIZONTAL_COUNT - 1; row++) {
+      const zStart = zLines[row] + zHalfWidths[row] + 2.8;
+      const zEnd = zLines[row + 1] - zHalfWidths[row + 1] - 2.8;
+      if (zEnd <= zStart) continue;
+
+      if (cls === 'boulevard') {
+        // Four lanes each way with a planted median; lane separators + shoulder.
+        for (const offset of [-5.3, -8.8, 5.3, 8.8]) {
+          dashAlongU(whiteLineAcc, u + offset, zStart, zEnd, 3.0, 4.8);
+        }
+        for (const offset of [-12.3, 12.3]) {
+          pushSlantedTopQuad(whiteLineAcc, u + offset - 0.07, u + offset + 0.07, zStart, zEnd, 0.013);
+        }
+      } else if (cls === 'avenue') {
+        pushSlantedTopQuad(yellowLineAcc, u - 0.14, u - 0.04, zStart, zEnd, 0.012);
+        pushSlantedTopQuad(yellowLineAcc, u + 0.04, u + 0.14, zStart, zEnd, 0.012);
+        for (const offset of [-3.5, 3.5]) {
+          dashAlongU(whiteLineAcc, u + offset, zStart, zEnd, 3.0, 5.0);
+        }
+      } else {
+        pushSlantedTopQuad(yellowLineAcc, u - 0.12, u - 0.03, zStart, zEnd, 0.012);
+        pushSlantedTopQuad(yellowLineAcc, u + 0.03, u + 0.12, zStart, zEnd, 0.012);
+      }
+
+      // Parallel parking bays on every street that allows kerbside parking.
+      if (STREET_HIERARCHY[cls].parking) {
+        for (const side of [-1, 1]) {
+          const edge = u + side * (hw - 2.1);
+          for (let z = zStart + 1.0; z < zEnd - 1.8; z += 6.2) {
             pushSlantedTopQuad(
               whiteLineAcc,
-              u + laneSep - 0.06,
-              u + laneSep + 0.06,
+              edge - 2.0,
+              edge - 1.9,
               z,
-              Math.min(z + 2.6, zEnd),
+              z + 2.5,
               0.012
             );
           }
@@ -582,52 +700,99 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
   for (let j = 0; j < HORIZONTAL_COUNT; j++) {
     const z = zLines[j];
     const hw = zHalfWidths[j];
-    for (let col = 0; col < DIAGONAL_LETTERS.length - 1; col++) {
-      const uStart = uLines[col] + uHalfWidths[col] + 2.6;
-      const uEnd = uLines[col + 1] - uHalfWidths[col + 1] - 2.6;
-      if (uEnd <= uStart) continue;
-      pushSlantedTopQuad(yellowLineAcc, uStart, uEnd, z - 0.14, z - 0.04, 0.012);
-      pushSlantedTopQuad(yellowLineAcc, uStart, uEnd, z + 0.04, z + 0.14, 0.012);
+    const cls = zClasses[j];
 
-      if (zIsMajor[j]) {
-        for (const laneSep of [-hw * 0.5, hw * 0.5]) {
-          for (let u = uStart; u < uEnd - 2.0; u += 5.5) {
-            pushSlantedTopQuad(
-              whiteLineAcc,
-              u,
-              Math.min(u + 2.6, uEnd),
-              z + laneSep - 0.06,
-              z + laneSep + 0.06,
-              0.012
-            );
+    for (let col = 0; col < DIAGONAL_LETTERS.length - 1; col++) {
+      const uStart = uLines[col] + uHalfWidths[col] + 2.8;
+      const uEnd = uLines[col + 1] - uHalfWidths[col + 1] - 2.8;
+      if (uEnd <= uStart) continue;
+
+      if (cls === 'avenue') {
+        pushSlantedTopQuad(yellowLineAcc, uStart, uEnd, z - 0.14, z - 0.04, 0.012);
+        pushSlantedTopQuad(yellowLineAcc, uStart, uEnd, z + 0.04, z + 0.14, 0.012);
+        for (const offset of [-3.5, 3.5]) {
+          dashAlongZ(whiteLineAcc, z + offset, uStart, uEnd, 3.0, 5.0);
+        }
+      } else if (cls !== 'boulevard') {
+        pushSlantedTopQuad(yellowLineAcc, uStart, uEnd, z - 0.12, z - 0.03, 0.012);
+        pushSlantedTopQuad(yellowLineAcc, uStart, uEnd, z + 0.03, z + 0.12, 0.012);
+      }
+
+      if (STREET_HIERARCHY[cls].parking) {
+        for (const side of [-1, 1]) {
+          const edge = z + side * (hw - 2.1);
+          for (let u = uStart + 1.0; u < uEnd - 1.8; u += 6.2) {
+            pushSlantedTopQuad(whiteLineAcc, u, u + 2.5, edge - 2.0, edge - 1.9, 0.012);
           }
         }
       }
     }
   }
 
-  // Zebra Crosswalks & Stop Bars at signaled / downtown intersections
+  // Crosswalks and stop bars at every signalised junction.
   for (const sig of signalIntersections) {
     const { u, z, uHalfWidth, zHalfWidth } = sig;
-    // Crosswalks North & South of intersection
     for (const dirZ of [-1, 1]) {
-      const cz0 = z + dirZ * (zHalfWidth + 0.35);
-      const cz1 = z + dirZ * (zHalfWidth + 2.15);
+      const cz0 = z + dirZ * (zHalfWidth + 0.45);
+      const cz1 = z + dirZ * (zHalfWidth + 2.35);
       const zMinC = Math.min(cz0, cz1);
       const zMaxC = Math.max(cz0, cz1);
-      for (let su = -uHalfWidth + 0.8; su <= uHalfWidth - 1.2; su += 1.35) {
-        pushSlantedTopQuad(whiteLineAcc, u + su, u + su + 0.65, zMinC, zMaxC, 0.013);
+      for (let su = -uHalfWidth + 0.9; su <= uHalfWidth - 1.3; su += 1.4) {
+        pushSlantedTopQuad(whiteLineAcc, u + su, u + su + 0.68, zMinC, zMaxC, 0.014);
       }
+      // Stop bar across the approaching lanes.
+      const barZ = dirZ > 0 ? cz1 + 1.6 : cz1 - 1.8;
+      pushSlantedTopQuad(
+        whiteLineAcc,
+        u - uHalfWidth + 0.6,
+        u + uHalfWidth - 0.6,
+        Math.min(barZ, barZ + 0.35),
+        Math.max(barZ, barZ + 0.35),
+        0.014
+      );
     }
-    // Crosswalks West & East of intersection
     for (const dirU of [-1, 1]) {
-      const cu0 = u + dirU * (uHalfWidth + 0.35);
-      const cu1 = u + dirU * (uHalfWidth + 2.15);
+      const cu0 = u + dirU * (uHalfWidth + 0.45);
+      const cu1 = u + dirU * (uHalfWidth + 2.35);
       const uMinC = Math.min(cu0, cu1);
       const uMaxC = Math.max(cu0, cu1);
-      for (let sz = -zHalfWidth + 0.8; sz <= zHalfWidth - 1.2; sz += 1.35) {
-        pushSlantedTopQuad(whiteLineAcc, uMinC, uMaxC, z + sz, z + sz + 0.65, 0.013);
+      for (let sz = -zHalfWidth + 0.9; sz <= zHalfWidth - 1.3; sz += 1.4) {
+        pushSlantedTopQuad(whiteLineAcc, uMinC, uMaxC, z + sz, z + sz + 0.68, 0.014);
       }
+    }
+  }
+
+  // M Street's planted median: raised kerb, soil, trees and shrubs, with
+  // turning bays left open at every signalised junction.
+  for (let row = 0; row < HORIZONTAL_COUNT - 1; row++) {
+    const zStart = zLines[row] + zHalfWidths[row] + 8.5;
+    const zEnd = zLines[row + 1] - zHalfWidths[row + 1] - 8.5;
+    if (zEnd - zStart < 8) continue;
+    pushSlantedPrism(
+      medianCurbAcc,
+      M_U - BOULEVARD_MEDIAN_HALF - 0.25,
+      M_U + BOULEVARD_MEDIAN_HALF + 0.25,
+      zStart,
+      zEnd,
+      0.0,
+      0.17,
+      4,
+      4,
+      true
+    );
+    pushSlantedTopQuad(
+      medianGreenAcc,
+      M_U - BOULEVARD_MEDIAN_HALF,
+      M_U + BOULEVARD_MEDIAN_HALF,
+      zStart + 0.25,
+      zEnd - 0.25,
+      0.18
+    );
+    for (let z = zStart + 3.2; z <= zEnd - 2.4; z += 9.5) {
+      treeCoords.push({ x: uzToWorldX(M_U, z), z, scale: 0.78 });
+    }
+    for (let z = zStart + 7.4; z <= zEnd - 2.0; z += 19) {
+      shrubCoords.push({ x: uzToWorldX(M_U, z), z, scale: 0.7 });
     }
   }
 
@@ -645,17 +810,29 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     );
     worldGroup.add(whiteMesh);
   }
+  const medianCurbMesh = new THREE.Mesh(
+    finalizeAccumulator(medianCurbAcc),
+    new THREE.MeshStandardMaterial({ color: 0xb8b2a4, roughness: 0.86 })
+  );
+  medianCurbMesh.receiveShadow = true;
+  worldGroup.add(medianCurbMesh);
+  const medianGreenMesh = new THREE.Mesh(
+    finalizeAccumulator(medianGreenAcc),
+    new THREE.MeshStandardMaterial({ color: 0x3f6b3d, roughness: 0.95 })
+  );
+  medianGreenMesh.receiveShadow = true;
+  worldGroup.add(medianGreenMesh);
 
-  // 3. Sidewalks, Parks, and Multi-Part UV-Mapped City Buildings across 725 blocks
+  // 3. Blocks: sidewalks, district architecture, parks, plazas, parking,
+  //    waterfront promenades and industrial service yards.
   const sidewalkAcc = createAccumulator();
   const parkGrassAcc = createAccumulator();
+  const plazaPavingAcc = createAccumulator();
+  const parkingAcc = createAccumulator();
   const storefrontAcc = createAccumulator();
   const roofAcc = createAccumulator();
   const crownAcc = createAccumulator();
   const facadeAccs = Array.from({ length: 6 }, () => createAccumulator());
-
-  const treeCoords: { x: number; z: number; scale: number }[] = [];
-  const lampCoords: { x: number; z: number; rotY: number }[] = [];
 
   function addCityBuilding(
     u0: number,
@@ -665,22 +842,22 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     totalH: number,
     setbackH: number,
     styleIdx: number,
-    hasCrown: boolean
+    hasCrown: boolean,
+    district: string
   ) {
     if (u1 - u0 < 3.2 || z1 - z0 < 3.2) return;
 
-    // Ground floor storefront podium (0.14 -> 3.6m)
-    const podiumTop = 3.6;
+    const commercial = district === 'downtown' || district === 'retail' || district === 'entertainment' || district === 'medical';
+    const podiumTop = commercial ? 4.4 : district.startsWith('residential') ? 3.2 : 3.8;
+
+    // Ground floor podium (retail frontage downtown, stoops in neighbourhoods).
     pushSlantedPrism(storefrontAcc, u0, u1, z0, z1, 0.14, podiumTop, 6, 4, true);
 
-    // Main tower shaft (3.6 -> totalH)
     const mainAcc = facadeAccs[styleIdx % facadeAccs.length];
     pushSlantedPrism(mainAcc, u0 + 0.12, u1 - 0.12, z0 + 0.12, z1 - 0.12, podiumTop, totalH, 10, 9, false);
-    // Concrete roof cap
     pushSlantedTopQuad(roofAcc, u0 + 0.12, u1 - 0.12, z0 + 0.12, z1 - 0.12, totalH);
     cameraOccluders.push({ u0, u1, z0, z1, y0: 0, y1: totalH });
 
-    // Secondary architectural setback tower
     let topY = totalH;
     let topU0 = u0 + 0.12;
     let topU1 = u1 - 0.12;
@@ -700,178 +877,463 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
       cameraOccluders.push({ u0: topU0, u1: topU1, z0: topZ0, z1: topZ1, y0: totalH, y1: topY });
     }
 
-    // Rooftop Mechanical Penthouse / Crown
     if (hasCrown && topU1 - topU0 > 4 && topZ1 - topZ0 > 4) {
       const cu0 = topU0 + (topU1 - topU0) * 0.24;
       const cu1 = topU1 - (topU1 - topU0) * 0.24;
       const cz0 = topZ0 + (topZ1 - topZ0) * 0.24;
       const cz1 = topZ1 - (topZ1 - topZ0) * 0.24;
-      pushSlantedPrism(crownAcc, cu0, cu1, cz0, cz1, topY, topY + 2.8, 5, 5, true);
+      pushSlantedPrism(crownAcc, cu0, cu1, cz0, cz1, topY, topY + 3.0, 5, 5, true);
+    }
+
+    // Balcony bands on residential blocks give the street a human scale.
+    if (district.startsWith('residential') || district === 'luxury') {
+      const bands = district === 'luxury' ? 3 : 2;
+      for (let b = 0; b < bands; b++) {
+        const y = podiumTop + 2.4 + b * 3.2;
+        if (y > totalH - 2.0) break;
+        pushSlantedPrism(balconyAcc, u0 - 0.28, u1 + 0.28, z0 - 0.28, z1 + 0.28, y, y + 0.12, 4, 4, true);
+      }
+    }
+
+    // Rooftop water tanks are a New York-style silhouette detail.
+    if (district.startsWith('residential') && totalH < 40 && (topU1 - topU0) > 5) {
+      waterTankCoords.push({
+        x: uzToWorldX((topU0 + topU1) / 2, (topZ0 + topZ1) / 2),
+        z: (topZ0 + topZ1) / 2,
+        y: topY + 1.3,
+        scale: 1,
+      });
+    }
+
+    // Green roofs for the newest downtown and luxury towers.
+    if ((district === 'downtown' || district === 'luxury') && totalH > 45) {
+      pushSlantedTopQuad(
+        greenRoofAcc,
+        topU0 + 1.0,
+        topU1 - 1.0,
+        topZ0 + 1.0,
+        topZ1 - 1.0,
+        topY + 0.03
+      );
+    }
+  }
+
+  function addIndustrialBuilding(blk: (typeof blocks)[number]) {
+    const inset = blk.sidewalk + blk.setback + 1.4;
+    const yard = 7.0;
+    const u0 = blk.uMin + inset;
+    const u1 = blk.uMax - inset;
+    const z0 = blk.zMin + inset;
+    const z1 = blk.zMax - inset - yard;
+    if (u1 - u0 < 6 || z1 - z0 < 6) return;
+    const h = blk.height;
+    const acc = facadeAccs[3];
+    pushSlantedPrism(acc, u0, u1, z0, z1, 0.14, h, 10, 6, false);
+    pushSlantedTopQuad(roofAcc, u0, u1, z0, z1, h);
+    // Saw-tooth roof lights.
+    const teeth = Math.max(2, Math.floor((u1 - u0) / 7));
+    for (let t = 0; t < teeth; t += 1) {
+      const tu = u0 + 2.0 + (t * (u1 - u0 - 4.0)) / Math.max(1, teeth - 1);
+      pushSlantedPrism(acc, tu - 1.6, tu + 1.6, z0 + 1.2, z1 - 1.2, h, h + 1.3, 5, 5, true);
+    }
+    // Loading dock canopy and roll-up doors facing the street.
+    const dockZ = z0 - 1.9;
+    pushSlantedPrism(
+      loadingDockAcc,
+      u0 + 1.0,
+      u1 - 1.0,
+      dockZ,
+      z0 + 0.4,
+      4.2,
+      4.55,
+      3,
+      3,
+      true
+    );
+    for (let d = 0; d < 3; d += 1) {
+      const du = u0 + 3.0 + d * 6.0;
+      pushSlantedPrism(loadingDockAcc, du - 1.8, du + 1.8, z0 - 0.05, z0 + 0.8, 0.14, 3.8, 3, 3, true);
+    }
+    // Container yard in the reserved strip behind the shed.
+    for (let c = 0; c < 4; c += 1) {
+      const cu = u0 + 2.0 + c * 3.6;
+      const cz = blk.zMax - 4.2;
+      if (cu > u1 - 2.0) break;
+      containerCoords.push({
+        x: uzToWorldX(cu, cz),
+        z: cz,
+        rotY: 0,
+        color: [0x9a4b3a, 0x2f6f86, 0xb08c3c, 0x3f6b52][c % 4],
+      });
+    }
+    cameraOccluders.push({ u0, u1, z0, z1, y0: 0, y1: h + 1.3 });
+  }
+
+  function addPark(blk: (typeof blocks)[number]) {
+    const { uMin, uMax, zMin, zMax } = blk;
+    const width = uMax - uMin;
+    const depth = zMax - zMin;
+    const midU = (uMin + uMax) / 2;
+    const midZ = (zMin + zMax) / 2;
+    pushSlantedPrism(parkGrassAcc, uMin + 1.4, uMax - 1.4, zMin + 1.4, zMax - 1.4, 0.12, 0.16, 8, 8, true);
+    // Perimeter walking path and a crossing path.
+    const path = 1.9;
+    pushSlantedPrism(plazaPavingAcc, uMin + 1.4, uMax - 1.4, zMin + 1.4, zMin + 1.4 + path, 0.14, 0.19, 5, 5, true);
+    pushSlantedPrism(plazaPavingAcc, uMin + 1.4, uMax - 1.4, zMax - 1.4 - path, zMax - 1.4, 0.14, 0.19, 5, 5, true);
+    pushSlantedPrism(plazaPavingAcc, uMin + 1.4, uMin + 1.4 + path, zMin + 1.4, zMax - 1.4, 0.14, 0.19, 5, 5, true);
+    pushSlantedPrism(plazaPavingAcc, uMax - 1.4 - path, uMax - 1.4, zMin + 1.4, zMax - 1.4, 0.14, 0.19, 5, 5, true);
+    pushSlantedPrism(plazaPavingAcc, midU - 1.2, midU + 1.2, zMin + 1.4, zMax - 1.4, 0.14, 0.19, 5, 5, true);
+
+    const large = width > 34 && depth > 32;
+    if (large) {
+      // Pond with a stone rim and a small fountain jet.
+      const pondU = midU - width * 0.18;
+      const pondZ = midZ - depth * 0.12;
+      const pond = new THREE.Mesh(
+        new THREE.CylinderGeometry(5.2, 5.4, 0.34, 28),
+        new THREE.MeshStandardMaterial({ color: 0x5b6f6a, roughness: 0.9 })
+      );
+      pond.position.set(uzToWorldX(pondU, pondZ), 0.18, pondZ);
+      worldGroup.add(pond);
+      const pondWater = new THREE.Mesh(
+        new THREE.CylinderGeometry(4.8, 4.8, 0.2, 28),
+        new THREE.MeshPhysicalMaterial({
+          color: 0x4d94a8,
+          roughness: 0.12,
+          clearcoat: 0.9,
+          transparent: true,
+          opacity: 0.9,
+        })
+      );
+      pondWater.position.set(uzToWorldX(pondU, pondZ), 0.36, pondZ);
+      worldGroup.add(pondWater);
+      obstacles.push({ type: 'circle', x: uzToWorldX(pondU, pondZ), z: pondZ, r: 5.4 });
+
+      // Timber gazebo at the other corner.
+      const gazeboU = midU + width * 0.22;
+      const gazeboZ = midZ + depth * 0.2;
+      const gazebo = new THREE.Group();
+      gazebo.position.set(uzToWorldX(gazeboU, gazeboZ), 0.16, gazeboZ);
+      const timber = new THREE.MeshStandardMaterial({ color: 0x7a5636, roughness: 0.72 });
+      for (const [gx, gz] of [
+        [-2.4, -2.4],
+        [2.4, -2.4],
+        [-2.4, 2.4],
+        [2.4, 2.4],
+      ]) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.22, 3.0, 0.22), timber);
+        post.position.set(gx, 1.5, gz);
+        gazebo.add(post);
+      }
+      const gazeboRoof = new THREE.Mesh(new THREE.ConeGeometry(4.2, 1.5, 4), timber);
+      gazeboRoof.position.y = 3.75;
+      gazeboRoof.rotation.y = Math.PI / 4;
+      gazebo.add(gazeboRoof);
+      worldGroup.add(gazebo);
+      obstacles.push({ type: 'box', x: uzToWorldX(gazeboU, gazeboZ), z: gazeboZ, hw: 2.8, hd: 2.8 });
+    }
+
+    // Playground corner with colourful equipment.
+    const playU = uMax - 5.2;
+    const playZ = zMax - 5.2;
+    pushSlantedPrism(playgroundAcc, playU - 3.0, playU + 2.4, playZ - 2.6, playZ + 2.4, 0.18, 0.2, 2, 2, true);
+    pushSlantedPrism(playgroundAcc, playU - 2.2, playU - 0.4, playZ - 2.4, playZ - 0.8, 0.2, 1.6, 2, 2, true);
+    pushSlantedPrism(playgroundAcc, playU + 0.4, playU + 2.2, playZ - 2.4, playZ - 0.8, 0.2, 1.0, 2, 2, true);
+    pushSlantedPrism(playgroundAcc, playU - 1.6, playU + 1.6, playZ + 1.4, playZ + 1.9, 0.2, 2.4, 2, 2, true);
+
+    // Benches and trees around the park edges.
+    for (const [u, z, rotY] of [
+      [midU - 6, zMin + 4.0, 0],
+      [midU + 6, zMin + 4.0, 0],
+      [midU - 6, zMax - 4.0, Math.PI],
+      [midU + 6, zMax - 4.0, Math.PI],
+    ] as const) {
+      benchCoords.push({ x: uzToWorldX(u, z), z, rotY });
+    }
+    const treeCount = large ? 10 : 5;
+    for (let i = 0; i < treeCount; i += 1) {
+      const angle = (i / treeCount) * Math.PI * 2;
+      const tu = midU + Math.cos(angle) * width * 0.32;
+      const tz = midZ + Math.sin(angle) * depth * 0.3;
+      if (Math.abs(tu - midU) < 2.6) continue;
+      treeCoords.push({ x: uzToWorldX(tu, tz), z: tz, scale: 1.05 + (i % 3) * 0.12 });
+    }
+  }
+
+  function addParkingLot(blk: (typeof blocks)[number]) {
+    const { uMin, uMax, zMin, zMax } = blk;
+    pushSlantedPrism(parkingAcc, uMin + 0.6, uMax - 0.6, zMin + 0.6, zMax - 0.6, 0.0, 0.06, 10, 10, true);
+    const midU = (uMin + uMax) / 2;
+    const midZ = (zMin + zMax) / 2;
+    // Two rows of stalls with a drive aisle between them.
+    const stallWidth = 2.7;
+    for (const side of [-1, 1]) {
+      const rowU = midU + side * 5.2;
+      for (let z = zMin + 3.0; z < zMax - 3.0; z += stallWidth) {
+        pushSlantedTopQuad(detailLineAcc, rowU - 4.6, rowU + 4.6, z, z + 0.12, 0.07);
+        if ((Math.round(z) / stallWidth) % 2 === 0) {
+          parkedCarCoords.push({
+            x: uzToWorldX(rowU, z + 1.35),
+            z: z + 1.35,
+            rotY: Math.PI / 2,
+            color: [0x9aa4ad, 0x2f5a8a, 0x8f2d2d, 0xe6ebe7, 0x39465c][Math.abs(Math.round(z)) % 5],
+          });
+        }
+      }
+    }
+    // Kiosk + lighting.
+    const kioskU = uMax - 3.4;
+    const kioskZ = zMax - 3.4;
+    pushSlantedPrism(storefrontAcc, kioskU - 1.6, kioskU + 1.6, kioskZ - 1.6, kioskZ + 1.6, 0.06, 3.2, 4, 4, true);
+    pushSlantedPrism(loadingDockAcc, kioskU - 2.0, kioskU + 2.0, kioskZ - 2.0, kioskZ + 2.0, 3.2, 3.4, 3, 3, true);
+    for (const [lu, lz] of [
+      [uMin + 3, zMin + 3],
+      [uMax - 3, zMin + 3],
+      [uMin + 3, zMax - 3],
+    ] as const) {
+      lampCoords.push({ x: uzToWorldX(lu, lz), z: lz, rotY: Math.PI / 2 });
+    }
+  }
+
+  function addPlaza(blk: (typeof blocks)[number]) {
+    const { uMin, uMax, zMin, zMax } = blk;
+    const midU = (uMin + uMax) / 2;
+    const midZ = (zMin + zMax) / 2;
+    pushSlantedPrism(plazaPavingAcc, uMin + 0.8, uMax - 0.8, zMin + 0.8, zMax - 0.8, 0.12, 0.17, 6, 6, true);
+    // Public art plinth and sculpture.
+    pushSlantedPrism(plazaArtAcc, midU - 1.1, midU + 1.1, midZ - 1.1, midZ + 1.1, 0.17, 1.1, 3, 3, true);
+    pushSlantedPrism(plazaArtAcc, midU - 0.45, midU + 0.45, midZ - 0.45, midZ + 0.45, 1.1, 4.4, 3, 3, true);
+    pushSlantedPrism(plazaArtAcc, midU - 1.5, midU + 1.5, midZ - 0.18, midZ + 0.18, 3.4, 3.9, 3, 3, true);
+    obstacles.push({ type: 'box', x: uzToWorldX(midU, midZ), z: midZ, hw: 1.4, hd: 1.4 });
+    // Planters and benches around the square.
+    for (const [du, dz, rotY] of [
+      [0, -3.6, Math.PI],
+      [0, 3.6, 0],
+      [-4.0, 0, Math.PI / 2],
+      [4.0, 0, -Math.PI / 2],
+    ] as const) {
+      const u = midU + du;
+      const z = midZ + dz;
+      benchCoords.push({ x: uzToWorldX(u, z), z, rotY });
+      planterCoords.push({ x: uzToWorldX(u - 2.2, z - 1.6), z: z - 1.6, scale: 1 });
+    }
+    for (const corner of [
+      [uMin + 3, zMin + 3],
+      [uMax - 3, zMin + 3],
+      [uMin + 3, zMax - 3],
+      [uMax - 3, zMax - 3],
+    ] as const) {
+      treeCoords.push({ x: uzToWorldX(corner[0], corner[1]), z: corner[1], scale: 0.95 });
+    }
+  }
+
+  function addPromenade(blk: (typeof blocks)[number]) {
+    const { uMin, uMax, zMin, zMax } = blk;
+    const midU = (uMin + uMax) / 2;
+    pushSlantedPrism(plazaPavingAcc, uMin, uMax, zMin, zMax, 0.14, 0.17, 5, 5, true);
+    // Planted centre line with benches facing the water or the shops.
+    const facingWater = uMax > waterfront.uEdge - 40;
+    for (let z = zMin + 4; z < zMax - 2; z += 7.5) {
+      treeCoords.push({ x: uzToWorldX(midU, z), z, scale: 0.9 });
+      benchCoords.push({
+        x: uzToWorldX(facingWater ? uMax - 3.6 : midU, z + 2.6),
+        z: z + 2.6,
+        rotY: facingWater ? -Math.PI / 2 : Math.PI,
+      });
+    }
+    for (let z = zMin + 6; z < zMax - 4; z += 10) {
+      stringLightCoords.push({ x: uzToWorldX(midU + 2.2, z), y: 3.6, z });
+      stringLightCoords.push({ x: uzToWorldX(midU - 2.2, z), y: 3.6, z });
+    }
+    // Market promenade gets stalls; the river esplanade gets a railing.
+    if (!facingWater) {
+      for (let s = 0; s < 3; s += 1) {
+        const su = uMin + 4.0 + s * 6.4;
+        const sz = zMax - 4.0;
+        pushSlantedPrism(storefrontAcc, su - 2.0, su + 2.0, sz - 1.4, sz + 1.4, 0.17, 2.6, 3, 3, true);
+        pushSlantedPrism(loadingDockAcc, su - 2.5, su + 2.5, sz - 1.8, sz + 1.8, 2.6, 2.8, 3, 3, true);
+      }
     }
   }
 
   for (const blk of blocks) {
-    // Full block sidewalk curb (14cm tall realistic sidewalk)
-    pushSlantedPrism(sidewalkAcc, blk.uMin, blk.uMax, blk.zMin, blk.zMax, 0.0, 0.14, 6, 6, true);
+    if (blk.kind === 'park') {
+      addPark(blk);
+      continue;
+    }
+    if (blk.kind === 'parking') {
+      addParkingLot(blk);
+      continue;
+    }
+    if (blk.kind === 'plaza') {
+      addPlaza(blk);
+      continue;
+    }
+    if (blk.kind === 'promenade') {
+      addPromenade(blk);
+      continue;
+    }
+
+    // Every built block rests on a continuous raised sidewalk.
+    pushSlantedPrism(
+      sidewalkAcc,
+      blk.uMin,
+      blk.uMax,
+      blk.zMin,
+      blk.zMax,
+      0.0,
+      blk.walkHeight,
+      6,
+      6,
+      true
+    );
 
     if (blk.kind === 'loft_plaza') {
       pushSlantedPrism(
-        sidewalkAcc,
+        plazaPavingAcc,
         blk.uMin + 0.4,
         blk.uMax - 0.4,
         blk.zMin + 0.4,
         blk.zMax - 0.4,
-        0.14,
-        0.17,
+        blk.walkHeight,
+        blk.walkHeight + 0.03,
         6,
         6,
         true
       );
+      for (const [du, dz] of [
+        [-0.34, -0.34],
+        [0.34, -0.34],
+        [-0.34, 0.34],
+        [0.34, 0.34],
+      ] as const) {
+        treeCoords.push({
+          x: uzToWorldX((blk.uMin + blk.uMax) / 2 + (blk.uMax - blk.uMin) * du, (blk.zMin + blk.zMax) / 2 + (blk.zMax - blk.zMin) * dz),
+          z: (blk.zMin + blk.zMax) / 2 + (blk.zMax - blk.zMin) * dz,
+          scale: 1.0,
+        });
+      }
       continue;
     }
 
-    if (
-      blk.kind === 'loft_hotel' ||
-      blk.kind === 'airport' ||
-      blk.kind === 'clothing_store'
-    ) {
-      pushSlantedPrism(sidewalkAcc, blk.uMin + 0.4, blk.uMax - 0.4, blk.zMin + 0.4, blk.zMax - 0.4, 0.14, 0.17, 6, 6, true);
+    if (blk.kind === 'venue' || blk.kind === 'loft_hotel' || blk.kind === 'airport' || blk.kind === 'clothing_store') {
+      // These landmarks build their own facades, forecourts and landscaping.
       continue;
     }
 
-    if (blk.kind === 'venue') {
-      // The public destinations build their own storefronts, interiors and
-      // landscaping in venueBuilder; only the block sidewalk is shared.
-      pushSlantedPrism(sidewalkAcc, blk.uMin + 0.4, blk.uMax - 0.4, blk.zMin + 0.4, blk.zMax - 0.4, 0.14, 0.17, 6, 6, true);
-      continue;
-    }
+    // Ordinary city block: one or two buildings behind the sidewalk.
+    const inset = blk.sidewalk + blk.setback;
+    const bu0 = blk.uMin + inset;
+    const bu1 = blk.uMax - inset;
+    const bz0 = blk.zMin + inset;
+    const bz1 = blk.zMax - inset;
 
-    if (blk.kind === 'park') {
-      pushSlantedPrism(
-        parkGrassAcc,
-        blk.uMin + 2.2,
-        blk.uMax - 2.2,
-        blk.zMin + 2.2,
-        blk.zMax - 2.2,
-        0.14,
-        0.2,
-        8,
-        8,
-        true
-      );
-      const midU = (blk.uMin + blk.uMax) / 2;
-      const midZ = (blk.zMin + blk.zMax) / 2;
-      treeCoords.push({ x: uzToWorldX(midU - 3.6, midZ - 2.6), z: midZ - 2.6, scale: 1.25 });
-      treeCoords.push({ x: uzToWorldX(midU + 3.6, midZ + 2.4), z: midZ + 2.4, scale: 1.1 });
-      treeCoords.push({ x: uzToWorldX(midU - 2.5, midZ + 3.4), z: midZ + 3.4, scale: 0.95 });
-      continue;
-    }
-
-    // Building footprint inset by 2.6m walkable city sidewalk
-    const bu0 = blk.uMin + 2.6;
-    const bu1 = blk.uMax - 2.6;
-    const bz0 = blk.zMin + 2.6;
-    const bz1 = blk.zMax - 2.6;
-
-    if (blk.subSplit === 'split_u' && bu1 - bu0 > 13) {
+    if (blk.district === 'industrial') {
+      addIndustrialBuilding(blk);
+    } else if (blk.subSplit === 'split_u' && bu1 - bu0 > 13) {
       const midU = (bu0 + bu1) / 2;
-      addCityBuilding(
-        bu0,
-        midU - 0.6,
-        bz0,
-        bz1,
-        blk.height,
-        blk.setbackHeight,
-        blk.facadeStyle,
-        blk.hasTowerCrown
-      );
-      addCityBuilding(
-        midU + 0.6,
-        bu1,
-        bz0,
-        bz1,
-        Math.max(10, blk.height * 0.78),
-        0,
-        (blk.facadeStyle + 2) % 6,
-        false
-      );
+      addCityBuilding(bu0, midU - 0.7, bz0, bz1, blk.height, blk.setbackHeight, blk.facadeStyle, blk.hasTowerCrown, blk.district);
+      addCityBuilding(midU + 0.7, bu1, bz0, bz1, Math.max(8, blk.height * 0.76), 0, (blk.facadeStyle + 2) % 6, false, blk.district);
     } else if (blk.subSplit === 'split_z' && bz1 - bz0 > 13) {
       const midZ = (bz0 + bz1) / 2;
-      addCityBuilding(
-        bu0,
-        bu1,
-        bz0,
-        midZ - 0.6,
-        blk.height,
-        blk.setbackHeight,
-        blk.facadeStyle,
-        blk.hasTowerCrown
-      );
-      addCityBuilding(
-        bu0,
-        bu1,
-        midZ + 0.6,
-        bz1,
-        Math.max(10, blk.height * 0.82),
-        0,
-        (blk.facadeStyle + 3) % 6,
-        false
-      );
+      addCityBuilding(bu0, bu1, bz0, midZ - 0.7, blk.height, blk.setbackHeight, blk.facadeStyle, blk.hasTowerCrown, blk.district);
+      addCityBuilding(bu0, bu1, midZ + 0.7, bz1, Math.max(8, blk.height * 0.8), 0, (blk.facadeStyle + 3) % 6, false, blk.district);
     } else {
-      addCityBuilding(
-        bu0,
-        bu1,
-        bz0,
-        bz1,
-        blk.height,
-        blk.setbackHeight,
-        blk.facadeStyle,
-        blk.hasTowerCrown
-      );
+      addCityBuilding(bu0, bu1, bz0, bz1, blk.height, blk.setbackHeight, blk.facadeStyle, blk.hasTowerCrown, blk.district);
     }
 
-    // Streetlamps & street trees along major avenues & every other corner
-    if ((blk.col + blk.row) % 2 === 0) {
-      const lx = uzToWorldX(blk.uMin + 0.85, blk.zMin + 0.85);
-      lampCoords.push({ x: lx, z: blk.zMin + 0.85, rotY: 0 });
+    // Street trees and lamps scale with the district.
+    const dist = CITY_LAYOUT.districts.find((d) => d.id === blk.district)!;
+    const spacing = dist.treeDensity >= 1.2 ? 11 : dist.treeDensity >= 0.8 ? 14 : 20;
+    const treeEdgeU = blk.uMin + Math.max(1.0, blk.sidewalk * 0.45);
+    for (let z = blk.zMin + 4.0; z < blk.zMax - 3.0; z += spacing) {
+      if ((Math.round(z * 3) + blk.col) % 3 === 0) continue;
+      treeCoords.push({ x: uzToWorldX(treeEdgeU, z), z, scale: 0.9 + ((blk.col + blk.row) % 3) * 0.08 });
     }
-    if (blk.col === 12 || blk.row === 14) {
-      const sx = uzToWorldX(blk.uMax - 0.9, blk.zMax - 0.9);
-      lampCoords.push({ x: sx, z: blk.zMax - 0.9, rotY: Math.PI });
+    if (dist.furniture > 0.8) {
+      lampCoords.push({ x: uzToWorldX(blk.uMin + 1.2, blk.zMin + 1.2), z: blk.zMin + 1.2, rotY: 0 });
+      lampCoords.push({ x: uzToWorldX(blk.uMax - 1.2, blk.zMax - 1.2), z: blk.zMax - 1.2, rotY: Math.PI });
+    } else {
+      lampCoords.push({ x: uzToWorldX(blk.uMin + 1.2, blk.zMin + 1.2), z: blk.zMin + 1.2, rotY: 0 });
     }
-    if ((blk.col + blk.row) % 5 === 1) {
-      const tx = uzToWorldX(blk.uMin + 1.25, (blk.zMin + blk.zMax) / 2);
-      treeCoords.push({ x: tx, z: (blk.zMin + blk.zMax) / 2, scale: 0.92 });
+    if (dist.furniture >= 1.4 && (blk.col + blk.row) % 3 === 0) {
+      benchCoords.push({
+        x: uzToWorldX(blk.uMax - 1.5, (blk.zMin + blk.zMax) / 2),
+        z: (blk.zMin + blk.zMax) / 2,
+        rotY: -Math.PI / 2,
+      });
+      planterCoords.push({
+        x: uzToWorldX(blk.uMin + 1.6, blk.zMin + 1.6),
+        z: blk.zMin + 1.6,
+        scale: 1,
+      });
     }
   }
 
+  // Street furniture along the M Street boulevard frontage.
+  for (let row = 0; row < HORIZONTAL_COUNT - 1; row++) {
+    for (const side of [-1, 1]) {
+      const u = M_U + side * (uHalfWidths[M_STREET_INDEX] + 2.2);
+      for (let z = zLines[row] + 6; z < zLines[row + 1] - 6; z += 16) {
+        planterCoords.push({ x: uzToWorldX(u, z), z, scale: 1.05 });
+        if ((Math.round(z) + side) % 3 === 0) {
+          benchCoords.push({ x: uzToWorldX(u + side * 1.4, z + 4.2), z: z + 4.2, rotY: side > 0 ? -Math.PI / 2 : Math.PI / 2 });
+        }
+      }
+    }
+  }
+
+  // Riverfront railing along the esplanade.
+  const railingAcc = createAccumulator();
+  const railZ0 = zLines[10] - 4;
+  const railZ1 = zLines[14] + 4;
+  pushSlantedPrism(railingAcc, waterfront.uEdge - 1.0, waterfront.uEdge - 0.8, railZ0, railZ1, 0.95, 1.05, 2, 2, true);
+  for (let z = railZ0; z <= railZ1; z += 3.4) {
+    pushSlantedPrism(railingAcc, waterfront.uEdge - 1.02, waterfront.uEdge - 0.78, z - 0.06, z + 0.06, 0.17, 1.0, 2, 2, true);
+  }
+
+  // Surface meshes.
   const sidewalkTex = createSidewalkTexture(maxAnisotropy);
   const sidewalkMesh = new THREE.Mesh(
     finalizeAccumulator(sidewalkAcc),
-    new THREE.MeshStandardMaterial({
-      map: sidewalkTex,
-      roughness: 0.84,
-      metalness: 0.02,
-    })
+    new THREE.MeshStandardMaterial({ map: sidewalkTex, roughness: 0.84, metalness: 0.02 })
   );
   sidewalkMesh.receiveShadow = true;
   worldGroup.add(sidewalkMesh);
 
   const parkGrassMesh = new THREE.Mesh(
     finalizeAccumulator(parkGrassAcc),
-    new THREE.MeshStandardMaterial({ color: 0x4f7d4a, roughness: 0.92 })
+    new THREE.MeshStandardMaterial({ color: 0x4f7d4a, roughness: 0.94 })
   );
   parkGrassMesh.receiveShadow = true;
   worldGroup.add(parkGrassMesh);
 
+  const plazaPavingMesh = new THREE.Mesh(
+    finalizeAccumulator(plazaPavingAcc),
+    new THREE.MeshStandardMaterial({ map: sidewalkTex, color: 0xd8cdb8, roughness: 0.82 })
+  );
+  plazaPavingMesh.receiveShadow = true;
+  worldGroup.add(plazaPavingMesh);
+
+  const parkingMesh = new THREE.Mesh(
+    finalizeAccumulator(parkingAcc),
+    new THREE.MeshStandardMaterial({ map: asphaltTex, color: 0x8d8f8a, roughness: 0.9 })
+  );
+  parkingMesh.receiveShadow = true;
+  worldGroup.add(parkingMesh);
+
+  if (detailLineAcc.positions.length > 0) {
+    const detailLineMesh = new THREE.Mesh(
+      finalizeAccumulator(detailLineAcc),
+      new THREE.MeshBasicMaterial({ color: 0xe2e8f0 })
+    );
+    worldGroup.add(detailLineMesh);
+  }
+
   if (storefrontAcc.positions.length > 0) {
     const sfMesh = new THREE.Mesh(
       finalizeAccumulator(storefrontAcc),
-      new THREE.MeshStandardMaterial({
-        color: 0x1e242c,
-        roughness: 0.32,
-        metalness: 0.45,
-      })
+      new THREE.MeshStandardMaterial({ color: 0x1e242c, roughness: 0.32, metalness: 0.45 })
     );
     sfMesh.castShadow = true;
     sfMesh.receiveShadow = true;
@@ -887,13 +1349,67 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     worldGroup.add(roofMesh);
   }
 
+  if (loadingDockAcc.positions.length > 0) {
+    const dockMesh = new THREE.Mesh(
+      finalizeAccumulator(loadingDockAcc),
+      new THREE.MeshStandardMaterial({ color: 0x59616a, roughness: 0.82, metalness: 0.16 })
+    );
+    dockMesh.castShadow = true;
+    dockMesh.receiveShadow = true;
+    worldGroup.add(dockMesh);
+  }
+
+  if (balconyAcc.positions.length > 0) {
+    const balconyMesh = new THREE.Mesh(
+      finalizeAccumulator(balconyAcc),
+      new THREE.MeshStandardMaterial({ color: 0xb7ab98, roughness: 0.78 })
+    );
+    balconyMesh.castShadow = true;
+    balconyMesh.receiveShadow = true;
+    worldGroup.add(balconyMesh);
+  }
+
+  if (greenRoofAcc.positions.length > 0) {
+    const greenRoofMesh = new THREE.Mesh(
+      finalizeAccumulator(greenRoofAcc),
+      new THREE.MeshStandardMaterial({ color: 0x4b7a4d, roughness: 0.92 })
+    );
+    greenRoofMesh.receiveShadow = true;
+    worldGroup.add(greenRoofMesh);
+  }
+
+  if (plazaArtAcc.positions.length > 0) {
+    const artMesh = new THREE.Mesh(
+      finalizeAccumulator(plazaArtAcc),
+      new THREE.MeshStandardMaterial({ color: 0xc9a95a, roughness: 0.42, metalness: 0.62 })
+    );
+    artMesh.castShadow = true;
+    artMesh.receiveShadow = true;
+    worldGroup.add(artMesh);
+  }
+
+  if (playgroundAcc.positions.length > 0) {
+    const playMesh = new THREE.Mesh(
+      finalizeAccumulator(playgroundAcc),
+      new THREE.MeshStandardMaterial({ color: 0xd07a3a, roughness: 0.55 })
+    );
+    playMesh.castShadow = true;
+    playMesh.receiveShadow = true;
+    worldGroup.add(playMesh);
+  }
+
+  if (railingAcc.positions.length > 0) {
+    const railingMesh = new THREE.Mesh(
+      finalizeAccumulator(railingAcc),
+      new THREE.MeshStandardMaterial({ color: 0x2f3740, roughness: 0.35, metalness: 0.8 })
+    );
+    worldGroup.add(railingMesh);
+  }
+
   const facadeMaterials: THREE.MeshStandardMaterial[] = [];
   facadeAccs.forEach((acc, styleIdx) => {
     if (acc.positions.length === 0) return;
-    const { map, emissiveMap, roughnessMap } = createBuildingFacadeTextures(
-      styleIdx,
-      maxAnisotropy
-    );
+    const { map, emissiveMap, roughnessMap } = createBuildingFacadeTextures(styleIdx, maxAnisotropy);
     const mat = new THREE.MeshStandardMaterial({
       map,
       emissiveMap,
@@ -918,7 +1434,8 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     worldGroup.add(crownMesh);
   }
 
-  // 4. Instanced Realistic Multi-Tier Trees & Architectural Streetlights
+  // 4. Instanced trees, streetlights, benches, planters, parked cars,
+  //    containers and rooftop water tanks.
   if (treeCoords.length > 0) {
     const trunkInst = new THREE.InstancedMesh(
       new THREE.CylinderGeometry(0.14, 0.24, 2.2, 8),
@@ -926,17 +1443,18 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
       treeCoords.length
     );
     const canopyLower = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(1.15, 12, 10),
+      new THREE.SphereGeometry(1.15, 10, 8),
       new THREE.MeshStandardMaterial({ color: 0x3e6e44, roughness: 0.85 }),
       treeCoords.length
     );
     const canopyUpper = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(0.88, 12, 10),
+      new THREE.SphereGeometry(0.88, 10, 8),
       new THREE.MeshStandardMaterial({ color: 0x4d8252, roughness: 0.82 }),
       treeCoords.length
     );
     const dummy = new THREE.Object3D();
     treeCoords.forEach((tc, i) => {
+      dummy.rotation.set(0, (i * 1.37) % Math.PI, 0);
       dummy.position.set(tc.x, 1.1 * tc.scale, tc.z);
       dummy.scale.setScalar(tc.scale);
       dummy.updateMatrix();
@@ -1002,6 +1520,173 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     armInst.computeBoundingSphere();
     globeInst.computeBoundingSphere();
     worldGroup.add(poleInst, armInst, globeInst);
+  }
+
+  // Public benches (instanced seat/back/leg set) across parks and plazas.
+  if (benchCoords.length > 0) {
+    const seatMat = new THREE.MeshStandardMaterial({ color: 0x8c5c38, roughness: 0.62 });
+    const ironMat = new THREE.MeshStandardMaterial({ color: 0x22262e, roughness: 0.4, metalness: 0.7 });
+    const seatInst = new THREE.InstancedMesh(new THREE.BoxGeometry(1.5, 0.08, 0.46), seatMat, benchCoords.length);
+    const backInst = new THREE.InstancedMesh(new THREE.BoxGeometry(1.5, 0.42, 0.07), seatMat, benchCoords.length);
+    const legInst = new THREE.InstancedMesh(new THREE.BoxGeometry(0.09, 0.42, 0.42), ironMat, benchCoords.length);
+    const legInst2 = new THREE.InstancedMesh(new THREE.BoxGeometry(0.09, 0.42, 0.42), ironMat, benchCoords.length);
+    const dummy = new THREE.Object3D();
+    benchCoords.forEach((bc, i) => {
+      dummy.rotation.set(0, bc.rotY, 0);
+      dummy.position.set(bc.x, 0.6, bc.z);
+      dummy.updateMatrix();
+      seatInst.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(bc.x - Math.sin(bc.rotY) * 0.2, 0.84, bc.z - Math.cos(bc.rotY) * 0.2);
+      dummy.updateMatrix();
+      backInst.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(bc.x + Math.cos(bc.rotY) * 0.6, 0.39, bc.z - Math.sin(bc.rotY) * 0.6);
+      dummy.updateMatrix();
+      legInst.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(bc.x - Math.cos(bc.rotY) * 0.6, 0.39, bc.z + Math.sin(bc.rotY) * 0.6);
+      dummy.updateMatrix();
+      legInst2.setMatrixAt(i, dummy.matrix);
+    });
+    [seatInst, backInst, legInst, legInst2].forEach((m) => {
+      m.computeBoundingSphere();
+      m.receiveShadow = true;
+      worldGroup.add(m);
+    });
+  }
+
+  if (planterCoords.length > 0) {
+    const planterInst = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(1.5, 0.55, 1.5),
+      new THREE.MeshStandardMaterial({ color: 0x8b8578, roughness: 0.9 }),
+      planterCoords.length
+    );
+    const plantInst = new THREE.InstancedMesh(
+      new THREE.IcosahedronGeometry(0.7, 1),
+      new THREE.MeshStandardMaterial({ color: 0x467a4a, roughness: 0.9 }),
+      planterCoords.length
+    );
+    const dummy = new THREE.Object3D();
+    planterCoords.forEach((p, i) => {
+      dummy.rotation.set(0, 0, 0);
+      dummy.position.set(p.x, 0.44, p.z);
+      dummy.scale.setScalar(p.scale);
+      dummy.updateMatrix();
+      planterInst.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(p.x, 0.95, p.z);
+      dummy.scale.setScalar(p.scale * 1.1);
+      dummy.updateMatrix();
+      plantInst.setMatrixAt(i, dummy.matrix);
+    });
+    planterInst.computeBoundingSphere();
+    plantInst.computeBoundingSphere();
+    worldGroup.add(planterInst, plantInst);
+  }
+
+  if (shrubCoords.length > 0) {
+    const shrubInst = new THREE.InstancedMesh(
+      new THREE.IcosahedronGeometry(0.8, 1),
+      new THREE.MeshStandardMaterial({ color: 0x3c6841, roughness: 0.92 }),
+      shrubCoords.length
+    );
+    const dummy = new THREE.Object3D();
+    shrubCoords.forEach((s, i) => {
+      dummy.position.set(s.x, 0.62, s.z);
+      dummy.scale.setScalar(s.scale * 1.1);
+      dummy.updateMatrix();
+      shrubInst.setMatrixAt(i, dummy.matrix);
+    });
+    shrubInst.computeBoundingSphere();
+    worldGroup.add(shrubInst);
+  }
+
+  if (parkedCarCoords.length > 0) {
+    const bodyInst = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(1.8, 0.72, 4.2),
+      new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.35 }),
+      parkedCarCoords.length
+    );
+    const cabinInst = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(1.6, 0.55, 2.1),
+      new THREE.MeshStandardMaterial({ color: 0x18242f, roughness: 0.15, metalness: 0.3 }),
+      parkedCarCoords.length
+    );
+    bodyInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(parkedCarCoords.length * 3), 3);
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+    parkedCarCoords.forEach((car, i) => {
+      dummy.rotation.set(0, car.rotY, 0);
+      dummy.position.set(car.x, 0.45, car.z);
+      dummy.updateMatrix();
+      bodyInst.setMatrixAt(i, dummy.matrix);
+      bodyInst.setColorAt(i, color.setHex(car.color));
+      dummy.position.set(car.x, 1.02, car.z);
+      dummy.updateMatrix();
+      cabinInst.setMatrixAt(i, dummy.matrix);
+    });
+    bodyInst.computeBoundingSphere();
+    cabinInst.computeBoundingSphere();
+    worldGroup.add(bodyInst, cabinInst);
+  }
+
+  if (containerCoords.length > 0) {
+    const containerInst = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(2.6, 2.5, 6.2),
+      new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.25 }),
+      containerCoords.length
+    );
+    containerInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(containerCoords.length * 3), 3);
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+    containerCoords.forEach((c, i) => {
+      dummy.rotation.set(0, c.rotY, 0);
+      dummy.position.set(c.x, 1.25, c.z);
+      dummy.updateMatrix();
+      containerInst.setMatrixAt(i, dummy.matrix);
+      containerInst.setColorAt(i, color.setHex(c.color));
+    });
+    containerInst.computeBoundingSphere();
+    worldGroup.add(containerInst);
+  }
+
+  if (waterTankCoords.length > 0) {
+    const tankInst = new THREE.InstancedMesh(
+      new THREE.CylinderGeometry(1.05, 1.05, 2.2, 12),
+      new THREE.MeshStandardMaterial({ color: 0x5b4b3a, roughness: 0.85 }),
+      waterTankCoords.length
+    );
+    const roofInst = new THREE.InstancedMesh(
+      new THREE.ConeGeometry(1.15, 0.75, 12),
+      new THREE.MeshStandardMaterial({ color: 0x3f352b, roughness: 0.8 }),
+      waterTankCoords.length
+    );
+    const dummy = new THREE.Object3D();
+    waterTankCoords.forEach((t, i) => {
+      dummy.position.set(t.x, t.y, t.z);
+      dummy.scale.setScalar(t.scale);
+      dummy.updateMatrix();
+      tankInst.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(t.x, t.y + 1.45, t.z);
+      dummy.updateMatrix();
+      roofInst.setMatrixAt(i, dummy.matrix);
+    });
+    tankInst.computeBoundingSphere();
+    roofInst.computeBoundingSphere();
+    worldGroup.add(tankInst, roofInst);
+  }
+
+  if (stringLightCoords.length > 0) {
+    const bulbInst = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(0.1, 8, 6),
+      new THREE.MeshStandardMaterial({ color: 0xffe9a8, emissive: 0xffd27a, emissiveIntensity: 1.2 }),
+      stringLightCoords.length
+    );
+    const dummy = new THREE.Object3D();
+    stringLightCoords.forEach((p, i) => {
+      dummy.position.set(p.x, p.y, p.z);
+      dummy.updateMatrix();
+      bulbInst.setMatrixAt(i, dummy.matrix);
+    });
+    bulbInst.computeBoundingSphere();
+    worldGroup.add(bulbInst);
   }
 
   // 5. Working Traffic Signal Gantries at Major Intersections
@@ -2550,13 +3235,16 @@ export function isMainWorldPosWalkable(
     return false;
   }
 
-  // Check building footprints (leaving 2.6m walkable sidewalk around every uneven block)
+  // Check building footprints. The walkable band matches the district
+  // sidewalk + setback that the renderer uses, so collisions always agree
+  // with what the player can see.
   for (const blk of blocks) {
     if (blk.kind !== 'building') continue;
-    const bu0 = blk.uMin + 2.6 - radius;
-    const bu1 = blk.uMax - 2.6 + radius;
-    const bz0 = blk.zMin + 2.6 - radius;
-    const bz1 = blk.zMax - 2.6 + radius;
+    const inset = blk.sidewalk + blk.setback - radius;
+    const bu0 = blk.uMin + inset;
+    const bu1 = blk.uMax - inset;
+    const bz0 = blk.zMin + inset;
+    const bz1 = blk.zMax - inset;
     if (u > bu0 && u < bu1 && z > bz0 && z < bz1) {
       return false;
     }
@@ -2570,7 +3258,7 @@ export function getCityGroundY(x: number, z: number): number {
   const { blocks } = CITY_LAYOUT;
   for (const blk of blocks) {
     if (u >= blk.uMin && u <= blk.uMax && z >= blk.zMin && z <= blk.zMax) {
-      return blk.kind === 'loft_plaza' ? 0.17 : 0.14;
+      return blk.walkHeight;
     }
   }
   return 0;

@@ -31,15 +31,15 @@ const LANDMARKS = [
   {
     id: 'hotel',
     name: 'LoftLife Grand Hotel',
-    detail: 'W St · 28th St · 7 floors · 65 suites',
+    detail: 'W St · 28th St · Airport District · 65 suites',
     color: '#39ff14',
-    x: CITY_LAYOUT.loftCenter.x,
-    z: CITY_LAYOUT.loftCenter.z,
+    x: CITY_LAYOUT.hotelCenter.x,
+    z: CITY_LAYOUT.hotelCenter.z,
   },
   {
     id: 'airport',
     name: 'TheCity International Airport',
-    detail: 'X–Y St · 27th–28th St · Terminal A',
+    detail: 'X–Y St · 28th–29th St · Terminal 1',
     color: '#38bdf8',
     x: CITY_LAYOUT.airportCenter.x,
     z: CITY_LAYOUT.airportCenter.z,
@@ -47,7 +47,7 @@ const LANDMARKS = [
   {
     id: 'store',
     name: 'LoftLife Threads',
-    detail: 'N St · 15th St · Clothing & accessories',
+    detail: 'N St · 19th St · Retail & Food District',
     color: '#fbbf24',
     x: CITY_LAYOUT.clothingStoreCenter.x,
     z: CITY_LAYOUT.clothingStoreCenter.z,
@@ -55,7 +55,7 @@ const LANDMARKS = [
   {
     id: 'salon',
     name: 'The Salon',
-    detail: 'M St Plaza · Hair & makeup',
+    detail: 'LoftLife Plaza · Civic Core',
     color: '#f472b6',
     x: CITY_LAYOUT.salonPos.x,
     z: CITY_LAYOUT.salonPos.z,
@@ -89,8 +89,21 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
       const padT = 40;
       const padB = 40;
 
-      const { uLines, zLines, uIsMajor, zIsMajor, blocks, bounds, metroLineZ, busStops } =
-        CITY_LAYOUT;
+      const {
+        uLines,
+        zLines,
+        uIsMajor,
+        zIsMajor,
+        uClasses,
+        zClasses,
+        blocks,
+        bounds,
+        metroLineZ,
+        busStops,
+        districts,
+        waterfront,
+      } = CITY_LAYOUT;
+      const districtById = new Map(districts.map((d) => [d.id, d]));
 
       const minX = Math.min(
         uzToWorldX(bounds.uMin, bounds.zMin),
@@ -138,62 +151,86 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
       ctx.fillStyle = glow;
       ctx.fillRect(0, 0, w, h);
 
-      // City blocks with real footprints rather than a flat placeholder grid.
+      // The river and its seawall sit beyond the eastern street wall.
+      const waterLeftTop = toPx(uzToWorldX(waterfront.uEdge, bounds.zMin), bounds.zMin);
+      const waterLeftBottom = toPx(uzToWorldX(waterfront.uEdge, bounds.zMax), bounds.zMax);
+      const waterRightTop = toPx(uzToWorldX(waterfront.uEdge + 120, bounds.zMin), bounds.zMin);
+      const waterRightBottom = toPx(uzToWorldX(waterfront.uEdge + 120, bounds.zMax), bounds.zMax);
+      ctx.beginPath();
+      ctx.moveTo(waterLeftTop[0], waterLeftTop[1]);
+      ctx.lineTo(waterRightTop[0], waterRightTop[1]);
+      ctx.lineTo(waterRightBottom[0], waterRightBottom[1]);
+      ctx.lineTo(waterLeftBottom[0], waterLeftBottom[1]);
+      ctx.closePath();
+      ctx.fillStyle = '#0b2630';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(56,189,248,0.35)';
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(125,211,252,0.75)';
+      ctx.font = '600 9px ui-monospace, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText('RIVER', waterLeftTop[0] + 10, waterLeftTop[1] + 22);
+
+      // Blocks take their district's colour so the urban plan reads at a glance.
       for (const blk of blocks) {
+        const district = districtById.get(blk.district);
         blockPath(blk);
-        if (blk.kind === 'airport') {
-          ctx.fillStyle = '#162d3c';
-          ctx.strokeStyle = 'rgba(56,189,248,0.35)';
-        } else if (blk.kind === 'clothing_store') {
-          ctx.fillStyle = '#3d2d18';
-          ctx.strokeStyle = 'rgba(251,191,36,0.35)';
-        } else if (blk.kind === 'park') {
-          ctx.fillStyle = '#163a22';
-          ctx.strokeStyle = 'rgba(74,222,128,0.22)';
-        } else if (blk.kind === 'loft_plaza') {
-          ctx.fillStyle = '#1c3820';
-          ctx.strokeStyle = 'rgba(57,255,20,0.55)';
-        } else {
-          ctx.fillStyle = '#141d1b';
-          ctx.strokeStyle = 'rgba(148,184,158,0.14)';
-        }
-        ctx.lineWidth = 1;
+        ctx.fillStyle = district?.color ?? '#141d1b';
+        ctx.strokeStyle = district?.stroke ?? 'rgba(148,184,158,0.14)';
+        ctx.lineWidth = 0.8;
         ctx.fill();
         ctx.stroke();
 
-        if (blk.kind !== 'park' && blk.kind !== 'loft_plaza') {
-          const inset = blk.kind === 'airport' ? 0.08 : 0.16;
-          blockPath(blk, inset);
-          if (blk.kind === 'airport') {
-            ctx.fillStyle = '#1b3c50';
-          } else if (blk.kind === 'clothing_store') {
-            ctx.fillStyle = '#54401f';
-          } else {
-            const tone = 22 + Math.round(((blk.uMin * 7 + blk.zMin * 13) % 9) * 1.6);
-            ctx.fillStyle = `rgb(${tone + 2}, ${tone + 10}, ${tone + 8})`;
-          }
+        if (blk.kind === 'park') {
+          blockPath(blk, 0.12);
+          ctx.fillStyle = '#1e4a2a';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(74,222,128,0.35)';
+          ctx.stroke();
+        } else if (blk.kind === 'promenade') {
+          blockPath(blk, 0.1);
+          ctx.fillStyle = '#2b4a46';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(94,234,212,0.45)';
+          ctx.stroke();
+        } else if (blk.kind === 'plaza' || blk.kind === 'loft_plaza') {
+          blockPath(blk, 0.1);
+          ctx.fillStyle = '#31402d';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(57,255,20,0.55)';
+          ctx.stroke();
+        } else if (blk.kind === 'parking') {
+          blockPath(blk, 0.1);
+          ctx.fillStyle = '#24282a';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(203,213,225,0.28)';
+          ctx.stroke();
+        } else if (blk.kind === 'airport') {
+          blockPath(blk, 0.06);
+          ctx.fillStyle = '#1b3c50';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(125,211,252,0.4)';
+          ctx.stroke();
+        } else if (blk.kind === 'clothing_store' || blk.kind === 'loft_hotel' || blk.kind === 'venue') {
+          blockPath(blk, 0.12);
+          ctx.fillStyle = blk.kind === 'clothing_store' ? '#54401f' : blk.kind === 'loft_hotel' ? '#243c26' : '#2d3430';
           ctx.fill();
           ctx.strokeStyle =
-            blk.kind === 'airport'
-              ? 'rgba(125,211,252,0.28)'
-              : blk.kind === 'clothing_store'
-              ? 'rgba(253,224,71,0.32)'
-              : 'rgba(148,184,158,0.09)';
+            blk.kind === 'clothing_store'
+              ? 'rgba(253,224,71,0.5)'
+              : blk.kind === 'loft_hotel'
+              ? 'rgba(57,255,20,0.6)'
+              : 'rgba(226,244,232,0.4)';
           ctx.stroke();
-
-          // Rooftop service details make the footprints read as buildings.
-          if (blk.kind !== 'clothing_store') {
-            const p0 = toPx(
-              uzToWorldX(blk.uMin + 0.38, blk.zMin + 0.38),
-              blk.zMin + 0.38
-            );
-            const p1 = toPx(
-              uzToWorldX(blk.uMax - 0.38, blk.zMax - 0.38),
-              blk.zMax - 0.38
-            );
-            ctx.fillStyle = 'rgba(255,255,255,0.035)';
-            ctx.fillRect(p0[0], p0[1], Math.max(2, p1[0] - p0[0]), Math.max(2, p1[1] - p0[1]));
-          }
+        } else {
+          // Rooftop tone varies by district and building height.
+          const inset = Math.max(0.14, blk.setback * 0.18);
+          blockPath(blk, inset);
+          const heightTone = Math.min(26, Math.round(blk.height * 0.22));
+          ctx.fillStyle = `rgba(${38 + heightTone}, ${50 + heightTone}, ${46 + heightTone}, 0.55)`;
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+          ctx.stroke();
         }
       }
 
@@ -220,13 +257,16 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
         const bot = toPx(uzToWorldX(u, bounds.zMax), bounds.zMax);
         const isM = i === 12;
         const isMajor = uIsMajor[i];
+        const cls = uClasses[i];
 
-        ctx.lineWidth = isM ? 2.6 : isMajor ? 2.1 : 1.1;
+        ctx.lineWidth = isM ? 5.0 : cls === 'avenue' ? 2.8 : cls === 'residential' ? 0.9 : 1.4;
         ctx.strokeStyle = isM
           ? 'rgba(57,255,20,0.9)'
           : isMajor
-          ? 'rgba(190,218,199,0.42)'
-          : 'rgba(148,184,158,0.2)';
+          ? 'rgba(190,218,199,0.46)'
+          : cls === 'residential'
+          ? 'rgba(148,184,158,0.14)'
+          : 'rgba(148,184,158,0.24)';
         ctx.beginPath();
         ctx.moveTo(top[0], top[1]);
         ctx.lineTo(bot[0], bot[1]);
@@ -248,13 +288,16 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
         const right = toPx(uzToWorldX(bounds.uMax, z), z);
         const is15 = j === 14;
         const isMajor = zIsMajor[j];
+        const cls = zClasses[j];
 
-        ctx.lineWidth = is15 ? 2.6 : isMajor ? 2.1 : 1.0;
+        ctx.lineWidth = is15 ? 2.8 : cls === 'avenue' ? 2.6 : cls === 'residential' ? 0.9 : 1.3;
         ctx.strokeStyle = is15
           ? 'rgba(57,255,20,0.9)'
           : isMajor
-          ? 'rgba(190,218,199,0.38)'
-          : 'rgba(148,184,158,0.18)';
+          ? 'rgba(190,218,199,0.4)'
+          : cls === 'residential'
+          ? 'rgba(148,184,158,0.12)'
+          : 'rgba(148,184,158,0.22)';
         ctx.beginPath();
         ctx.moveTo(left[0], left[1]);
         ctx.lineTo(right[0], right[1]);
@@ -329,11 +372,34 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
         // name is never clipped by the map frame.
         const labelX =
           x + 12 + width > ctx.canvas.width - 8 ? x - 12 - width : x + 12;
+        const top = placeLabel(labelX - 3, y - 8, width, 15);
         ctx.fillStyle = 'rgba(5,11,8,0.82)';
-        ctx.fillRect(labelX - 3, y - 8, width, 15);
+        ctx.fillRect(labelX - 3, top, width, 15);
         ctx.fillStyle = color;
-        ctx.fillText(label, labelX, y + 3);
+        ctx.fillText(label, labelX, top + 11);
       };
+      // Labels are nudged vertically until they clear each other, so the dense
+      // civic and nightlife clusters stay legible at this scale.
+      const labelBoxes: Array<{ x: number; y: number; w: number; h: number }> = [];
+      const placeLabel = (x: number, y: number, w: number, h: number) => {
+        for (const dy of [0, -11, 11, -22, 22, -33, 33]) {
+          const top = y + dy;
+          if (top < padT || top + h > h - padB) continue;
+          const hit = labelBoxes.some(
+            (box) =>
+              x < box.x + box.w + 2 &&
+              x + w + 2 > box.x &&
+              top < box.y + box.h + 1 &&
+              top + h + 1 > box.y
+          );
+          if (!hit) {
+            labelBoxes.push({ x, y: top, w, h });
+            return top;
+          }
+        }
+        return y;
+      };
+
       // Public destinations: accent squares with short labels.
       for (const venue of CITY_VENUES) {
         const cu = (venue.u0 + venue.u1) / 2;
@@ -349,11 +415,15 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
         ctx.fillStyle = '#d6e8dc';
         ctx.font = '600 9px sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText(venue.sign, vx + 7, vy + 3);
+        const width = ctx.measureText(venue.sign).width;
+        const top = placeLabel(vx + 5, vy - 7, width + 6, 12);
+        ctx.fillStyle = 'rgba(5,11,8,0.72)';
+        ctx.fillRect(vx + 5, top, width + 6, 12);
+        ctx.fillStyle = '#d6e8dc';
+        ctx.fillText(venue.sign, vx + 8, top + 9);
       }
 
-
-      drawLandmark(CITY_LAYOUT.loftCenter, '#39ff14', 'GRAND HOTEL', 'H');
+      drawLandmark(CITY_LAYOUT.hotelCenter, '#39ff14', 'GRAND HOTEL', 'H');
       drawLandmark(CITY_LAYOUT.airportCenter, '#38bdf8', 'INTERNATIONAL AIRPORT', 'A');
       drawLandmark(CITY_LAYOUT.clothingStoreCenter, '#fbbf24', 'LOFTLIFE THREADS', 'T');
       drawLandmark(CITY_LAYOUT.salonPos, '#f472b6', 'SALON', 'S');
@@ -448,6 +518,17 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
               height={620}
               className="w-full rounded-xl border border-white/10 bg-[#070d0b]"
             />
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-1 text-[10px] text-slate-400">
+              {CITY_LAYOUT.districts.map((district) => (
+                <span key={district.id} className="flex items-center gap-1.5">
+                  <span
+                    className="w-2.5 h-2.5 rounded-sm border"
+                    style={{ backgroundColor: district.color, borderColor: district.color }}
+                  />
+                  <span className="text-slate-300">{district.shortName}</span>
+                </span>
+              ))}
+            </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-1 text-[10px] md:text-[11px] text-slate-300">
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-[#39ff14]" />
@@ -466,8 +547,12 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
                 Salon
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="w-3 h-0.5 border-t-2 border-dashed border-[#38bdf8]" />
-                Metro
+                <span className="w-4 h-0.5 border-t-2 border-dashed border-[#38bdf8]" />
+                Elevated rail
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-4 h-1 rounded-full bg-[#39ff14]/80" />
+                M St boulevard · 8 lanes
               </span>
               <span className="text-slate-500">M = map · Shift = sprint</span>
             </div>
@@ -532,8 +617,10 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
             <section className="rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2.5 flex items-start gap-2.5">
               <TrainFront className="w-4 h-4 text-[#38bdf8] mt-0.5 shrink-0" />
               <div className="text-[10px] leading-relaxed text-slate-400">
-                <span className="text-slate-200 font-semibold">Transit</span> · LoftLine bus on
-                15th/M St · Elevated Metro on 16th St. Airport drop-off is north of the terminal.
+                <span className="text-slate-200 font-semibold">Transit</span> · 15th Street,
+                M Street and Downtown Loop buses, plus the Airport Express from Central Station.
+                Elevated rail runs on the 16th Street viaduct. Airport drop-off is north of
+                Terminal 1.
               </div>
             </section>
           </aside>
@@ -543,7 +630,7 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
           <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500 mb-2">
             Public destinations
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-28 overflow-y-auto pr-1">
             {CITY_VENUES.map((venue) => (
               <button
                 key={venue.id}

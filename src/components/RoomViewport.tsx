@@ -2485,7 +2485,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           transitGroup.add(mesh);
           transitMeshes.set(vehicle.id, mesh);
         }
-        mesh.position.set(vehicle.x, 0.02, vehicle.z);
+        // Rail cars run on the elevated 16th Street viaduct; road vehicles stay
+        // on the asphalt. Keeps the two modes visually separate.
+        mesh.position.set(vehicle.x, vehicle.kind === 'rail' ? 6.52 : 0.02, vehicle.z);
         mesh.rotation.y = vehicle.heading;
       }
       for (const [id, mesh] of [...transitMeshes]) {

@@ -1,12 +1,13 @@
 import { CITY_LAYOUT, CITY_SLOPE, type CityBlock } from './cityLayout';
 
 /**
- * The named public destinations of TheCity.
+ * The named public destinations of TheCity, grouped by district.
  *
- * Each venue owns one full city block and is placed so the downtown plaza sits
- * at the middle of a walkable district: Central Park west of the plaza, the
- * community centre / café / clothing store to the north, the cinema to the
- * east, and the library, market and Med Deck to the south.
+ * Civic Core   — community centre, café, library around LoftLife Plaza
+ * Arts         — cinema and event hall on the cultural corridor
+ * Nightlife    — nightclub, bar and toke lounge in the Entertainment District
+ * Retail/Food  — market hall and restaurant beside the clothing store
+ * Medical      — The Med Deck campus
  */
 export type VenueId =
   | 'library'
@@ -14,7 +15,12 @@ export type VenueId =
   | 'community_center'
   | 'cafe'
   | 'market'
-  | 'cinema';
+  | 'cinema'
+  | 'event_hall'
+  | 'nightclub'
+  | 'bar'
+  | 'toke_lounge'
+  | 'restaurant';
 
 export type DoorSide = 'north' | 'south' | 'east' | 'west';
 
@@ -83,7 +89,7 @@ export interface CityVenue {
   };
 }
 
-/** u-space block coordinates for each destination (col, row). */
+/** Block coordinates for each destination (col, row), matching VENUE_BLOCKS. */
 const SPECS: Array<{
   id: VenueId;
   col: number;
@@ -96,15 +102,16 @@ const SPECS: Array<{
   sign: string;
   palette: CityVenue['palette'];
 }> = [
+  // ── Civic Core ────────────────────────────────────────────────────────────
   {
     id: 'community_center',
     col: 11,
     row: 13,
     doorSide: 'south',
-    height: 9.6,
+    height: 10.8,
     name: 'LoftLife Community Center',
     tagline: 'Classes, workshops and the neighbourhood noticeboard.',
-    district: 'Civic Row',
+    district: 'Civic Core',
     sign: 'COMMUNITY CENTER',
     palette: {
       body: '#a4623f',
@@ -120,10 +127,10 @@ const SPECS: Array<{
     col: 12,
     row: 13,
     doorSide: 'south',
-    height: 7.2,
+    height: 8.6,
     name: 'Bean & Loft Café',
-    tagline: 'Pour-over coffee, pastries and a sunlit terrace.',
-    district: 'Civic Row',
+    tagline: 'Pour-over coffee, pastries and a sunlit terrace on the plaza.',
+    district: 'Civic Core',
     sign: 'BEAN & LOFT CAFÉ',
     palette: {
       body: '#c8b49a',
@@ -139,10 +146,10 @@ const SPECS: Array<{
     col: 11,
     row: 15,
     doorSide: 'north',
-    height: 13.4,
+    height: 14.6,
     name: 'LoftLife Public Library',
     tagline: 'Reading rooms, study tables and public computers.',
-    district: 'Knowledge Quarter',
+    district: 'Civic Core',
     sign: 'PUBLIC LIBRARY',
     palette: {
       body: '#cbbda4',
@@ -153,15 +160,113 @@ const SPECS: Array<{
       awning: '#3d4a3a',
     },
   },
+  // ── Arts & Culture ───────────────────────────────────────────────────────
+  {
+    id: 'cinema',
+    col: 10,
+    row: 9,
+    doorSide: 'east',
+    height: 13.8,
+    name: 'LoftLife Cinema',
+    tagline: 'Two screens, an arcade cabinet and a popcorn counter.',
+    district: 'Arts & Culture',
+    sign: 'LOFTLIFE CINEMA',
+    palette: {
+      body: '#3a2a2f',
+      trim: '#181113',
+      glass: '#6d5560',
+      accent: '#ffcf5a',
+      floor: '#4a2f36',
+      awning: '#8c2b3a',
+    },
+  },
+  {
+    id: 'event_hall',
+    col: 11,
+    row: 9,
+    doorSide: 'west',
+    height: 15.2,
+    name: 'The Loft Hall',
+    tagline: 'Concerts, launches and community events under one roof.',
+    district: 'Arts & Culture',
+    sign: 'THE LOFT HALL',
+    palette: {
+      body: '#d8d2c4',
+      trim: '#6a6252',
+      glass: '#6f8fa3',
+      accent: '#e3c15a',
+      floor: '#b9a98c',
+      awning: '#2f4858',
+    },
+  },
+  // ── Entertainment & Nightlife ────────────────────────────────────────────
+  {
+    id: 'nightclub',
+    col: 15,
+    row: 11,
+    doorSide: 'south',
+    height: 13.4,
+    name: 'Neon Loft Nightclub',
+    tagline: 'Bass, lasers and a dance floor that never quite closes.',
+    district: 'Entertainment District',
+    sign: 'NEON LOFT',
+    palette: {
+      body: '#2a2233',
+      trim: '#120d18',
+      glass: '#7b5cff',
+      accent: '#ff3bd4',
+      floor: '#221a29',
+      awning: '#3b1f4a',
+    },
+  },
+  {
+    id: 'bar',
+    col: 16,
+    row: 12,
+    doorSide: 'west',
+    height: 10.2,
+    name: 'The Brass Tap',
+    tagline: 'Neighbourhood bar with booths, taps and a corner stage.',
+    district: 'Entertainment District',
+    sign: 'THE BRASS TAP',
+    palette: {
+      body: '#3b2a22',
+      trim: '#1a100c',
+      glass: '#6f8a7a',
+      accent: '#ffb347',
+      floor: '#2e211b',
+      awning: '#7a3b23',
+    },
+  },
+  {
+    id: 'toke_lounge',
+    col: 14,
+    row: 12,
+    doorSide: 'east',
+    height: 8.8,
+    name: 'Cloud Nine Toke Lounge',
+    tagline: 'Low light, deep sofas and a plant-filled patio.',
+    district: 'Entertainment District',
+    sign: 'CLOUD NINE',
+    palette: {
+      body: '#2f3a2c',
+      trim: '#181f16',
+      glass: '#8fae8a',
+      accent: '#c8ff5a',
+      floor: '#26301f',
+      awning: '#43553a',
+    },
+  },
+  // ── Retail & Food ───────────────────────────────────────────────────────
   {
     id: 'market',
-    col: 12,
-    row: 15,
+    col: 14,
+    row: 17,
     doorSide: 'north',
-    height: 8.4,
+    height: 9.6,
     name: 'Market Hall',
     tagline: 'Groceries, housewares and furniture for your loft.',
-    district: 'Knowledge Quarter',
+    district: 'Retail & Food District',
     sign: 'MARKET HALL',
     palette: {
       body: '#b9c2ae',
@@ -173,14 +278,34 @@ const SPECS: Array<{
     },
   },
   {
+    id: 'restaurant',
+    col: 16,
+    row: 18,
+    doorSide: 'west',
+    height: 10.4,
+    name: 'The Copper Fork',
+    tagline: 'All-day dining, a long bar and pavement tables.',
+    district: 'Retail & Food District',
+    sign: 'THE COPPER FORK',
+    palette: {
+      body: '#c9b79c',
+      trim: '#5c4632',
+      glass: '#7d9aa0',
+      accent: '#e8b04b',
+      floor: '#a9855d',
+      awning: '#8a3030',
+    },
+  },
+  // ── Medical ─────────────────────────────────────────────────────────────
+  {
     id: 'med_deck',
-    col: 14,
-    row: 15,
-    doorSide: 'north',
-    height: 16.8,
+    col: 19,
+    row: 17,
+    doorSide: 'west',
+    height: 18.4,
     name: 'The Med Deck',
     tagline: "TheCity's hospital — reception, triage and recovery beds.",
-    district: 'Knowledge Quarter',
+    district: 'Medical District',
     sign: 'THE MED DECK',
     palette: {
       body: '#e6ebee',
@@ -189,25 +314,6 @@ const SPECS: Array<{
       accent: '#e04a4a',
       floor: '#dfe6e8',
       awning: '#2f6f86',
-    },
-  },
-  {
-    id: 'cinema',
-    col: 13,
-    row: 14,
-    doorSide: 'west',
-    height: 11.6,
-    name: 'LoftLife Cinema',
-    tagline: 'Two screens, an arcade cabinet and a popcorn counter.',
-    district: 'Plaza East',
-    sign: 'LOFTLIFE CINEMA',
-    palette: {
-      body: '#3a2a2f',
-      trim: '#181113',
-      glass: '#6d5560',
-      accent: '#ffcf5a',
-      floor: '#4a2f36',
-      awning: '#8c2b3a',
     },
   },
 ];
@@ -224,11 +330,16 @@ function blockFor(col: number, row: number): CityBlock | undefined {
 function buildVenue(spec: (typeof SPECS)[number]): CityVenue {
   const block = blockFor(spec.col, spec.row);
   if (!block) throw new Error(`No city block for venue ${spec.id}`);
-  // 3.0 m forecourt on every side keeps the street sidewalk readable.
-  const u0 = block.uMin + 3.0;
-  const u1 = block.uMax - 3.0;
-  const z0 = block.zMin + 3.0;
-  const z1 = block.zMax - 3.0;
+  if (block.kind !== 'venue') {
+    throw new Error(`Venue ${spec.id} is placed on a "${block.kind}" block`);
+  }
+  // Keep the full sidewalk clear: the shell starts behind the paving and the
+  // doors open onto the walkable frontage.
+  const inset = block.sidewalk + 1.0;
+  const u0 = block.uMin + inset;
+  const u1 = block.uMax - inset;
+  const z0 = block.zMin + inset;
+  const z1 = block.zMax - inset;
   const wall = 0.55;
   const iu0 = u0 + wall;
   const iu1 = u1 - wall;
@@ -263,7 +374,9 @@ function buildVenue(spec: (typeof SPECS)[number]): CityVenue {
     insidePos = { x: venueWorldX(doorU - inward, doorZ), z: doorZ };
   }
 
-  const outwardArrival = 7.0;
+  // Arrival point stays on the sidewalk in front of the doors (never in a
+  // traffic lane) and keeps enough room for the chase camera.
+  const outwardArrival = Math.min(7.4, block.sidewalk + 0.7);
   let arrivalPos = doorPos;
   if (spec.doorSide === 'north') {
     arrivalPos = { x: venueWorldX(doorU, doorZ - outwardArrival), z: doorZ - outwardArrival };
@@ -290,7 +403,16 @@ function buildVenue(spec: (typeof SPECS)[number]): CityVenue {
     iu1,
     iz0,
     iz1,
-    ceiling: spec.id === 'library' ? 5.4 : spec.id === 'med_deck' ? 4.8 : 4.4,
+    ceiling:
+      spec.id === 'event_hall'
+        ? 7.2
+        : spec.id === 'library'
+        ? 5.4
+        : spec.id === 'med_deck'
+        ? 4.8
+        : spec.id === 'nightclub'
+        ? 6.2
+        : 4.4,
     height: spec.height,
     doorSide: spec.doorSide,
     doorU,
