@@ -181,11 +181,11 @@ export class LoftLifeRealtime {
       return Response.json(result);
     }
     if (requestUrl.pathname === '/internal/party/presence' && request.method === 'POST') {
-      const body = await request.json().catch(() => ({})) as { userId?: string; instanceId?: string | null };
+      const body = await request.json().catch(() => ({})) as { userId?: string; instanceId?: string | null; expectedInstanceId?: string };
       if (!body.userId) return new Response('userId required',{status:400});
       const state = await this.partyData();
       if (body.instanceId) state.userInstances[body.userId] = body.instanceId;
-      else delete state.userInstances[body.userId];
+      else if (!body.expectedInstanceId || state.userInstances[body.userId] === body.expectedInstanceId) delete state.userInstances[body.userId];
       await this.ctx.storage.put('party_state',state);
       return Response.json({ok:true});
     }
@@ -509,7 +509,7 @@ export class LoftLifeRealtime {
       const other = socket.deserializeAttachment() as Player | undefined;
       return Boolean(other?.userId === player.userId && other.instanceId === player.instanceId && !other.departed);
     });
-    if (!player.isGuest && !stillConnected) await this.updatePartyPresence(player.userId, null);
+    if (!player.isGuest && !stillConnected) await this.updatePartyPresence(player.userId, null, player.instanceId);
     this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
     this.broadcastSnapshot(player.instanceId, true);
     if (player.instanceId.startsWith('world:')) await this.syncWorldStatus(player.instanceId.slice(6), player.connId);
@@ -661,11 +661,11 @@ export class LoftLifeRealtime {
       method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({userIds,message}),
     }))));
   }
-  private async updatePartyPresence(userId:string,instanceId:string|null) {
+  private async updatePartyPresence(userId:string,instanceId:string|null,expectedInstanceId?:string) {
     const namespace=this.env.REALTIME;
     if(!namespace)return;
     await namespace.get(namespace.idFromName('party:global')).fetch(new Request('https://loftlife-internal/internal/party/presence',{
-      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({userId,instanceId}),
+      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({userId,instanceId,expectedInstanceId}),
     }));
   }
     private async partyData(): Promise<{ parties: Record<string,{id:string;leaderId:string;members:string[];invites:string[];createdAt:number}>; memberParty: Record<string,string>; userInstances: Record<string,string> }> {
