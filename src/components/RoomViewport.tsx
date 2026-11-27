@@ -3364,17 +3364,24 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           const focusX = av.x;
           const focusY = av.y + 1.0;
           const focusZ = av.z;
+          // OrbitControls operates on the compressed camera from the prior
+          // frame. Recover its intended orbit arm before testing, otherwise a
+          // clear compressed ray would immediately release and oscillate.
+          const previousScale = Math.max(0.22, isoOcclusionScale);
+          const rawCameraX = focusX + (camera.position.x - focusX) / previousScale;
+          const rawCameraY = focusY + (camera.position.y - focusY) / previousScale;
+          const rawCameraZ = focusZ + (camera.position.z - focusZ) / previousScale;
           const hitScale = resolveCityCameraScale(
             focusX, focusY, focusZ,
-            camera.position.x, camera.position.y, camera.position.z,
+            rawCameraX, rawCameraY, rawCameraZ,
             mainWorld.cameraOccluders
           );
           const scaleRate = hitScale < isoOcclusionScale ? 24 : 4.5;
           isoOcclusionScale = THREE.MathUtils.damp(isoOcclusionScale, hitScale, scaleRate, delta);
           camera.position.set(
-            focusX + (camera.position.x - focusX) * isoOcclusionScale,
-            focusY + (camera.position.y - focusY) * isoOcclusionScale,
-            focusZ + (camera.position.z - focusZ) * isoOcclusionScale
+            focusX + (rawCameraX - focusX) * isoOcclusionScale,
+            focusY + (rawCameraY - focusY) * isoOcclusionScale,
+            focusZ + (rawCameraZ - focusZ) * isoOcclusionScale
           );
           controls.target.set(focusX, focusY, focusZ);
         } else if (currentLoc !== 'world') {
