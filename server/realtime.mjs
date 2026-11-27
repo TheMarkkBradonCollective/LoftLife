@@ -187,6 +187,7 @@ function joinInstance(player, instance) {
   for (const currentInstance of [...instances.values()]) {
     for (const existing of [...currentInstance.members.values()]) {
       if (existing.userId === player.userId) {
+        send(existing.ws, { t: 'replaced', reason: 'This account connected from another session' });
         leaveInstance(existing);
         existing.ws.close(4003, 'replaced');
       }
