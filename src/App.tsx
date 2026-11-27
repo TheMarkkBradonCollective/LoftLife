@@ -1639,9 +1639,9 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         nearbyLabel={proximityPrompt}
         locationTitle={locationTitle}
         locationSub={locationSub}
-        presence={session.presenceOnline}
+        presence={session.instance?.count ?? session.presenceOnline}
         connection={session.connection}
-        online={session.status === 'online'}
+        online={session.status === 'online' || session.status === 'guest'}
         syncState={session.syncState}
         syncError={session.syncError}
         conflict={Boolean(conflict)}
