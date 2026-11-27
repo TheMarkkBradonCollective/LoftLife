@@ -434,8 +434,66 @@ export class LoftLifeRealtime {
   }
 
   private players(instanceId: string): Player[] {
-    return this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment() as Player | undefined)
-      .filter((p): p is Player => Boolean(p && p.instanceId === instanceId && p.userId));
+    const now = Date.now();
+    const unique = new Map<string, Player>();
+    for (const socket of this.ctx.getWebSockets()) {
+      if (socket.readyState !== WebSocket.OPEN) continue;
+      const player = socket.deserializeAttachment() as (Player & { pending?: boolean }) | undefined;
+      if (!player?.userId || player.pending || player.departed || player.instanceId !== instanceId) continue;
+      if (now - Number(player.lastSeen ?? 0) > LoftLifeRealtime.STALE_CONNECTION_MS) continue;
+      const previous = unique.get(player.userId);
+      if (!previous || Number(player.lastSeen ?? 0) > Number(previous.lastSeen ?? 0)) unique.set(player.userId, player);
+    }
+    return [...unique.values()];
+  }
+
+  private async schedulePresenceSweep() {
+    await this.ctx.storage.setAlarm(Date.now() + LoftLifeRealtime.PRESENCE_SWEEP_MS);
+  }
+
+  private async replaceDuplicateConnections(current: HibernatableWebSocket, player: Player) {
+    for (const socket of this.ctx.getWebSockets()) {
+      if (socket === current) continue;
+      const existing = socket.deserializeAttachment() as Player | undefined;
+      if (!existing?.userId || existing.departed || existing.userId !== player.userId || existing.instanceId !== player.instanceId) continue;
+      socket.serializeAttachment({ ...existing, departed: true });
+      send(socket, { t: 'replaced', reason: 'This account connected from another session' });
+      socket.close(4003, 'replaced');
+      this.broadcast(existing.instanceId, { t: 'leave', connId: existing.connId }, socket);
+    }
+  }
+
+  private async disconnectPlayer(ws: HibernatableWebSocket) {
+    const player = ws.deserializeAttachment() as Player | undefined;
+    if (!player?.userId || player.departed) return;
+    ws.serializeAttachment({ ...player, departed: true, voice: false });
+    const stillConnected = this.ctx.getWebSockets().some((socket) => {
+      if (socket === ws || socket.readyState !== WebSocket.OPEN) return false;
+      const other = socket.deserializeAttachment() as Player | undefined;
+      return Boolean(other?.userId === player.userId && other.instanceId === player.instanceId && !other.departed);
+    });
+    if (!player.isGuest && !stillConnected) await this.updatePartyPresence(player.userId, null);
+    this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
+    this.broadcastSnapshot(player.instanceId, true);
+    if (player.instanceId.startsWith('world:')) await this.syncWorldStatus(player.instanceId.slice(6), player.connId);
+  }
+
+  async alarm() {
+    const now = Date.now();
+    for (const socket of this.ctx.getWebSockets()) {
+      const attachment = socket.deserializeAttachment() as (Player & { pending?: boolean; pendingSince?: number }) | undefined;
+      if (!attachment || attachment.departed) continue;
+      if (attachment.pending) {
+        if (now - Number(attachment.pendingSince ?? now) > LoftLifeRealtime.PENDING_CONNECTION_MS) socket.close(1008, 'hello_timeout');
+        continue;
+      }
+      if (!attachment.userId) continue;
+      if (socket.readyState !== WebSocket.OPEN || now - Number(attachment.lastSeen ?? 0) > LoftLifeRealtime.STALE_CONNECTION_MS) {
+        await this.disconnectPlayer(socket);
+        try { socket.close(4000, 'presence_timeout'); } catch { /* Socket already closed. */ }
+      }
+    }
+    if (this.ctx.getWebSockets().some((socket) => socket.readyState === WebSocket.OPEN)) await this.schedulePresenceSweep();
   }
   private async syncWorldStatus(worldId: string, leavingConnId?: string) {
     const instanceId = `world:${worldId}`;
