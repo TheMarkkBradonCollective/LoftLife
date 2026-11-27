@@ -3,8 +3,6 @@ import { CITY_LAYOUT } from './cityLayout';
 import { CITY_VENUES } from './venues';
 import { createAvatarRig, type AvatarRig } from './avatar';
 import { createContactShadowTexture } from './textures';
-import { KENNEY_BY_ID } from '../../shared/catalog/kenney-library.mjs';
-import { CHARACTER_LIBRARY } from '../../shared/catalog/character-library.mjs';
 import {
   assignCrowdDetail,
   createCrowd,
@@ -13,11 +11,6 @@ import {
   stepCrowd,
 } from '../../shared/city-crowd.mjs';
 import type { AvatarConfig, EmoteType } from './types';
-import {
-  getKenneyAssetModel,
-  preloadKenneyAsset,
-  subscribeKenneyAssets,
-} from './assets/kenneyRuntime';
 
 type CrowdQuality = 'high' | 'medium' | 'low';
 
@@ -56,31 +49,72 @@ const CROWD_SIZE: Record<CrowdQuality, number> = { high: 50, medium: 34, low: 20
 
 const RIG_POOL_LIMIT = 10;
 
-function hashId(value: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
+/**
+ * Distant crowd LOD built from the same avatar palette as the nearby rig.
+ * This avoids swapping a pedestrian to an unrelated Kenney character (and a
+ * different forward axis) as the player approaches. The simplified geometry
+ * keeps the distant tier inexpensive while preserving skin, hair, clothing,
+ * shoes and the shared +Z facing convention.
+ */
+function createCrowdLodAvatar(avatar: AvatarConfig): THREE.Group {
+  const root = new THREE.Group();
+  root.name = 'crowd-avatar-lod';
+  const material = (color: string, roughness = 0.82) =>
+    new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
+  const skin = material(avatar.skinTone, 0.76);
+  const hair = material(avatar.hairColor, 0.9);
+  const top = material(avatar.topColor);
+  const bottom = material(avatar.bottomColor);
+  const shoes = material(avatar.shoeColor, 0.68);
+
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.36, 2, 7), top);
+  torso.position.y = 1.02;
+  root.add(torso);
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 9, 7), skin);
+  head.position.set(0, 1.48, 0.012);
+  root.add(head);
+
+  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.124, 8, 5), hair);
+  hairCap.scale.set(1.02, 0.62, 1.02);
+  hairCap.position.set(0, 1.535, -0.006);
+  root.add(hairCap);
+
+  for (const side of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.064, 0.28, 2, 6), bottom);
+    leg.position.set(side * 0.09, 0.48, 0);
+    root.add(leg);
+
+    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.052, 0.26, 2, 6), top);
+    arm.position.set(side * 0.22, 1.02, 0);
+    arm.rotation.z = side * -0.08;
+    root.add(arm);
+
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.07, 0.22), shoes);
+    shoe.position.set(side * 0.09, 0.105, 0.035);
+    root.add(shoe);
   }
-  return hash >>> 0;
+
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.frustumCulled = true;
+  });
+  root.userData.avatarLod = true;
+  return root;
 }
 
-/** Static Kenney characters used only for the distant LOD tier. */
-function propPoolFor(role: string) {
-  const wanted = role === 'worker' ? 'service' : 'pedestrian';
-  const matching = CHARACTER_LIBRARY.items.filter((item: { npcEligible?: boolean; role: string }) => item.npcEligible && item.role === wanted);
-  return matching.length ? matching : CHARACTER_LIBRARY.items.filter((item: { npcEligible?: boolean }) => item.npcEligible);
-}
 
 /**
  * A city crowd: deterministic sidewalk simulation plus two render tiers.
  *
  *  - Near agents are full LoftLife avatar rigs, so they animate, sit, talk and
  *    wave with the same rig as players.
- *  - Distant agents are static Kenney pedestrian models on a contact shadow;
- *    they cost one draw call and keep the sidewalk busy at a fraction of the
- *    cost.
- *  - The nearest rigs are capped by graphics quality. Everything else is hidden.
+ *  - Distant agents use a lightweight avatar-colored LOD with matching skin,
+ *    hair, clothing and facing direction, avoiding an identity/model swap.
+ *  - Both render tiers stay within the existing graphics-quality budgets.
  *
  * The simulation itself lives in `shared/city-crowd.mjs` and is unit-tested
  * without a browser or Three.js.
@@ -108,7 +142,7 @@ export function createCityCrowd(options: {
   const agents = crowd.agents as unknown as CrowdAgentView[];
   let lastPlayer = { x: CITY_LAYOUT.loftCenter.x, z: CITY_LAYOUT.loftCenter.z };
   const rigs = new Map<string, AvatarRig>();
-  const props = new Map<string, { group: THREE.Group; assetId: string; placeholder: boolean }>();
+  const props = new Map<string, { group: THREE.Group }>();
   const shadowTexture = createContactShadowTexture();
   const shadowMaterial = new THREE.MeshBasicMaterial({
     map: shadowTexture,
@@ -118,58 +152,20 @@ export function createCityCrowd(options: {
   });
   const shadowGeometry = new THREE.PlaneGeometry(0.9, 0.9).rotateX(-Math.PI / 2);
 
-  let assetsVersion = 0;
-  let knownAssetVersion = -1;
-  subscribeKenneyAssets(() => {
-    assetsVersion += 1;
-  });
-
-  // Warm a handful of pedestrian models so the first distant tier does not
-  // appear as placeholders for long. Failures simply stay placeholders.
-  const warm = new Set<string>();
-  for (const agent of agents.slice(0, 12)) {
-    const pool = propPoolFor(agent.role);
-    if (!pool.length) continue;
-    const entry = pool[hashId(agent.id) % pool.length];
-    if (warm.has(entry.id)) continue;
-    warm.add(entry.id);
-    const source = KENNEY_BY_ID[entry.id];
-    if (source) void preloadKenneyAsset(source);
-  }
-
   function propFor(agent: CrowdAgentView) {
     let entry = props.get(agent.id);
     if (entry) return entry;
-    const pool = propPoolFor(agent.role);
-    if (!pool.length) return null;
-    const choice = pool[hashId(agent.id) % pool.length];
-    const source = KENNEY_BY_ID[choice.id];
-    if (!source) return null;
+
     const holder = new THREE.Group();
     holder.name = `crowd-prop-${agent.id}`;
-    holder.userData.crowdProp = choice.id;
+    holder.userData.crowdAgent = agent.id;
+    holder.add(createCrowdLodAvatar(agent.avatar));
 
-    const model = getKenneyAssetModel(source, { color: choice.id.includes('blocky') ? '#efeae1' : '#e6dfd3' });
-    if (model) {
-      model.scale.multiplyScalar(0.96);
-      holder.add(model);
-    } else {
-      // Cheap silhouette while the GLB is in flight (or if it never loads).
-      const skin = new THREE.MeshStandardMaterial({ color: agent.avatar.skinTone, roughness: 0.7 });
-      const cloth = new THREE.MeshStandardMaterial({ color: agent.avatar.topColor, roughness: 0.8 });
-      const silhouette = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.6, 4, 8), cloth);
-      body.position.y = 0.86;
-      const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8), skin);
-      head.position.y = 1.43;
-      silhouette.add(body, head);
-      holder.add(silhouette);
-      holder.userData.silhouette = silhouette;
-    }
     const shadow = new THREE.Mesh(shadowGeometry, shadowMaterial);
     shadow.position.y = 0.025;
     holder.add(shadow);
-    entry = { group: holder, assetId: choice.id, placeholder: !model };
+
+    entry = { group: holder };
     props.set(agent.id, entry);
     group.add(holder);
     return entry;
@@ -213,9 +209,6 @@ export function createCityCrowd(options: {
   }
 
   function syncRender(elapsed: number, delta: number) {
-    const rebuilt = assetsVersion !== knownAssetVersion;
-    if (rebuilt) knownAssetVersion = assetsVersion;
-
     for (const agent of agents) {
       const wantRig = agent.detail === 'rig';
       const wantProp = agent.detail === 'prop' && !(agent.seated && agent.mode === 'sitting');
@@ -255,27 +248,8 @@ export function createCityCrowd(options: {
       entry.group.visible = true;
       const bob = isMoving ? Math.abs(Math.sin(elapsed * 5.4 + agent.personalPhase)) * 0.02 : 0;
       entry.group.position.set(agent.x, ground + bob, agent.z);
-      // Kenney characters and the LoftLife rig both face +Z.
+      // The lightweight avatar LOD and nearby LoftLife rig share +Z forward.
       entry.group.rotation.y = agent.yaw;
-      if (entry.placeholder && rebuilt) {
-        const source = KENNEY_BY_ID[entry.assetId];
-        const model = source ? getKenneyAssetModel(source, { color: '#e6dfd3' }) : null;
-        if (model) {
-          model.scale.multiplyScalar(0.96);
-          const silhouette = entry.group.userData.silhouette as THREE.Group | undefined;
-          if (silhouette) {
-            entry.group.remove(silhouette);
-            silhouette.traverse((object) => {
-              const mesh = object as THREE.Mesh;
-              const material = mesh.material as THREE.Material | undefined;
-              material?.dispose();
-            });
-            entry.group.userData.silhouette = undefined;
-          }
-          entry.group.add(model);
-          entry.placeholder = false;
-        }
-      }
     }
 
     // Keep hidden props out of the draw list entirely.
