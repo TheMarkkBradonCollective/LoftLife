@@ -136,11 +136,35 @@ export class LoftLifeRealtime {
       return Response.json({ok:true});
     }
     if (requestUrl.pathname === '/internal/party/presence-snapshot' && request.method === 'GET') {
+      if (!this.env.REALTIME) return Response.json({ online: 0, instances: [], cityCapacity: MAX_PLAYERS });
       const state = await this.partyData();
-      const counts = new Map<string,number>();
-      for (const instanceId of Object.values(state.userInstances)) counts.set(instanceId,(counts.get(instanceId)??0)+1);
-      const instances = [...counts.entries()].map(([id,count])=>({id,kind:id.startsWith('world:')?'world':'city',worldId:id.startsWith('world:')?id.slice(6):null,capacity:MAX_PLAYERS,count}));
-      return Response.json({online:Object.values(state.userInstances).length,instances,cityCapacity:MAX_PLAYERS});
+      const url = new URL(request.url);
+      const includeDetails = url.searchParams.get('details') === '1';
+      const instanceIds = [...new Set(['city:main', ...Object.values(state.userInstances)])].filter(id => id !== 'party:global');
+      const snapshots = await Promise.all(instanceIds.map(async (instanceId) => {
+        const target = new URL('https://loftlife-internal/internal/presence');
+        target.searchParams.set('instanceId', instanceId);
+        if (includeDetails) target.searchParams.set('details', '1');
+        const response = await this.env.REALTIME!.get(this.env.REALTIME!.idFromName(instanceId)).fetch(new Request(target));
+        if (!response.ok) return null;
+        return await response.json() as { online: number; instances: Array<{id:string;kind:string;worldId:string|null;capacity:number;count:number}>; userIds: string[]; players?: Array<Record<string,unknown>> };
+      }));
+      const active = snapshots.filter((snapshot): snapshot is NonNullable<typeof snapshot> => Boolean(snapshot));
+      const liveInstances = active.flatMap(snapshot => snapshot.instances).filter(instance => instance.count > 0);
+      const actualPresence: Record<string,string> = {};
+      for (const snapshot of active) for (const userId of snapshot.userIds) {
+        const instance = snapshot.instances[0];
+        if (instance) actualPresence[userId] = instance.id;
+      }
+      state.userInstances = actualPresence;
+      await this.ctx.storage.put('party_state', state);
+      const uniquePlayers = new Map<string,Record<string,unknown>>();
+      if (includeDetails) for (const snapshot of active) for (const player of snapshot.players ?? []) uniquePlayers.set(String(player.userId), player);
+      const result: Record<string,unknown> = {
+        online: Object.keys(actualPresence).length, instances: liveInstances, cityCapacity: MAX_PLAYERS, updatedAt: Date.now(),
+      };
+      if (includeDetails) result.players = [...uniquePlayers.values()];
+      return Response.json(result, { headers: { 'cache-control': 'no-store' } });
     }
     if (requestUrl.pathname === '/internal/party/state' && request.method === 'POST') {
       const body = await request.json().catch(() => ({})) as { userId?: string };
