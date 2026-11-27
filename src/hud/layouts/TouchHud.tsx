@@ -1,5 +1,5 @@
 import React from 'react';
-import { Map, MessageCircle, Users } from 'lucide-react';
+import { MessageCircle, Users } from 'lucide-react';
 import { Joystick } from '../Joystick';
 import { ActionLayer } from '../ActionLayer';
 import { TopHud, type TopHudProps } from '../TopHud';
@@ -129,14 +129,6 @@ export const TouchHud: React.FC<TouchHudProps> = ({
             className="ll-focus ll-surface flex h-11 w-11 items-center justify-center rounded-xl text-white"
           >
             <Users className="w-4 h-4" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            onClick={top.onOpenMenu}
-            aria-label="Open map"
-            className="ll-focus ll-surface flex h-11 w-11 items-center justify-center rounded-xl text-white"
-          >
-            <Map className="w-4 h-4" aria-hidden="true" />
           </button>
         </nav>
       )}
