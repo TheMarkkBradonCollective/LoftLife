@@ -899,7 +899,11 @@ test('realtime: an autonomous taxi takes a fare to a valid destination', async (
     20_000
   );
   assert.match(arrived.exited.label, /Library/i);
-  assert.ok(Math.hypot(arrived.exited.x + 2.33, arrived.exited.z - 41.2) < 1.5);
+  // The drop-off must match the server-declared destination exactly, so the
+  // test follows the city plan rather than hard-coding a street coordinate.
+  const library = boarded.taxi.destinations.find((entry) => entry.id === 'library');
+  assert.ok(library, 'the library has a taxi destination');
+  assert.ok(Math.hypot(arrived.exited.x - library.arrival.x, arrived.exited.z - library.arrival.z) < 0.5);
   client.close();
 });
 

@@ -113,8 +113,11 @@ known gaps, priorities and long-term roadmap. The more implementation-specific s
 - Character studio: skin tones, 6 hairstyles, 4 tops, accessories, hair/outfit colours.
 - Main Hotel: lobby, 4 floors, brass elevator, keycard door terminal, numbered suite doors,
   resident NPC suites and greetings.
-- Main City: A–Z diagonal × 1st–30th street grid, procedural buildings, live traffic and signals,
-  city map, walkable streets.
+- Main City: a 725-block, 13-district world on the A–Z × 1st–30th grid — an eight-lane M Street
+  boulevard, avenue/street/residential hierarchy, civic plaza, Central Park, entertainment and
+  retail promenades, luxury waterfront, industrial yards and a three-block airport campus.
+  Eleven walk-up destinations with interiors, live traffic and signals, a district-aware city map
+  and walkable streets. See [docs/CITY-MASTERPLAN.md](docs/CITY-MASTERPLAN.md).
 
 **Online (added in this build)**
 - Accounts, sessions, rate limiting; first account on a fresh database becomes admin.
@@ -138,7 +141,8 @@ known gaps, priorities and long-term roadmap. The more implementation-specific s
   toggle-to-talk, voice activation with a sensitivity slider, open mic and push-to-mute. Settings →
   Audio & Voice holds the mode picker, sensitivity, permission status, input device and a live
   mic test; preferences save on-device offline and to the account when signed in.
-- **Rideable transit**: two LoftLine routes with marked stops. Seats are assigned by the server,
+- **Rideable transit**: six LoftLine routes (four buses, two elevated light-rail lines) with marked
+  stops, plus a Central Station hub and 15 taxi destinations. Seats are assigned by the server,
   rider positions are server-authoritative, and passengers who board the same line share the tram.
 - **Device-aware game HUD**: one cohesive interface built from `src/hud/`, composed for six
   presentations (mobile portrait/landscape, tablet portrait/landscape, desktop browser and the
@@ -204,6 +208,8 @@ docs/              AUDIT.md, ARCHITECTURE.md, CATALOG-EXPANSION.md, ROADMAP.md, 
 
 ## Documentation
 
+- [docs/CITY-MASTERPLAN.md](docs/CITY-MASTERPLAN.md) — the city's districts, street hierarchy,
+  destination register, transit network, implementation and validation record.
 - [docs/AUDIT.md](docs/AUDIT.md) — honest audit of the codebase as found, plus the work done.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — server design, data model, realtime protocol,
   hosting and costs, and the path to Unity.

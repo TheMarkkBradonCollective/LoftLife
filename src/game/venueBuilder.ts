@@ -738,6 +738,259 @@ function buildCinemaInterior(b: VenueMeshBuilder, v: CityVenue, seats: VenueSeat
   }
 }
 
+function buildNightclubInterior(b: VenueMeshBuilder, v: CityVenue, seats: VenueSeat[], interactions: VenueInteractionPoint[], obstacles: VenueObstacle[]) {
+  const { iu0, iu1, iz0, iz1 } = v;
+  const midU = (iu0 + iu1) / 2;
+  // Dance floor with a lit grid and a DJ booth at the back.
+  const floorZ = iz0 + 6.4;
+  for (let gu = -2; gu <= 2; gu += 1) {
+    for (let gz = -1; gz <= 1; gz += 1) {
+      b.box('emissive', 0.86, 0.03, 0.86, midU + gu * 0.92, 0.18, floorZ + gz * 0.92);
+    }
+  }
+  b.box('trim', 3.2, 0.9, 1.1, midU, 0.45, iz0 + 2.0);
+  b.box('emissive', 2.4, 0.22, 0.12, midU, 1.02, iz0 + 2.5);
+  b.box('glass', 2.6, 1.4, 0.12, midU, 1.9, iz0 + 2.7);
+  obstacles.push({ type: 'box', ...venueToWorld(midU, iz0 + 2.0), hw: 1.7, hd: 0.7 });
+  // Long bar with stools along the east wall.
+  const barU = iu1 - 2.4;
+  b.box('wood', 1.1, 1.1, (iz1 - iz0) - 6.0, barU, 0.55, (iz0 + iz1) / 2);
+  b.box('trim', 1.25, 0.08, (iz1 - iz0) - 5.8, barU, 1.12, (iz0 + iz1) / 2);
+  for (let i = 0; i < 5; i += 1) {
+    b.box('glass', 0.24, 0.55, 0.24, barU - 0.8, 1.4, iz0 + 3.4 + i * 1.9);
+    b.cylinder('metal', 0.06, 0.7, barU - 1.1, 0.35, iz0 + 3.4 + i * 1.9, 6);
+    b.cylinder('fabric', 0.24, 0.08, barU - 1.1, 0.72, iz0 + 3.4 + i * 1.9, 10);
+    seats.push({ id: `nightclub_stool_${i}`, label: 'Bar Stool', ...venueToWorld(barU - 1.1, iz0 + 3.4 + i * 1.9), facingYaw: Math.PI / 2 });
+  }
+  obstacles.push({ type: 'box', ...venueToWorld(barU, (iz0 + iz1) / 2), hw: 0.75, hd: (iz1 - iz0) / 2 - 3.0 });
+  interactions.push({
+    id: 'nightclub_bar',
+    venueId: 'nightclub',
+    ...venueToWorld(barU - 1.8, (iz0 + iz1) / 2),
+    radius: 2.8,
+    label: 'Order at the bar',
+    kind: 'inspect',
+    hint: 'The dance floor is behind you and the DJ booth at the back. Booths line the west wall.',
+  });
+  // Upholstered booths on the west side.
+  for (let i = 0; i < 2; i += 1) {
+    const z = iz0 + 3.6 + i * 4.2;
+    b.box('fabric', 0.9, 0.55, 2.4, iu0 + 1.4, 0.28, z);
+    b.box('fabric', 0.2, 1.1, 2.4, iu0 + 1.0, 0.55, z);
+    b.box('wood', 1.0, 0.06, 1.1, iu0 + 2.3, 0.72, z);
+    b.box('wood', 0.1, 0.7, 0.1, iu0 + 2.3, 0.35, z);
+    seats.push({ id: `nightclub_booth_${i}`, label: 'Club Booth', ...venueToWorld(iu0 + 1.4, z), facingYaw: -Math.PI / 2 });
+    obstacles.push({ type: 'box', ...venueToWorld(iu0 + 1.4, z), hw: 0.55, hd: 1.3 });
+  }
+  // Speaker stacks and ceiling wash.
+  for (const u of [iu0 + 1.6, iu1 - 1.6]) {
+    b.box('trim', 0.6, 2.4, 0.6, u, 1.2, iz0 + 1.2);
+    b.box('accent', 0.42, 0.42, 0.2, u, 1.9, iz0 + 1.55);
+  }
+  b.box('emissive', (iu1 - iu0) - 4.0, 0.08, 0.5, midU, v.ceiling - 0.3, iz1 - 2.0);
+}
+
+function buildBarInterior(b: VenueMeshBuilder, v: CityVenue, seats: VenueSeat[], interactions: VenueInteractionPoint[], obstacles: VenueObstacle[]) {
+  const { iu0, iu1, iz0, iz1 } = v;
+  const midU = (iu0 + iu1) / 2;
+  // Back bar with taps and a mirror.
+  const barZ = iz0 + 2.2;
+  b.box('wood', (iu1 - iu0) - 3.2, 1.1, 0.9, midU, 0.55, barZ);
+  b.box('trim', (iu1 - iu0) - 3.0, 0.1, 1.0, midU, 1.12, barZ);
+  for (let i = 0; i < 6; i += 1) {
+    b.cylinder('metal', 0.05, 0.3, midU - 3.0 + i * 1.2, 1.2, barZ - 0.25, 6);
+    b.box('glass', 0.22, 0.38, 0.22, midU - 3.0 + i * 1.2, 1.5, barZ - 0.2);
+  }
+  b.box('glass', (iu1 - iu0) - 3.6, 1.3, 0.08, midU, 2.1, barZ - 0.52);
+  obstacles.push({ type: 'box', ...venueToWorld(midU, barZ), hw: (iu1 - iu0) / 2 - 1.6, hd: 0.7 });
+  interactions.push({
+    id: 'bar_counter',
+    venueId: 'bar',
+    ...venueToWorld(midU, barZ + 1.6),
+    radius: 2.8,
+    label: 'Order a drink',
+    kind: 'inspect',
+    hint: 'Six taps, a corner stage and booths along the wall. Grab a stool at the bar.',
+  });
+  // Stools.
+  const stoolCount = Math.max(3, Math.min(6, Math.floor((iu1 - iu0) / 2.2)));
+  for (let i = 0; i < stoolCount; i += 1) {
+    const u = midU - ((stoolCount - 1) * 1.5) / 2 + i * 1.5;
+    b.cylinder('metal', 0.05, 0.72, u, 0.36, barZ + 0.9, 6);
+    b.cylinder('fabric', 0.23, 0.08, u, 0.74, barZ + 0.9, 10);
+    seats.push({ id: `bar_stool_${i}`, label: 'Bar Stool', ...venueToWorld(u, barZ + 0.9), facingYaw: 0 });
+  }
+  // Wooden booths down the long walls.
+  for (let i = 0; i < 2; i += 1) {
+    const z = iz0 + 5.2 + i * 3.4;
+    b.box('wood', 0.8, 0.5, 2.2, iu0 + 1.1, 0.25, z);
+    b.box('wood', 0.16, 1.0, 2.2, iu0 + 0.8, 0.5, z);
+    b.box('wood', 1.8, 0.06, 1.2, iu0 + 2.2, 0.72, z);
+    b.box('wood', 0.1, 0.7, 0.1, iu0 + 2.2, 0.35, z);
+    seats.push({ id: `bar_booth_${i}`, label: 'Bar Booth', ...venueToWorld(iu0 + 1.1, z), facingYaw: -Math.PI / 2 });
+    obstacles.push({ type: 'box', ...venueToWorld(iu0 + 1.1, z), hw: 0.5, hd: 1.2 });
+  }
+  // Corner stage.
+  b.box('wood', 3.0, 0.35, 1.8, iu1 - 2.6, 0.17, iz1 - 1.6);
+  b.box('trim', 0.6, 1.4, 0.6, iu1 - 2.6, 1.05, iz1 - 2.2);
+  obstacles.push({ type: 'box', ...venueToWorld(iu1 - 2.6, iz1 - 1.6), hw: 1.6, hd: 1.0 });
+  b.box('emissive', 2.0, 0.1, 0.16, iu1 - 2.6, 2.5, iz1 - 0.4);
+  b.blob('leaf', 0.38, iu0 + 1.0, 0.82, iz1 - 1.0, 1.1);
+}
+
+function buildTokeLoungeInterior(b: VenueMeshBuilder, v: CityVenue, seats: VenueSeat[], interactions: VenueInteractionPoint[], obstacles: VenueObstacle[]) {
+  const { iu0, iu1, iz0, iz1 } = v;
+  const midU = (iu0 + iu1) / 2;
+  // Lounge pit: sofas around low tables.
+  const ring = [
+    { u: midU - 3.4, z: iz0 + 4.2, yaw: Math.PI / 2 },
+    { u: midU + 3.4, z: iz0 + 4.2, yaw: -Math.PI / 2 },
+    { u: midU - 3.4, z: iz0 + 7.4, yaw: Math.PI / 2 },
+    { u: midU + 3.4, z: iz0 + 7.4, yaw: -Math.PI / 2 },
+  ];
+  for (let i = 0; i < ring.length; i += 1) {
+    const spot = ring[i];
+    b.box('fabric', 1.1, 0.58, 2.2, spot.u, 0.29, spot.z);
+    b.box('fabric', 0.22, 1.0, 2.2, spot.u + (spot.yaw > 0 ? 0.44 : -0.44), 0.5, spot.z);
+    seats.push({ id: `toke_sofa_${i}`, label: 'Lounge Sofa', ...venueToWorld(spot.u, spot.z), facingYaw: spot.yaw });
+    obstacles.push({ type: 'box', ...venueToWorld(spot.u, spot.z), hw: 0.65, hd: 1.15 });
+  }
+  for (const z of [iz0 + 4.2, iz0 + 7.4]) {
+    b.box('wood', 1.5, 0.36, 0.9, midU, 0.18, z);
+    b.box('trim', 0.5, 0.12, 0.5, midU, 0.42, z);
+    obstacles.push({ type: 'box', ...venueToWorld(midU, z), hw: 0.85, hd: 0.55 });
+  }
+  // Herb bar along the back wall.
+  const barZ = iz1 - 2.0;
+  b.box('wood', (iu1 - iu0) - 4.0, 1.0, 0.8, midU, 0.5, barZ);
+  b.box('trim', (iu1 - iu0) - 3.8, 0.08, 0.92, midU, 1.04, barZ);
+  for (let i = 0; i < 4; i += 1) {
+    b.box('glass', 0.3, 0.5, 0.3, midU - 2.2 + i * 1.45, 1.3, barZ - 0.2);
+    b.blob('leaf', 0.18, midU - 2.2 + i * 1.45, 1.62, barZ - 0.2, 0.8);
+  }
+  obstacles.push({ type: 'box', ...venueToWorld(midU, barZ), hw: (iu1 - iu0) / 2 - 2.0, hd: 0.6 });
+  interactions.push({
+    id: 'toke_counter',
+    venueId: 'toke_lounge',
+    ...venueToWorld(midU, barZ - 1.5),
+    radius: 2.8,
+    label: 'Visit the herb bar',
+    kind: 'inspect',
+    hint: 'The lounge is 21+ after 9pm. Sofas, low tables and the patio planters are all yours.',
+  });
+  // Planters and warm floor lamps make it feel lived in.
+  for (const [u, z] of [
+    [iu0 + 1.4, iz0 + 1.4],
+    [iu1 - 1.4, iz0 + 1.4],
+    [iu0 + 1.4, iz1 - 1.2],
+    [iu1 - 1.4, iz1 - 1.2],
+  ]) {
+    b.box('trim', 0.55, 0.5, 0.55, u, 0.25, z);
+    b.blob('leaf', 0.55, u, 0.95, z, 1.15);
+    obstacles.push({ type: 'circle', ...venueToWorld(u, z), r: 0.45 });
+  }
+  b.box('fabric', 5.2, 0.02, 5.0, midU, 0.16, iz0 + 5.8);
+  b.box('emissive', 3.0, 0.06, 0.16, midU, v.ceiling - 0.4, iz0 + 5.8);
+}
+
+function buildRestaurantInterior(b: VenueMeshBuilder, v: CityVenue, seats: VenueSeat[], interactions: VenueInteractionPoint[], obstacles: VenueObstacle[]) {
+  const { iu0, iu1, iz0, iz1 } = v;
+  const midU = (iu0 + iu1) / 2;
+  // Service counter with a pass to the kitchen.
+  const counterZ = iz0 + 2.2;
+  b.box('wood', 5.0, 1.05, 1.0, midU, 0.52, counterZ);
+  b.box('trim', 5.2, 0.1, 1.1, midU, 1.1, counterZ);
+  b.box('metal', 1.2, 0.5, 0.6, midU - 1.2, 1.35, counterZ);
+  b.box('emissive', 2.2, 0.16, 0.08, midU, 2.6, counterZ - 0.5);
+  obstacles.push({ type: 'box', ...venueToWorld(midU, counterZ), hw: 2.6, hd: 0.65 });
+  interactions.push({
+    id: 'restaurant_host',
+    venueId: 'restaurant',
+    ...venueToWorld(midU, counterZ + 1.6),
+    radius: 2.8,
+    label: 'Ask for a table',
+    kind: 'inspect',
+    hint: 'The Copper Fork serves all day. Window tables and the back banquette are open.',
+  });
+  // Banquette seating down the east wall.
+  for (let i = 0; i < 3; i += 1) {
+    const z = iz0 + 4.4 + i * 3.2;
+    b.box('fabric', 0.85, 0.55, 2.4, iu1 - 1.2, 0.28, z);
+    b.box('fabric', 0.2, 1.15, 2.4, iu1 - 0.85, 0.58, z);
+    b.box('wood', 1.2, 0.06, 1.3, iu1 - 2.1, 0.74, z);
+    b.box('wood', 0.1, 0.72, 0.1, iu1 - 2.1, 0.36, z);
+    seats.push({ id: `restaurant_banquette_${i}`, label: 'Banquette', ...venueToWorld(iu1 - 1.2, z), facingYaw: -Math.PI / 2 });
+    b.box('wood', 0.48, 0.06, 0.48, iu1 - 2.9, 0.45, z);
+    b.box('wood', 0.48, 0.5, 0.08, iu1 - 2.9, 0.7, z + 0.2);
+    seats.push({ id: `restaurant_chair_${i}`, label: 'Dining Chair', ...venueToWorld(iu1 - 2.9, z), facingYaw: Math.PI / 2 });
+    obstacles.push({ type: 'box', ...venueToWorld(iu1 - 1.4, z), hw: 0.7, hd: 1.2 });
+  }
+  // Window two-tops.
+  for (let i = 0; i < 3; i += 1) {
+    const z = iz0 + 4.0 + i * 3.4;
+    const u = iu0 + 2.8;
+    b.cylinder('metal', 0.06, 0.72, u, 0.36, z, 8);
+    b.cylinder('wood', 0.52, 0.06, u, 0.74, z, 16);
+    for (const side of [-0.8, 0.8]) {
+      b.box('wood', 0.44, 0.06, 0.44, u + side, 0.45, z);
+      b.box('wood', 0.44, 0.5, 0.08, u + side, 0.7, z + 0.2);
+      seats.push({ id: `restaurant_table_${i}_${side > 0 ? 'e' : 'w'}`, label: 'Dining Chair', ...venueToWorld(u + side, z), facingYaw: 0 });
+    }
+    obstacles.push({ type: 'circle', ...venueToWorld(u, z), r: 0.7 });
+  }
+  // Planter divider and pendant lights.
+  for (let i = 0; i < 4; i += 1) {
+    b.box('trim', 0.5, 0.46, 0.5, midU + 2.0, 0.23, iz0 + 4.0 + i * 2.6);
+    b.blob('leaf', 0.42, midU + 2.0, 0.85, iz0 + 4.0 + i * 2.6, 1.1);
+  }
+  for (const u of [midU - 2.6, midU, midU + 2.6]) {
+    b.box('emissive', 0.35, 0.2, 0.35, u, v.ceiling - 0.5, iz0 + 5.4);
+  }
+}
+
+function buildEventHallInterior(b: VenueMeshBuilder, v: CityVenue, seats: VenueSeat[], interactions: VenueInteractionPoint[], obstacles: VenueObstacle[]) {
+  const { iu0, iu1, iz0, iz1 } = v;
+  const midU = (iu0 + iu1) / 2;
+  // Stage at the far end with a screen and lectern.
+  b.box('wood', (iu1 - iu0) - 4.0, 0.6, 3.0, midU, 0.3, iz1 - 2.2);
+  b.box('trim', 0.9, 1.2, 0.6, midU + 2.2, 1.2, iz1 - 2.2);
+  b.box('emissive', 5.4, 2.4, 0.14, midU - 1.0, 2.2, iz1 - 0.6);
+  obstacles.push({ type: 'box', ...venueToWorld(midU, iz1 - 2.2), hw: (iu1 - iu0) / 2 - 2.0, hd: 1.6 });
+  interactions.push({
+    id: 'event_hall_stage',
+    venueId: 'event_hall',
+    ...venueToWorld(midU, iz1 - 4.2),
+    radius: 2.8,
+    label: 'Check the event programme',
+    kind: 'inspect',
+    hint: 'Tonight: a live set at 8, the neighbourhood assembly at 6. Every chair in the hall is free.',
+  });
+  // Rows of stackable chairs facing the stage.
+  for (let row = 0; row < 4; row += 1) {
+    const z = iz0 + 3.2 + row * 2.2;
+    const count = Math.max(3, Math.min(6, Math.floor((iu1 - iu0 - 2.0) / 1.9)));
+    for (let i = 0; i < count; i += 1) {
+      const u = midU - ((count - 1) * 1.7) / 2 + i * 1.7;
+      b.box('fabric', 0.46, 0.08, 0.46, u, 0.46, z);
+      b.box('fabric', 0.46, 0.5, 0.08, u, 0.72, z + 0.21);
+      seats.push({ id: `hall_chair_${row}_${i}`, label: 'Hall Chair', ...venueToWorld(u, z), facingYaw: Math.PI });
+      obstacles.push({ type: 'box', ...venueToWorld(u, z), hw: 0.3, hd: 0.3 });
+    }
+  }
+  // Ticket / welcome desk by the doors.
+  const deskZ = iz0 + 1.6;
+  b.box('wood', 3.4, 1.0, 0.85, iu0 + 2.4, 0.5, deskZ);
+  b.box('trim', 3.6, 0.08, 0.95, iu0 + 2.4, 1.04, deskZ);
+  obstacles.push({ type: 'box', ...venueToWorld(iu0 + 2.4, deskZ), hw: 1.8, hd: 0.55 });
+  b.box('wood', 0.5, 0.44, 0.5, iu0 + 3.8, 0.22, deskZ + 1.0);
+  // Coat rail and pendant wash.
+  for (let i = 0; i < 3; i += 1) {
+    b.box('emissive', 0.3, 0.14, 0.9, midU - 3.0 + i * 3.0, v.ceiling - 0.4, iz0 + 4.4);
+  }
+  b.box('trim', 0.12, 1.8, 2.2, iu1 - 0.5, 1.0, iz0 + 3.0);
+  b.blob('leaf', 0.44, iu1 - 1.0, 0.86, iz1 - 3.4, 1.1);
+}
+
 function buildVenueInterior(b: VenueMeshBuilder, v: CityVenue, seats: VenueSeat[], interactions: VenueInteractionPoint[], obstacles: VenueObstacle[]) {
   switch (v.id) {
     case 'library':
@@ -757,6 +1010,21 @@ function buildVenueInterior(b: VenueMeshBuilder, v: CityVenue, seats: VenueSeat[
       break;
     case 'cinema':
       buildCinemaInterior(b, v, seats, interactions, obstacles);
+      break;
+    case 'event_hall':
+      buildEventHallInterior(b, v, seats, interactions, obstacles);
+      break;
+    case 'nightclub':
+      buildNightclubInterior(b, v, seats, interactions, obstacles);
+      break;
+    case 'bar':
+      buildBarInterior(b, v, seats, interactions, obstacles);
+      break;
+    case 'toke_lounge':
+      buildTokeLoungeInterior(b, v, seats, interactions, obstacles);
+      break;
+    case 'restaurant':
+      buildRestaurantInterior(b, v, seats, interactions, obstacles);
       break;
     default:
       break;

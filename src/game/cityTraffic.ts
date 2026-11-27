@@ -485,8 +485,9 @@ export function createCityTraffic(maxAnisotropy: number): TrafficSystemHandles {
   const carColors = [0xd9e0e8, 0x1f2937, 0x2f5a8a, 0x8f2d2d, 0x3b6b58, 0x6b7280, 0xb88635];
 
   // 1. Spawn Cars across major Horizontal & Diagonal streets
-  const majorRows = [4, 9, 14, 15, 19, 24];
-  const majorCols = [5, 11, 12, 13, 18, 22];
+  // Priority corridors: every avenue plus the M Street boulevard.
+  const majorRows = [4, 9, 14, 19, 24];
+  const majorCols = [0, 4, 8, 12, 16, 20, 25];
 
   for (let i = 0; i < 16; i++) {
     const isDiag = i % 2 === 1;
@@ -500,7 +501,8 @@ export function createCityTraffic(maxAnisotropy: number): TrafficSystemHandles {
 
     if (!isDiag) {
       const row = majorRows[(i >> 1) % majorRows.length];
-      const laneOffset = zIsMajor[row] ? (i % 3 === 0 ? 1.85 : 3.95) : 2.1;
+      const laneOffsets = zIsMajor[row] ? [2.0, 4.9] : [2.4];
+      const laneOffset = laneOffsets[(i + row) % laneOffsets.length];
       const pos = bounds.uMin + ((i * 79) % (bounds.uMax - bounds.uMin));
       vehicles.push({
         group: built.group,
@@ -521,7 +523,10 @@ export function createCityTraffic(maxAnisotropy: number): TrafficSystemHandles {
       });
     } else {
       const col = majorCols[(i >> 1) % majorCols.length];
-      const laneOffset = uIsMajor[col] ? (i % 3 === 0 ? 1.85 : 3.85) : 2.1;
+      // M Street carries four lanes each way, clear of its planted median.
+      const laneOffsets =
+        col === 12 ? [2.8, 6.4, 10.0, 13.0] : uIsMajor[col] ? [2.0, 5.2] : [2.4];
+      const laneOffset = laneOffsets[(i + col) % laneOffsets.length];
       const pos = bounds.zMin + ((i * 73) % (bounds.zMax - bounds.zMin));
       vehicles.push({
         group: built.group,
@@ -564,7 +569,8 @@ export function createCityTraffic(maxAnisotropy: number): TrafficSystemHandles {
       axis: bs.axis,
       dir: bs.dir,
       lineIndex: bs.lineIndex,
-      laneOffset: 3.9,
+      // Kerbside bus lane: outer lane on the boulevard, lane 2 elsewhere.
+      laneOffset: bs.lineIndex === 12 ? 12.9 : 4.9,
       pos: bs.pos,
       speed: 7.0,
       maxSpeed: 7.6,

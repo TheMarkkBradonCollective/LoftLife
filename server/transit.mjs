@@ -34,17 +34,23 @@ const TAXI_WAIT_MS = 45_000;
 
 /** Full street grid, used to keep hired taxis on roads. */
 const ROAD_U = [
-  -410.9, -375.6, -344.5, -310.4, -276.9, -237.1, -203.6, -170.1, -140.6,
-  -111.5, -74.1, -36.0, 0.0, 36.0, 73.0, 109.0, 137.0, 170.0, 207.7, 248.7,
-  290.3, 324.8, 361.9, 400.9, 432.8, 460.9,
+  -487.06, -446.88, -409.76, -370.44, -331.55, -288.2,
+  -249.31, -210.44, -174.45, -138.8, -97.13, -54.93,
+  0, 56.96, 98.34, 139.01, 173.89, 212.43,
+  254.27, 298.6, 343.33, 382.86, 424.35, 467.19,
+  504.86, 543.87,
 ];
 const ROAD_Z = [
-  -444.7, -408.0, -381.1, -350.8, -314.3, -276.5, -250.7, -216.2, -193.2,
-  -164.3, -130.4, -93.4, -65.9, -34.0, 0.0, 34.0, 64.8, 90.5, 123.4, 155.8,
-  180.5, 209.5, 236.3, 262.1, 296.6, 324.5, 359.5, 395.7, 423.8, 458.0,
+  -532.76, -493.66, -461.29, -426.6, -387.62, -347.76,
+  -316.18, -278.55, -248.88, -215.15, -168.95, -129.64,
+  -87.84, -43.05, 0, 40.02, 84.09, 115.6,
+  161.12, 206.23, 237.12, 270.93, 303.2, 334.84,
+  372.44, 405.49, 443.43, 487.17, 525.39, 562.76,
 ];
 
-const stop = (id, name, u, z) => ({ id, name, x: u + SLOPE * z, z });
+/** World x for a diagonal (u) street at a given z. */
+const stop = (id, name, u, z) => ({ id, name, x: Math.round((u + SLOPE * z) * 100) / 100, z });
+const VIADUCT_Z = 40.02; // 16th Street elevated line
 
 export const TRANSIT_LINES = [
   {
@@ -52,26 +58,29 @@ export const TRANSIT_LINES = [
     label: '15th Street Bus',
     kind: 'bus',
     color: '#39ff14',
-    // Coordinates preserved from the original LoftLine network.
+    // North-side kerb of 15th Street, linking the civic and retail spines.
     stops: [
-      { id: '15-l', name: '15th & L St', x: -36, z: 5.85 },
-      { id: '15-m', name: '15th & M St', x: 0, z: 5.85 },
-      { id: '15-n', name: '15th & N St', x: 36, z: 5.85 },
-      { id: '15-o', name: '15th & O St', x: 72.98, z: 5.85 },
-      { id: '15-p', name: '15th & P St', x: 108.98, z: 5.85 },
+      stop('15-l', '15th & L St', -54.93, -9.5),
+      stop('15-m', '15th & M St', 0, -9.5),
+      stop('15-n', '15th & N St', 56.96, -9.5),
+      stop('15-p', '15th & P St', 139.01, -9.5),
+      stop('15-r', '15th & R St', 212.43, -9.5),
+      stop('15-s', '15th & S St', 254.27, -9.5),
     ],
   },
   {
     id: 'loftline-m',
-    label: 'M Street Bus',
+    label: 'M Street Boulevard Bus',
     kind: 'bus',
     color: '#39ff14',
+    // East-side bus lane on the eight-lane M Street boulevard.
     stops: [
-      { id: 'm-12', name: 'M St & 12th St', x: -39.23, z: -93.4 },
-      { id: 'm-14', name: 'M St & 14th St', x: -19.14, z: -34 },
-      { id: 'm-15', name: 'M St & 15th St', x: -4.86, z: 0 },
-      { id: 'm-16', name: 'M St & 16th St', x: 9.42, z: 34 },
-      { id: 'm-18', name: 'M St & 18th St', x: 33.15, z: 90.49 },
+      stop('m-12', 'M St & 12th St', 16.4, -129.64),
+      stop('m-14', 'M St & 14th St', 16.4, -43.05),
+      stop('m-15', 'M St & 15th St', 16.4, 0),
+      stop('m-18', 'M St & 18th St', 16.4, 115.6),
+      stop('m-22', 'M St & 22nd St', 16.4, 270.93),
+      stop('m-28', 'M St & 28th St', 16.4, 487.17),
     ],
   },
   {
@@ -79,98 +88,174 @@ export const TRANSIT_LINES = [
     label: 'Downtown Loop Bus',
     kind: 'bus',
     color: '#22d3ee',
+    // A road rectangle around the civic core: M/O × 12th/18th.
     stops: [
-      stop('loop-plaza', 'Loft Plaza', 0, 5.85),
-      stop('loop-library', 'Library', 0, 90.5),
-      stop('loop-market', 'Market Hall', 36, 64.8),
-      stop('loop-cinema', 'Cinema', 72.98, 34),
-      stop('loop-med', 'The Med Deck', 109, 34),
+      stop('loop-m12', 'M St & 12th St', 0, -129.64),
+      stop('loop-m18', 'M St & 18th St', 0, 115.6),
+      stop('loop-o18', 'O St & 18th St', 98.34, 115.6),
+      stop('loop-o12', 'O St & 12th St', 98.34, -129.64),
+    ],
+  },
+  {
+    id: 'airport-express',
+    label: 'Airport Express Bus',
+    kind: 'bus',
+    color: '#38bdf8',
+    // Central Station → O St → 20th St → W St → 28th St → terminal kerb.
+    stops: [
+      stop('air-central', 'Central Station', 0, 0),
+      stop('air-o15', 'O St & 15th St', 98.34, 0),
+      stop('air-o20', 'O St & 20th St', 98.34, 206.23),
+      stop('air-w20', 'W St & 20th St', 424.35, 206.23),
+      stop('air-w28', 'W St & 28th St', 424.35, 487.17),
+      stop('air-terminal', 'Airport Terminal', 504.83, 487.17),
     ],
   },
   {
     id: 'rail-green',
-    label: 'Green Line · Airport Express',
+    label: 'Green Line · 16th Street Express',
     kind: 'rail',
     color: '#22c55e',
+    // Runs entirely on the elevated 16th Street viaduct.
     stops: [
-      stop('rail-m', 'M St & 16th Station', 0, 30.5),
-      stop('rail-o', 'O St Station', 73, 30.5),
-      stop('rail-t', 'T St Station', 207.7, 30.5),
-      stop('rail-w', 'W St Station', 361.9, 30.5),
-      stop('rail-hotel', 'Grand Hotel Station', 402, 400.5),
-      stop('rail-airport', 'Airport Station', 430, 421),
+      stop('rail-a', 'A St · 16th Station', -487.06, 40.02),
+      stop('rail-m', 'M St · 16th Station', 0, 40.02),
+      stop('rail-q', 'Q St · 16th Station', 173.89, 40.02),
+      stop('rail-u', 'U St · 16th Station', 343.33, 40.02),
+      stop('rail-z', 'Z St · 16th Station', 543.87, 40.02),
     ],
   },
   {
     id: 'rail-blue',
-    label: 'Blue Line · Downtown Loop',
+    label: 'Blue Line · Downtown Crosstown',
     kind: 'rail',
     color: '#3b82f6',
     stops: [
-      stop('blue-12', '12th St Station', 0, -93.4),
-      stop('blue-15', '15th St Station', 0, 0),
-      stop('blue-16', '16th St Station', 0, 34),
-      stop('blue-cinema', 'Cinema Station', 73, 64.8),
-      stop('blue-o', 'O St Station', 73, 0),
+      stop('blue-m', 'M St · 16th Station', 0, 40.02),
+      stop('blue-o', 'O St · 16th Station', 98.34, 40.02),
+      stop('blue-p', 'P St · 16th Station', 139.01, 40.02),
+      stop('blue-t', 'T St · 16th Station', 298.6, 40.02),
+      stop('blue-w', 'W St · 16th Station', 424.35, 40.02),
     ],
   },
 ];
 
-/** Intercity gateways. The rail hub opens the long-distance journey UI. */
 export const TRANSIT_HUBS = [
   {
     id: 'central-station',
     label: 'LoftLife Central Station',
     mode: 'rail',
-    // On the plaza apron, clear of the 15th Street traffic lanes.
-    x: 26.56,
-    z: 10.5,
+    // South-west corner of LoftLife Plaza, clear of the fountain and stage.
+    x: 32.1,
+    z: 30,
   },
 ];
 
-/** Valid autonomous-taxi destinations. `arrival` is where riders step out. */
 export const TAXI_DESTINATIONS = [
   {
     id: 'plaza',
     label: 'LoftLife Plaza',
-    x: 26.56,
-    z: 18,
-    arrival: { x: 26.56, z: 24 },
+    x: 32.6,
+    z: 30,
+    arrival: { x: 32.6, z: 30 },
   },
   {
     id: 'hotel',
     label: 'Grand Hotel',
-    x: 552.15,
-    z: 406.49,
-    arrival: { x: 552.15, z: 406.49 },
+    x: 655.93,
+    z: 505.37,
+    arrival: { x: 655.93, z: 505.37 },
   },
   {
     id: 'airport',
     label: 'TheCity Airport',
-    x: 598.81,
-    z: 397.89,
-    arrival: { x: 598.81, z: 397.89 },
+    x: 710.3,
+    z: 485.67,
+    arrival: { x: 710.3, z: 485.67 },
   },
   {
     id: 'clothing-store',
     label: 'LoftLife Threads',
-    x: 79.12,
-    z: 58.64,
-    arrival: { x: 79.12, z: 62.5 },
+    x: 158.89,
+    z: 196.23,
+    arrival: { x: 158.89, z: 196.23 },
+  },
+  {
+    id: 'community-center',
+    label: 'LoftLife Community Center',
+    x: -34.93,
+    z: -7.3,
+    arrival: { x: -34.93, z: -7.3 },
+  },
+  {
+    id: 'cafe',
+    label: 'Bean & Loft Café',
+    x: 29.82,
+    z: -7.3,
+    arrival: { x: 29.82, z: -7.3 },
   },
   {
     id: 'library',
-    label: 'Public Library',
-    x: -2.33,
-    z: 39.7,
-    arrival: { x: -2.33, z: 41.2 },
+    label: 'LoftLife Public Library',
+    x: -12.58,
+    z: 45.92,
+    arrival: { x: -12.58, z: 45.92 },
+  },
+  {
+    id: 'cinema',
+    label: 'LoftLife Cinema',
+    x: -140.99,
+    z: -190.85,
+    arrival: { x: -140.99, z: -190.85 },
+  },
+  {
+    id: 'event-hall',
+    label: 'The Loft Hall',
+    x: -129.19,
+    z: -190.85,
+    arrival: { x: -129.19, z: -190.85 },
+  },
+  {
+    id: 'nightclub',
+    label: 'Neon Loft Nightclub',
+    x: 116.38,
+    z: -93.74,
+    arrival: { x: 116.38, z: -93.74 },
+  },
+  {
+    id: 'bar',
+    label: 'The Brass Tap',
+    x: 153.71,
+    z: -65.44,
+    arrival: { x: 153.71, z: -65.44 },
+  },
+  {
+    id: 'toke-lounge',
+    label: 'Cloud Nine Toke Lounge',
+    x: 105.62,
+    z: -65.44,
+    arrival: { x: 105.62, z: -65.44 },
+  },
+  {
+    id: 'market',
+    label: 'Market Hall',
+    x: 169.7,
+    z: 121.5,
+    arrival: { x: 169.7, z: 121.5 },
+  },
+  {
+    id: 'restaurant',
+    label: 'The Copper Fork',
+    x: 257.83,
+    z: 182.47,
+    arrival: { x: 257.83, z: 182.47 },
   },
   {
     id: 'med-deck',
     label: 'The Med Deck',
-    x: 107.65,
-    z: 39.7,
-    arrival: { x: 107.65, z: 41.2 },
+    x: 362.82,
+    z: 138.86,
+    arrival: { x: 362.82, z: 138.86 },
   },
 ];
 
@@ -419,9 +504,9 @@ export function ensureFleet(instanceId) {
 function taxiLoop() {
   const corners = [
     { u: 0, z: 0 },
-    { u: 0, z: 34 },
-    { u: 73, z: 34 },
-    { u: 73, z: 0 },
+    { u: 0, z: 40.02 },
+    { u: 98.34, z: 40.02 },
+    { u: 98.34, z: 0 },
   ].map((node) => ({ x: node.u + SLOPE * node.z, z: node.z }));
   const segments = [];
   let total = 0;

@@ -29,7 +29,8 @@ test('the transit network has scheduled buses, light rail, taxis and a rail hub'
     ids.add(line.id);
     for (const stop of line.stops) {
       assert.ok(Number.isFinite(stop.x) && Number.isFinite(stop.z));
-      assert.ok(Math.abs(stop.x) <= 700 && Math.abs(stop.z) <= 700, `${stop.id} is in the city`);
+      // The redesigned city is roughly 1.1 km across, so the map bound is 800 m.
+      assert.ok(Math.abs(stop.x) <= 800 && Math.abs(stop.z) <= 800, `${stop.id} is in the city`);
     }
   }
 
