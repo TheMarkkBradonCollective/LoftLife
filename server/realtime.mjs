@@ -41,6 +41,7 @@ import {
   vehiclesFor,
 } from './transit.mjs';
 import { advanceJourney, releaseJourney, startJourney } from './travel.mjs';
+import { normalizeAnimation } from '../shared/animation.mjs';
 import {
   DOORBELL_REASON_TEXT,
   DOORBELL_TIMEOUT_MS,
@@ -475,7 +476,10 @@ function handlePose(player, msg) {
   player.y = clamp(Number(msg.y), 3);
   player.yaw = Number.isFinite(Number(msg.yaw)) ? Number(msg.yaw) : player.yaw;
   if (ALLOWED_LOCATIONS.has(msg.location)) player.location = msg.location;
-  if (typeof msg.emote === 'string' && msg.emote.length <= 16) player.emote = msg.emote;
+  // Only the shared animation vocabulary is accepted. A modified client cannot
+  // inject arbitrary labels that other players would then try to render.
+  const emote = normalizeAnimation(msg.emote);
+  if (emote) player.emote = emote;
   if (typeof msg.voice === 'boolean') player.voice = msg.voice;
   if (msg.voiceMode === 'whisper' || msg.voiceMode === 'say' || msg.voiceMode === 'shout') {
     player.voiceMode = msg.voiceMode;

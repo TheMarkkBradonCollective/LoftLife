@@ -84,10 +84,25 @@ interface RemoteRigEntry {
   target: { x: number; y: number; z: number; yaw: number };
   emote: EmoteType;
   moving: boolean;
+  speed: number;
   phase: number;
 }
 
-const EMOTE_SET = new Set<string>(['idle', 'walk', 'sit', 'wave', 'dance', 'cheer', 'jump']);
+const EMOTE_SET = new Set<string>([
+  'idle',
+  'walk',
+  'run',
+  'stand',
+  'sit',
+  'wave',
+  'dance',
+  'cheer',
+  'talk',
+  'gesture',
+  'jump',
+  'enter_vehicle',
+  'exit_vehicle',
+]);
 
 /** Floating name label above a remote player. */
 function createNameTag(text: string): THREE.Sprite {
@@ -796,7 +811,11 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     // 4. Main City Outdoor Container
     const worldContainer = new THREE.Group();
-    const mainWorld = buildMainWorld(maxAnisotropy, isSoftwareGl);
+    const mainWorld = buildMainWorld(
+      maxAnisotropy,
+      isSoftwareGl,
+      isSoftwareGl ? 'low' : effectiveQuality === 'low' ? 'low' : effectiveQuality === 'medium' ? 'medium' : 'high'
+    );
     worldContainer.add(mainWorld.worldGroup);
     scene.add(worldContainer);
 
@@ -3436,13 +3455,25 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       avatarRig.shadowPlane.visible = !av.seatedUid;
 
       const effectiveEmote: EmoteType = isMoving
-        ? 'walk'
+        ? sprinting
+          ? 'run'
+          : 'walk'
         : av.seatedUid
         ? 'sit'
         : propsRef.current.activeEmote;
+      const groundSpeed = isMoving
+        ? sprinting
+          ? currentLoc === 'world'
+            ? 10.5
+            : 4.4
+          : currentLoc === 'world'
+          ? 4.4
+          : 2.85
+        : 0;
 
-      const animElapsed = isMoving && sprinting ? elapsed * 1.35 : elapsed;
-      avatarRig.updateAnimation(effectiveEmote, isMoving, animElapsed, delta, av.jumpY);
+      avatarRig.updateAnimation(effectiveEmote, isMoving, elapsed, delta, av.jumpY, {
+        speed: groundSpeed,
+      });
 
       // Remote players: interpolate toward their last server position.
       for (const entry of handles.remoteRigs.values()) {
@@ -3455,7 +3486,18 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         entry.rig.root.rotation.y +=
           shortestAngleDiff(entry.rig.root.rotation.y, entry.target.yaw) *
           (1 - Math.exp(-10 * delta));
-        entry.rig.updateAnimation(entry.emote, entry.moving, elapsed + entry.phase, delta, 0);
+        const measuredSpeed = entry.moving ? remaining / Math.max(delta, 0.001) : 0;
+        entry.speed = THREE.MathUtils.lerp(entry.speed, Math.min(measuredSpeed, 12), 1 - Math.exp(-10 * delta));
+        const remoteEmote: EmoteType = entry.moving
+          ? entry.emote === 'run' || entry.speed > 4.6
+            ? 'run'
+            : 'walk'
+          : entry.emote === 'walk' || entry.emote === 'run'
+          ? 'idle'
+          : entry.emote;
+        entry.rig.updateAnimation(remoteEmote, entry.moving, elapsed + entry.phase, delta, 0, {
+          speed: entry.speed,
+        });
       }
 
       if (rippleLife > 0) {
@@ -3887,6 +3929,16 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     h.mainWorld.setMainDoorUnlocked(mainDoorUnlocked);
   }, [mainDoorUnlocked]);
 
+  // Graphics quality caps the crowd LOD immediately; renderer resolution and
+  // shadows still settle on the next world entry (they need a new renderer).
+  useEffect(() => {
+    const h = sceneHandlesRef.current;
+    if (!h) return;
+    const effectiveQuality =
+      lowPowerGraphics && graphicsQuality === 'high' ? 'medium' : graphicsQuality;
+    h.mainWorld.cityCrowd.setQuality(effectiveQuality);
+  }, [graphicsQuality, lowPowerGraphics]);
+
   useEffect(() => {
     const h = sceneHandlesRef.current;
     if (!h) return;
@@ -3996,6 +4048,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           target: { x: player.x, y: player.y, z: player.z, yaw: player.yaw },
           emote: 'idle',
           moving: false,
+          speed: 0,
           phase: Math.random() * 6,
         };
         h.remoteRigs.set(connId, entry);
@@ -4010,10 +4063,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       const moved = Math.hypot(player.x - entry.target.x, player.z - entry.target.z) > 0.03;
       entry.target = { x: player.x, y: player.y, z: player.z, yaw: player.yaw };
       entry.moving = moved;
-      entry.emote = (player.emote === 'walk'
-        ? (moved ? 'walk' : 'idle')
+      entry.emote = (player.emote === 'walk' || player.emote === 'run'
+        ? moved
+          ? (player.emote as EmoteType)
+          : 'idle'
         : EMOTE_SET.has(player.emote)
-        ? player.emote
+        ? (player.emote as EmoteType)
         : moved
         ? 'walk'
         : 'idle') as EmoteType;

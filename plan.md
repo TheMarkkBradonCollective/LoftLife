@@ -253,11 +253,12 @@ A release is ready when:
 
 **North star:** if players can see it, consider how they can interact with it. If they can visit it, give them something worth doing there. Build a world people want to explore together — without making roleplay mandatory.
 
-## 10. Delivery status — catalog + multi-floor build
+## 10. Delivery status — catalog, characters, city and multi-floor build
 
 Status is literal: **Done** means implemented here and covered by an automated check; **Blocked**
 names missing external access; **Next** is unstarted. Deeper detail lives in
-[docs/CATALOG-EXPANSION.md](docs/CATALOG-EXPANSION.md) and
+[docs/CATALOG-EXPANSION.md](docs/CATALOG-EXPANSION.md),
+[docs/CHARACTERS-NPCS-VEHICLES.md](docs/CHARACTERS-NPCS-VEHICLES.md) and
 [docs/BUILDING-MULTIFLOOR.md](docs/BUILDING-MULTIFLOOR.md).
 
 | Area | Status | Evidence |
@@ -266,6 +267,12 @@ names missing external access; **Next** is unstarted. Deeper detail lives in
 | Imported Kenney library (1,676 models / 21 kits; 1,627 net-new catalog rows; 49 re-skins) | Done | `shared/catalog/kenney-library.mjs`, `server/test/kenney-library.test.mjs`, `docs/KENNEY-ASSET-LIBRARY.md` |
 | Real previews + searchable gallery for imported models | Done | `npm run assets:kenney`, `npm run assets:gallery`, `public/asset-gallery.html` |
 | Runtime GLB loading (lazy, deduped, LRU, pending rebuild, R2-ready URLs) | Done | `src/game/assets/kenneyRuntime.ts`, `RoomViewport.tsx`, `BuildPanel.tsx` |
+| Character library (51 records; pedestrian/service/accessibility separation) | Done | `shared/catalog/character-library.mjs`, `server/test/character-vehicle-libraries.test.mjs` |
+| City crowd (50 agents, sidewalk loops, corner crossings, venue visits, reactions, LOD/recycling) | Done | `shared/city-crowd.mjs`, `src/game/cityCrowd.ts`, `npm run check:people` |
+| Animation foundation (13 states, distance-driven stride, server validation) | Done | `shared/animation.mjs`, `src/game/avatar.ts`, `server/realtime.mjs` |
+| Vehicle library (134 models / 12 groups, real previews, group filters) | Done | `shared/catalog/vehicle-library.mjs`, `src/game/kenneyCatalog.ts`, gallery |
+| In-world traffic + transit (16 cars, 4 buses, 2 metro trains, 6 parked cars; server-owned LoftLine preserved) | Done | `src/game/cityTraffic.ts`, `server/transit.mjs`, `RoomViewport.tsx` |
+| Vehicle enter/exit animation and seating metadata | Done | `shared/animation.mjs`, `src/game/avatar.ts`; free driving is not implemented |
 | Weapon/gambling exclusion + full 49-kit classification | Done | `KENNEY_SUMMARY`, `docs/KENNEY-ASSET-LIBRARY.md` |
 | Placement persistence (online-mount autosave gate, integer cell snapping) | Done | `src/App.tsx`, `src/game/gridMath.ts`; verified by live place → PUT 200 → reload |
 | 1,434 transparent previews rendered from the actual models | Done | `npm run assets:check` |
@@ -278,23 +285,26 @@ names missing external access; **Next** is unstarted. Deeper detail lives in
 | Wall-run joining for structural pieces | Partial | bounding-box alignment only; no mitred curves |
 | Catalog schema + generated seed | Done, not applied | `migrations/0009_catalog_expansion.sql`, `scripts/export-catalog-sql.mjs` |
 | R2 upload (previews + GLBs + textures + manifests) | Blocked | `npm run assets:upload` needs `CATALOG_R2_BUCKET` + `CLOUDFLARE_API_TOKEN`; script is dry-run verified |
+| Production build excludes R2-hosted assets | Done | `vite.config.ts` + `VITE_ASSET_BASE_URL`; verified `dist/` has no `models/` or `catalog-previews/` and the gallery points at the base |
 | Neon migration + seed | Blocked | `npm run db:seed` needs `DATABASE_URL` |
 | Cloudflare deployment | Blocked | no token here; `wrangler deploy --dry-run` passes |
 
 ### Next
 
 1. Apply the R2 upload and point `VITE_ASSET_BASE_URL` at the bucket/CDN root, then repeat the
-   production asset check on the deployed origin. The importer, previews and uploader are ready; only
-   credentials are missing here.
+   production asset check on the deployed origin (and confirm CORS/public access). The importer,
+   previews, uploader and the build-time asset split are ready; only credentials are missing here.
 2. Split the 1.7 MB imported catalog metadata into a lazily fetched JSON module to trim the initial
    client chunk on low-end phones.
-3. Commission or author rigged, animated character models; Kenney's character kits are static props
-   and are intentionally not used for player avatars.
-4. Expand the clothing catalog with new garment rig geometry (shoes, swimwear, outerwear) plus
+3. Commission or author rigged, animated character models and clips; Kenney's available kits have
+   no skeletons, so imported characters are static and deliberately limited to distant crowd LOD.
+4. Add player-driven vehicles: vehicle physics, server authority, camera and collision handling. The
+   catalogue metadata, enter/exit poses and passenger transit already exist to build on.
+5. Expand the clothing catalog with new garment rig geometry (shoes, swimwear, outerwear) plus
    character-rendered previews; wire records through `shared/character.mjs`.
-2. Mitred geometry for curved/angled wall corners.
-3. Per-storey room outlines, atriums, animated stair traversal.
-4. Broadcast storey with player presence so visitors render on the right floor.
-5. Apply Neon migration/seed and upload previews to R2 once credentials exist; serve preview URLs
+6. Mitred geometry for curved/angled wall corners.
+7. Per-storey room outlines, atriums, animated stair traversal.
+8. Broadcast storey with player presence so visitors render on the right floor.
+9. Apply Neon migration/seed and upload previews to R2 once credentials exist; serve preview URLs
    from R2 in the Worker.
-6. Physical-device validation of the storey controls and HUD on Android phones/tablets.
+10. Physical-device validation of the storey controls, crowd LOD and HUD on Android phones/tablets.

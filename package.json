@@ -25,7 +25,9 @@
     "check:character": "node scripts/check-character.mjs",
     "check:finance": "node scripts/check-finance.mjs",
     "db:seed": "node scripts/seed-catalog-neon.mjs",
-    "assets:upload": "node scripts/upload-catalog-r2.mjs"
+    "assets:upload": "node scripts/upload-catalog-r2.mjs",
+    "assets:classify": "node scripts/build-people-vehicle-libraries.mjs",
+    "check:people": "node scripts/check-people.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
