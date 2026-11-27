@@ -68,6 +68,10 @@ export async function handleAdminRoute(request: Request, sql: Sql, user: User | 
     return fail('LoftLife staff access required.', 403, 'forbidden');
   }
 
+  if (url.pathname === '/api/admin/console/access' && request.method === 'GET') {
+    return json({ actor: { userId: user.id, handle: user.handle, role: actor.role, departments: actor.departments } });
+  }
+
   if (url.pathname === '/api/admin/console' && request.method === 'GET') {
     const q = (url.searchParams.get('q') ?? '').trim().slice(0, 64);
     const [staffRows, reportRows, accountCount, openReports, playerRows, auditRows] = await Promise.all([
