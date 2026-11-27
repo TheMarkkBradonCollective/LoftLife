@@ -2492,6 +2492,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         location={location}
         guestMode={session.status === 'guest'}
         world={activeWorld}
+        mood={mood}
+        onSetMood={setMood}
         suite={session.suite}
         roomName={roomName}
         items={items}
