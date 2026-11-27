@@ -24,9 +24,6 @@ import {
   Smartphone,
   Sparkles,
   Store,
-  Sun,
-  Sunset,
-  Moon,
   User,
   UserPlus,
   Users,
@@ -63,7 +60,7 @@ import {
 } from './primitives';
 import { VOICE_RANGES, VOICE_RANGE_INFO } from '../../shared/voice-controls.mjs';
 import { hudSectionAvailable } from '../../shared/hud-presentation.mjs';
-import type { EmoteType, GameMode, LightingMood, PlacedItem, ViewMode } from '../game/types';
+import type { EmoteType, GameMode, PlacedItem, ViewMode } from '../game/types';
 import type { SocialIntent } from './types';
 
 export type GameMenuSection =
@@ -96,7 +93,6 @@ export interface GameMenuProps {
   canChangeView: boolean;
   closeZoom: boolean;
   followCharacter: boolean;
-  mood: LightingMood;
   touch: TouchLayoutPreferences;
   syncing: boolean;
   syncError: string | null;
@@ -111,7 +107,6 @@ export interface GameMenuProps {
   debug: { presentation: string; platform: string; input: string } | null;
   onSetTouch: (patch: Partial<TouchLayoutPreferences>) => void;
   onResetTouch: () => void;
-  onSetMood: (mood: LightingMood) => void;
   onSetView: (mode: ViewMode) => void;
   onToggleZoom: () => void;
   onToggleFollow: () => void;
@@ -1072,20 +1067,6 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                   </MenuCard>
 
                   <MenuCard className="space-y-2">
-                    <SectionHeading>Lighting</SectionHeading>
-                    <Segmented
-                      label="Lighting mood"
-                      value={mood}
-                      onChange={(id) => props.onSetMood(id as LightingMood)}
-                      options={[
-                        { id: 'morning', label: 'Morning', icon: <Sun className="w-3.5 h-3.5" /> },
-                        { id: 'golden', label: 'Golden', icon: <Sunset className="w-3.5 h-3.5" /> },
-                        { id: 'night', label: 'Night', icon: <Moon className="w-3.5 h-3.5" /> },
-                      ]}
-                    />
-                  </MenuCard>
-
-                  <MenuCard className="space-y-2">
                     <SectionHeading hint="Saved to your account when signed in">Controls</SectionHeading>
                     {(
                       <>
@@ -1331,17 +1312,15 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                       </p>
                     )}
                     <div className="flex flex-wrap gap-2">
-                      {world && (
-                        <HudButton
-                          theme="light"
-                          variant="danger"
-                          icon={<DoorOpen className="w-4 h-4" />}
-                          loading={leaving}
-                          onClick={() => (confirmLeave ? void leave() : setConfirmLeave(true))}
-                        >
-                          {confirmLeave ? 'Confirm leave world' : 'Leave world'}
-                        </HudButton>
-                      )}
+                      <HudButton
+                        theme="light"
+                        variant="danger"
+                        icon={<DoorOpen className="w-4 h-4" />}
+                        loading={leaving}
+                        onClick={() => (confirmLeave ? void leave() : setConfirmLeave(true))}
+                      >
+                        {confirmLeave ? 'Confirm leave' : 'Leave world'}
+                      </HudButton>
                       {!online && !guest && (
                         <HudButton
                           theme="light"

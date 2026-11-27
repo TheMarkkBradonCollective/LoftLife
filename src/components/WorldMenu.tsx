@@ -29,7 +29,7 @@ import {
   isReservedBinding,
   keyLabel,
 } from '../../shared/keybindings.mjs';
-import type { PlacedItem, ViewMode, WorldLocation } from '../game/types';
+import type { LightingMood, PlacedItem, ViewMode, WorldLocation } from '../game/types';
 import type { SuiteState, TouchLayoutPreferences, WorldAccess, WorldRole, WorldSummary } from '../net/api';
 import { api, ApiError } from '../net/api';
 import { CITY_LAYOUT, worldToU } from '../game/cityLayout';
@@ -44,6 +44,8 @@ interface WorldMenuProps {
   initialTab?: MenuTab;
   location: WorldLocation;
   world: WorldSummary | null;
+  mood: LightingMood;
+  onSetMood: (mood: LightingMood) => void;
   suite: SuiteState | null;
   roomName: string;
   items: PlacedItem[];
@@ -251,6 +253,8 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
   initialTab,
   location,
   world,
+  mood,
+  onSetMood,
   suite,
   roomName,
   items,
@@ -812,6 +816,35 @@ export const WorldMenu: React.FC<WorldMenuProps> = ({
                   world.
                 </div>
               )}
+              <section className="rounded-xl border border-white/10 bg-black/20 p-3.5 space-y-3">
+                <h3 className="text-[11px] font-bold uppercase tracking-widest text-[#39ff14]/70">
+                  City Environment
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Lighting is a staff control. Only the city owner and authorized co-owners can change the shared environment.
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    ['morning', 'Morning'],
+                    ['golden', 'Golden'],
+                    ['night', 'Night'],
+                  ] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={mood === value}
+                      onClick={() => onSetMood(value)}
+                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${
+                        mood === value
+                          ? 'border-[#39ff14]/60 bg-[#39ff14]/15 text-[#b7ffab]'
+                          : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </section>
               <div className="grid gap-3 lg:grid-cols-2">
                 <section className="rounded-xl border border-white/10 bg-black/20 p-3.5 space-y-3">
                   <h3 className="text-[11px] font-bold uppercase tracking-widest text-[#39ff14]/70">
