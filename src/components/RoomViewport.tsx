@@ -26,6 +26,8 @@ import {
   worldToU,
 } from '../game/cityLayout';
 import { buildHotelHallway, buildHotelLobby } from '../game/hotelBuilder';
+import { buildAirportTerminal } from '../game/airportBuilder';
+import { buildClothingStore } from '../game/clothingStoreBuilder';
 import { buildRoomArchitecture, SUITE_DOOR_Z } from '../game/roomBuilder';
 import {
   buildMainWorld,
@@ -165,7 +167,7 @@ interface RoomViewportProps {
   onCityStreetChange?: (label: string) => void;
   onOpenDoorTerminal: () => void;
   onOpenAirportDeparture: () => void;
-  onOpenClothingShop: () => void;
+  onOpenClothingStore: () => void;
   /** Market Hall furniture counter. */
   onOpenFurnitureShop?: () => void;
   /** One-shot request to walk to a public destination's entrance. */
@@ -283,7 +285,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   onCityStreetChange,
   onOpenDoorTerminal,
   onOpenAirportDeparture,
-  onOpenClothingShop,
+  onOpenClothingStore,
   onOpenFurnitureShop,
   travelRequest,
   onEnterGuestRoom,
@@ -296,18 +298,14 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   onEnterSuiteFromHallway,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  // Give each client a slightly different city arrival point. Without this,
-  // every player spawns on the exact same coordinates and avatars can overlap
-  // so completely that multiplayer appears not to be working.
-  const citySpawnOffsetRef = useRef<{ x: number; z: number } | null>(null);
-  if (!citySpawnOffsetRef.current) {
-    const angle = Math.random() * Math.PI * 2;
-    const radius = 2 + Math.random() * 1.5;
-    citySpawnOffsetRef.current = {
-      x: Math.cos(angle) * radius,
-      z: Math.sin(angle) * radius,
-    };
-  }
+  // Absolute city arrival point for the next world transition. Waterfront,
+  // airport and store exits set this so the player lands on open pavement
+  // instead of inside the building they just left. Null means the hotel
+  // forecourt, with a small per-client jitter to avoid overlapping avatars.
+  const citySpawnTargetRef = useRef<{ x: number; z: number } | null>(null);
+  // Which side of the arrival building the isometric camera should sit on.
+  // The airport faces north; the hotel and clothing store face south.
+  const cityArrivalViewRef = useRef<'hotel' | 'airport' | 'store'>('hotel');
   const [webglError, setWebglError] = useState(false);
   // Camera distance/position captured the first time Z zoomed in, so the second
   // press returns to the exact previous view instead of a default.
@@ -370,7 +368,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onCityStreetChange,
     onOpenDoorTerminal,
     onOpenAirportDeparture,
-    onOpenClothingShop,
+    onOpenClothingStore,
     onOpenFurnitureShop,
     travelRequest,
     onEnterGuestRoom,
@@ -429,7 +427,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onCityStreetChange,
     onOpenDoorTerminal,
     onOpenAirportDeparture,
-    onOpenClothingShop,
+    onOpenClothingStore,
     onOpenFurnitureShop,
     travelRequest,
     onEnterGuestRoom,
@@ -458,6 +456,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     lobbyContainer: THREE.Group;
     hallwayContainer: THREE.Group;
     worldContainer: THREE.Group;
+    airportContainer: THREE.Group;
+    clothingStoreContainer: THREE.Group;
     furnitureRoot: THREE.Group;
     furnitureMap: Map<string, THREE.Group>;
     popAnimations: Map<string, number>;
@@ -468,6 +468,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     lobbyHandles: ReturnType<typeof buildHotelLobby>;
     hallwayHandles: ReturnType<typeof buildHotelHallway>;
     mainWorld: ReturnType<typeof buildMainWorld>;
+    airportHandles: ReturnType<typeof buildAirportTerminal>;
+    clothingStoreHandles: ReturnType<typeof buildClothingStore>;
     keyLight: THREE.DirectionalLight;
     hemiLight: THREE.HemisphereLight;
     fillLight: THREE.DirectionalLight;
@@ -701,6 +703,18 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     worldContainer.add(mainWorld.worldGroup);
     scene.add(worldContainer);
 
+    // 4b. TheCity International Airport terminal interior.
+    const airportContainer = new THREE.Group();
+    const airportHandles = buildAirportTerminal(maxAnisotropy);
+    airportContainer.add(airportHandles.airportGroup);
+    scene.add(airportContainer);
+
+    // 4c. LoftLife Threads — separate clothing store interior.
+    const clothingStoreContainer = new THREE.Group();
+    const clothingStoreHandles = buildClothingStore(maxAnisotropy);
+    clothingStoreContainer.add(clothingStoreHandles.storeGroup);
+    scene.add(clothingStoreContainer);
+
     // Rideable LoftLine vehicles + stop markers (server-owned positions).
     const transitGroup = new THREE.Group();
     transitGroup.name = 'loftline';
@@ -714,10 +728,19 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     lobbyContainer.visible = propsRef.current.location === 'lobby';
     hallwayContainer.visible = propsRef.current.location === 'hallway';
     worldContainer.visible = propsRef.current.location === 'world';
+    airportContainer.visible = propsRef.current.location === 'airport';
+    clothingStoreContainer.visible = propsRef.current.location === 'clothing_store';
 
     // 5. Player Avatar
     const avatarRig = createAvatarRig(propsRef.current.avatarConfig);
-    const initialCitySpawn = propsRef.current.location === 'world' ? CITY_LAYOUT.airportArrivalPos : { x: 0.5, z: 1.8 };
+    const initialCitySpawn =
+      propsRef.current.location === 'world'
+        ? mainWorld.loftDoorEntryPos
+        : propsRef.current.location === 'airport'
+        ? airportHandles.entrancePos
+        : propsRef.current.location === 'clothing_store'
+        ? clothingStoreHandles.entrancePos
+        : { x: 0.5, z: 1.8 };
     avatarRig.root.position.set(initialCitySpawn.x, 0, initialCitySpawn.z);
     scene.add(avatarRig.root);
 
@@ -735,8 +758,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     rippleMesh.position.y = 0.03;
     scene.add(rippleMesh);
     let rippleLife = 0;
-    let lastTravelAt = 0;
 
+    let lastTravelAt = 0;
     const handles = {
       scene,
       camera,
@@ -748,6 +771,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       lobbyContainer,
       hallwayContainer,
       worldContainer,
+      airportContainer,
+      clothingStoreContainer,
       furnitureRoot,
       furnitureMap: new Map<string, THREE.Group>(),
       popAnimations: new Map<string, number>(),
@@ -758,6 +783,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       lobbyHandles,
       hallwayHandles,
       mainWorld,
+      airportHandles,
+      clothingStoreHandles,
       keyLight,
       hemiLight,
       fillLight,
@@ -829,6 +856,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         mode: () => propsRef.current.mode,
         location: () => propsRef.current.location,
         avatar: () => ({ x: handles.avatarState.x, z: handles.avatarState.z }),
+        renderInfo: () => ({
+          calls: renderer.info.render.calls,
+          triangles: renderer.info.render.triangles,
+          geometries: renderer.info.memory.geometries,
+          textures: renderer.info.memory.textures,
+        }),
         wallItems: () =>
           propsRef.current.items
             .filter((item) => Boolean(item.wall))
@@ -862,6 +895,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       }
       if (loc === 'lobby') return lobbyHandles.isWalkable(x, z);
       if (loc === 'hallway') return hallwayHandles.isWalkable(x, z);
+      if (loc === 'airport') return airportHandles.isWalkable(x, z);
+      if (loc === 'clothing_store') return clothingStoreHandles.isWalkable(x, z);
       const suiteOpen = loc === 'resident_room' || propsRef.current.roomDoorUnlocked;
       return isWorldPosWalkable(x, z, list, 0.25, suiteOpen);
     }
@@ -1235,19 +1270,138 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         return null;
       }
 
-      // 4. Outdoor Main City ('world')
-      for (const spot of mainWorld.venueInteractions) {
-        if (Math.hypot(av.x - spot.x, av.z - spot.z) < spot.radius) {
-          if (spot.kind === 'shop_clothing') {
+      // 3b. Inside TheCity International Airport
+      if (loc === 'airport') {
+        const entranceDist = Math.hypot(av.x - airportHandles.entrancePos.x, av.z - (airportHandles.entrancePos.z - 1.2));
+        if (Math.hypot(av.x - airportHandles.checkInPos.x, av.z - airportHandles.checkInPos.z) < 3.2) {
+          return {
+            label: actionLabel('Check In for a Flight'),
+            execute: () => {
+              releaseCursorForModal();
+              sfx.playClick();
+              propsRef.current.onOpenAirportDeparture();
+            },
+          };
+        }
+        if (Math.hypot(av.x - airportHandles.gatePos.x, av.z - airportHandles.gatePos.z) < 3.2) {
+          return {
+            label: actionLabel('Board at Departure Gate'),
+            execute: () => {
+              releaseCursorForModal();
+              sfx.playClick();
+              propsRef.current.onOpenAirportDeparture();
+            },
+          };
+        }
+        if (Math.hypot(av.x - airportHandles.baggagePos.x, av.z - airportHandles.baggagePos.z) < 3.0) {
+          return {
+            label: actionLabel('Collect Checked Bag'),
+            execute: () => {
+              sfx.playToggle(true);
+              propsRef.current.onWalkHint?.('Baggage carousel 1 · Your bag will arrive on the next belt loop');
+            },
+          };
+        }
+        for (const npc of airportHandles.npcs) {
+          if (Math.hypot(av.x - npc.x, av.z - npc.z) < 2.1) {
             return {
-              label: actionLabel(spot.label),
+              label: actionLabel(`Talk to ${npc.name}`),
               execute: () => {
-                releaseCursorForModal();
-                sfx.playClick();
-                propsRef.current.onOpenClothingShop();
+                npc.greetTimer = 4.0;
+                av.yaw = Math.atan2(npc.x - av.x, npc.z - av.z);
+                propsRef.current.onEmoteChange('wave');
+                propsRef.current.onNpcChat?.(npc.name, npc.greeting);
+                sfx.playEmote();
               },
             };
           }
+        }
+        for (const s of airportHandles.seats) {
+          if (Math.hypot(av.x - s.seatPos.x, av.z - s.seatPos.z) < 1.9) {
+            return {
+              label: actionLabel(`Sit at ${s.label}`),
+              execute: () => {
+                sitOnSeat(s.id, s.seatPos, s.facingYaw, s.approachPos);
+                propsRef.current.onEmoteChange('sit');
+                sfx.playClick();
+              },
+            };
+          }
+        }
+        if (entranceDist < 2.2) {
+          return {
+            label: actionLabel('Exit to City · Airport Drop-off'),
+            execute: () => {
+              sfx.playToggle(true);
+              citySpawnTargetRef.current = {
+                x: CITY_LAYOUT.airportDoorPos.x,
+                z: CITY_LAYOUT.airportDoorPos.z - 3.4,
+              };
+              cityArrivalViewRef.current = 'airport';
+              propsRef.current.onChangeLocation('world');
+            },
+          };
+        }
+        return null;
+      }
+
+      // 3c. Inside LoftLife Threads
+      if (loc === 'clothing_store') {
+        if (Math.hypot(av.x - clothingStoreHandles.checkoutPos.x, av.z - clothingStoreHandles.checkoutPos.z) < 2.6) {
+          return {
+            label: actionLabel('Shop the Collection'),
+            execute: () => {
+              releaseCursorForModal();
+              sfx.playClick();
+              propsRef.current.onOpenClothingStore();
+            },
+          };
+        }
+        if (Math.hypot(av.x - clothingStoreHandles.fittingPos.x, av.z - clothingStoreHandles.fittingPos.z) < 2.2) {
+          return {
+            label: actionLabel('Try On in Fitting Room'),
+            execute: () => propsRef.current.onWalkHint?.('Fitting room · Purchase first, then change outfits at your home closet'),
+          };
+        }
+        if (Math.hypot(av.x - clothingStoreHandles.mirrorPos.x, av.z - clothingStoreHandles.mirrorPos.z) < 2.2) {
+          return {
+            label: actionLabel('Check the Mirror'),
+            execute: () => propsRef.current.onWalkHint?.('Full-length mirror · Outfits are changed at your home closet'),
+          };
+        }
+        const stylist = clothingStoreHandles.stylist;
+        if (Math.hypot(av.x - stylist.x, av.z - stylist.z) < 2.3) {
+          return {
+            label: actionLabel(`Talk to ${stylist.name}`),
+            execute: () => {
+              av.yaw = Math.atan2(stylist.x - av.x, stylist.z - av.z);
+              propsRef.current.onEmoteChange('wave');
+              propsRef.current.onNpcChat?.(stylist.name, stylist.greeting);
+              sfx.playEmote();
+            },
+          };
+        }
+        if (Math.hypot(av.x, av.z - 6.4) < 2.2) {
+          return {
+            label: actionLabel('Exit to City · LoftLife Threads'),
+            execute: () => {
+              sfx.playToggle(true);
+              citySpawnTargetRef.current = {
+                x: CITY_LAYOUT.clothingStoreDoorPos.x,
+                z: CITY_LAYOUT.clothingStoreDoorPos.z + 3.4,
+              };
+              cityArrivalViewRef.current = 'store';
+              propsRef.current.onChangeLocation('world');
+            },
+          };
+        }
+        return null;
+      }
+
+      // 4. Outdoor Main City ('world')
+      // 4. Outdoor Main City ('world')
+      for (const spot of mainWorld.venueInteractions) {
+        if (Math.hypot(av.x - spot.x, av.z - spot.z) < spot.radius) {
           if (spot.kind === 'shop_furniture') {
             return {
               label: actionLabel(spot.label),
@@ -1267,8 +1421,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           };
         }
       }
-      if (Math.hypot(av.x - CITY_LAYOUT.airportDeparturePos.x, av.z - CITY_LAYOUT.airportDeparturePos.z) < 2.25) {
-        return { label: actionLabel('Take a flight'), execute: () => { releaseCursorForModal(); propsRef.current.onOpenAirportDeparture(); } };
+
+      if (Math.hypot(av.x - CITY_LAYOUT.clothingStoreDoorPos.x, av.z - CITY_LAYOUT.clothingStoreDoorPos.z) < 2.4) {
+        return { label: actionLabel('Enter LoftLife Threads'), execute: () => { sfx.playToggle(true); propsRef.current.onChangeLocation('clothing_store'); } };
+      }
+      if (Math.hypot(av.x - CITY_LAYOUT.airportDoorPos.x, av.z - CITY_LAYOUT.airportDoorPos.z) < 2.8) {
+        return { label: actionLabel('Enter TheCity International Airport'), execute: () => { sfx.playToggle(true); propsRef.current.onChangeLocation('airport'); } };
       }
       if (Math.hypot(av.x - CITY_LAYOUT.salonPos.x, av.z - CITY_LAYOUT.salonPos.z) < 3.0) {
         return { label: actionLabel('Visit The Salon'), execute: () => { releaseCursorForModal(); propsRef.current.onOpenSalon(); } };
@@ -2695,6 +2853,46 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           av.pendingPortal = null;
           sfx.playToggle(true);
           propsRef.current.onChangeLocation('lobby');
+        } else if (
+          currentLoc === 'world' &&
+          Math.hypot(av.x - CITY_LAYOUT.airportDoorPos.x, av.z - CITY_LAYOUT.airportDoorPos.z) < 1.15
+        ) {
+          av.portalCooldown = 1.2;
+          av.path = [];
+          av.pendingPortal = null;
+          sfx.playToggle(true);
+          propsRef.current.onChangeLocation('airport');
+        } else if (
+          currentLoc === 'world' &&
+          Math.hypot(av.x - CITY_LAYOUT.clothingStoreDoorPos.x, av.z - CITY_LAYOUT.clothingStoreDoorPos.z) < 1.15
+        ) {
+          av.portalCooldown = 1.2;
+          av.path = [];
+          av.pendingPortal = null;
+          sfx.playToggle(true);
+          propsRef.current.onChangeLocation('clothing_store');
+        } else if (currentLoc === 'airport' && av.z > 13.25 && Math.abs(av.x) < 2.4) {
+          av.portalCooldown = 1.2;
+          av.path = [];
+          av.pendingPortal = null;
+          sfx.playToggle(true);
+          citySpawnTargetRef.current = {
+            x: CITY_LAYOUT.airportDoorPos.x,
+            z: CITY_LAYOUT.airportDoorPos.z - 3.4,
+          };
+          cityArrivalViewRef.current = 'airport';
+          propsRef.current.onChangeLocation('world');
+        } else if (currentLoc === 'clothing_store' && av.z > 6.35 && Math.abs(av.x) < 2.2) {
+          av.portalCooldown = 1.2;
+          av.path = [];
+          av.pendingPortal = null;
+          sfx.playToggle(true);
+          citySpawnTargetRef.current = {
+            x: CITY_LAYOUT.clothingStoreDoorPos.x,
+            z: CITY_LAYOUT.clothingStoreDoorPos.z + 3.4,
+          };
+          cityArrivalViewRef.current = 'store';
+          propsRef.current.onChangeLocation('world');
         } else if (currentLoc === 'lobby' && av.z > 7.42 && Math.abs(av.x) < 0.85) {
           av.portalCooldown = 1.0;
           av.path = [];
@@ -3092,6 +3290,15 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         lobbyHandles.updateLobby(elapsed, delta, av.x, av.z);
       } else if (currentLoc === 'hallway') {
         hallwayHandles.updateHallway(elapsed, delta, av.x, av.z);
+      } else if (currentLoc === 'airport') {
+        airportHandles.updateAirport(elapsed, delta);
+        airportHandles.airportGroup.userData.setPlayerPosition?.(av.x, av.z);
+        keyLight.target.position.set(av.x, 0, av.z);
+        keyLight.position.set(av.x - 14, 24, av.z + 12);
+      } else if (currentLoc === 'clothing_store') {
+        clothingStoreHandles.updateStore(elapsed, delta, av.x, av.z);
+        keyLight.target.position.set(av.x, 0, av.z);
+        keyLight.position.set(av.x - 8, 18, av.z + 10);
       } else {
         keyLight.target.position.set(av.x, 0, av.z);
         keyLight.position.set(av.x - 12, 18, av.z + 8);
@@ -3201,14 +3408,22 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     h.lobbyContainer.visible = location === 'lobby';
     h.hallwayContainer.visible = location === 'hallway';
     h.worldContainer.visible = location === 'world';
+    h.airportContainer.visible = location === 'airport';
+    h.clothingStoreContainer.visible = location === 'clothing_store';
 
     const fog = h.scene.fog as THREE.Fog;
 
     if (location === 'world') {
       const entry = h.mainWorld.loftDoorEntryPos;
-      const offset = citySpawnOffsetRef.current ?? { x: 0, z: 0 };
-      const spawnX = entry.x + offset.x;
-      const spawnZ = entry.z + offset.z;
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 1.2 + Math.random() * 1.4;
+      const target = citySpawnTargetRef.current ?? {
+        x: entry.x + Math.cos(angle) * radius,
+        z: entry.z + Math.sin(angle) * radius,
+      };
+      citySpawnTargetRef.current = null;
+      const spawnX = target.x;
+      const spawnZ = target.z;
       h.avatarState.x = spawnX;
       h.avatarState.z = spawnZ;
       h.avatarState.y = getCityGroundY(spawnX, spawnZ);
@@ -3226,11 +3441,36 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       h.keyLight.shadow.camera.bottom = -d;
       h.keyLight.shadow.camera.updateProjectionMatrix();
       if (vm === 'isometric') {
-        h.cameraAnim.pos.set(entry.x + 12.5, 11.5, entry.z + 14.5);
-        h.cameraAnim.target.set(entry.x, 0.8, entry.z);
+        // Hotel: look from the open west forecourt (the airport terminal is
+        // immediately south/east of it). Airport: look from the north drop-off
+        // toward the terminal. Store: look from the south sidewalk.
+        const arrivalView = cityArrivalViewRef.current;
+        cityArrivalViewRef.current = 'hotel';
+        const focus = new THREE.Vector3(spawnX, 0.9, spawnZ);
+        const desired =
+          arrivalView === 'airport'
+            ? new THREE.Vector3(spawnX, 15.5, spawnZ - 18)
+            : arrivalView === 'store'
+            ? new THREE.Vector3(spawnX, 15.5, spawnZ + 16)
+            : new THREE.Vector3(spawnX - 13, 15.5, spawnZ + 7);
+        // Pull the camera in front of the first façade between it and the
+        // player, so a dense block or the adjacent terminal can never leave
+        // the player staring at the inside of a wall.
+        const clear = resolveCityCameraScale(
+          spawnX,
+          1.4,
+          spawnZ,
+          desired.x,
+          desired.y,
+          desired.z,
+          h.mainWorld.cameraOccluders
+        );
+        desired.sub(focus).multiplyScalar(Math.max(0.3, clear)).add(focus);
+        h.cameraAnim.pos.copy(desired);
+        h.cameraAnim.target.copy(focus);
         h.cameraAnim.active = true;
       }
-      propsRef.current.onCityStreetChange?.(getCityLocationLabel(entry.x, entry.z));
+      propsRef.current.onCityStreetChange?.(getCityLocationLabel(spawnX, spawnZ));
       propsRef.current.onEmoteChange('idle');
     } else if (location === 'lobby') {
       if (prev.loc === 'hallway') {
@@ -3307,6 +3547,56 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         h.cameraAnim.active = true;
       }
       propsRef.current.onEmoteChange('idle');
+    } else if (location === 'airport') {
+      h.avatarState.x = 0;
+      h.avatarState.z = 12.1;
+      h.avatarState.yaw = Math.PI;
+      h.avatarState.y = 0;
+      h.playCam.yaw = 0;
+      h.controls.minAzimuthAngle = -Infinity;
+      h.controls.maxAzimuthAngle = Infinity;
+      h.controls.maxDistance = 34;
+      fog.near = 40;
+      fog.far = 125;
+      const d = 24;
+      h.keyLight.shadow.camera.left = -d;
+      h.keyLight.shadow.camera.right = d;
+      h.keyLight.shadow.camera.top = d;
+      h.keyLight.shadow.camera.bottom = -d;
+      h.keyLight.shadow.camera.updateProjectionMatrix();
+      h.keyLight.target.position.set(0, 0, 4);
+      h.keyLight.position.set(-18, 26, 22);
+      if (vm === 'isometric') {
+        h.cameraAnim.pos.set(13, 8.5, 13.5);
+        h.cameraAnim.target.set(0, 1.0, 1.5);
+        h.cameraAnim.active = true;
+      }
+      propsRef.current.onEmoteChange('idle');
+    } else if (location === 'clothing_store') {
+      h.avatarState.x = 0;
+      h.avatarState.z = 5.6;
+      h.avatarState.yaw = Math.PI;
+      h.avatarState.y = 0;
+      h.playCam.yaw = 0;
+      h.controls.minAzimuthAngle = -Infinity;
+      h.controls.maxAzimuthAngle = Infinity;
+      h.controls.maxDistance = 22;
+      fog.near = 26;
+      fog.far = 74;
+      const d = 14;
+      h.keyLight.shadow.camera.left = -d;
+      h.keyLight.shadow.camera.right = d;
+      h.keyLight.shadow.camera.top = d;
+      h.keyLight.shadow.camera.bottom = -d;
+      h.keyLight.shadow.camera.updateProjectionMatrix();
+      h.keyLight.target.position.set(0, 0, 0);
+      h.keyLight.position.set(-10, 17, 11);
+      if (vm === 'isometric') {
+        h.cameraAnim.pos.set(8, 6.8, 5.9);
+        h.cameraAnim.target.set(0, 0.9, -1.2);
+        h.cameraAnim.active = true;
+      }
+      propsRef.current.onEmoteChange('idle');
     } else {
       // 'room' or 'resident_room'
       if (prev.loc === 'hallway' || prev.loc === 'world' || prev.loc === 'lobby') {
@@ -3336,6 +3626,18 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         h.cameraAnim.active = true;
       }
       propsRef.current.onEmoteChange('idle');
+    }
+
+    // Cloud/mobile runtimes can throttle requestAnimationFrame hard during a
+    // scene build. A room-to-city transition must still land on the player,
+    // not on the previous scene's coordinates, so snap large camera moves.
+    if (vm === 'isometric' && h.cameraAnim.active) {
+      if (h.camera.position.distanceTo(h.cameraAnim.pos) > 40) {
+        h.camera.position.copy(h.cameraAnim.pos);
+        h.controls.target.copy(h.cameraAnim.target);
+        h.cameraAnim.active = false;
+        h.controls.update();
+      }
     }
 
     prevLocationRef.current = {

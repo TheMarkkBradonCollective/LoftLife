@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ArrowUpDown, Building2, Home, X } from 'lucide-react';
 import { sfx } from '../game/audio';
 import { HOTEL_RESIDENTS } from '../game/catalog';
+import { elevatorStops as hotelElevatorStops, HOTEL_TOTAL_ROOMS } from '../../shared/hotel-layout.mjs';
 import type { ActiveResident, WorldLocation } from '../game/types';
 
 interface ElevatorPanelModalProps {
@@ -54,14 +55,13 @@ export const ElevatorPanelModal: React.FC<ElevatorPanelModalProps> = ({
 
   if (!open) return null;
 
-  const maxFloor = Math.max(4, playerSuiteFloor);
-  const elevatorStops: { id: 'L' | number; label: string; floorNum: number; description: string }[] = [
-    ...Array.from({ length: maxFloor - 1 }, (_, index) => {
-      const floor = maxFloor - index;
-      return { id: floor, label: `Floor ${floor}`, floorNum: floor, description: `Residential Suites ${floor}01 – ${floor}10` };
-    }),
-    { id: 'L', label: 'Lobby (L)', floorNum: 1, description: 'Concierge & Main Street Exit' },
-  ];
+  // Seven floors, 65 suites. The shared layout owns the stop list so the
+  // elevator, the floor plaques and the city map cannot disagree.
+  const elevatorStops = hotelElevatorStops() as {
+    id: 'L' | number;
+    label: string;
+    description: string;
+  }[];
   const activeStopId: 'L' | number = currentLocation === 'lobby' ? 'L' : currentFloor;
 
   const handleSelectFloor = (stopId: 'L' | number) => {
@@ -97,7 +97,7 @@ export const ElevatorPanelModal: React.FC<ElevatorPanelModalProps> = ({
             <div>
               <h2 className="font-display text-base font-bold text-white flex items-center gap-1.5">
                 <ArrowUpDown className="w-4 h-4 text-[#39ff14]" />
-                LoftLife Hotel Elevator
+                LoftLife Grand Hotel · {HOTEL_TOTAL_ROOMS} Suites
               </h2>
               <p className="text-xs text-slate-400">
                 {travelingTo

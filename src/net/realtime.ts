@@ -233,6 +233,11 @@ export class RealtimeClient {
         case 'leave':
           this.options.onLeave?.(String(msg.connId ?? ''));
           break;
+        case 'replaced':
+          this.closedByUser = true;
+          socket.close(4003, 'replaced');
+          this.options.onStatus?.('offline');
+          break;
         case 'relocate': {
           const instance = msg.instance as InstanceInfo | undefined;
           if (instance?.id) this.options.onRelocate?.(instance);

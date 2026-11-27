@@ -4,10 +4,9 @@ export const DIAGONAL_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''); // 26: A
 const VENUE_BLOCKS: Record<string, string> = {
   '11,13': 'community_center',
   '12,13': 'cafe',
-  '13,13': 'clothing_store',
   '11,15': 'library',
   '12,15': 'market',
-  '13,15': 'med_deck',
+  '14,15': 'med_deck',
   '13,14': 'cinema',
 };
 export const HORIZONTAL_COUNT = 30; // 1st St .. 30th St
@@ -20,7 +19,14 @@ export interface CityBlock {
   uMax: number;
   zMin: number;
   zMax: number;
-  kind: 'loft_plaza' | 'loft_hotel' | 'airport' | 'park' | 'building' | 'venue';
+  kind:
+    | 'loft_plaza'
+    | 'loft_hotel'
+    | 'airport'
+    | 'clothing_store'
+    | 'park'
+    | 'building'
+    | 'venue';
   /** Public destination that owns this block (see src/game/venues.ts). */
   venueId?: string;
   height: number;
@@ -66,9 +72,13 @@ export interface CityLayout {
   loftDoorPos: { x: number; z: number };
   hotelCenter: { x: number; z: number };
   airportCenter: { x: number; z: number };
+  airportDoorPos: { x: number; z: number };
+  airportEntrancePos: { x: number; z: number };
   airportArrivalPos: { x: number; z: number };
   airportDeparturePos: { x: number; z: number };
-  airportShopPos: { x: number; z: number };
+  clothingStoreCenter: { x: number; z: number };
+  clothingStoreDoorPos: { x: number; z: number };
+  clothingStoreArrivalPos: { x: number; z: number };
   salonPos: { x: number; z: number };
   bounds: { zMin: number; zMax: number; uMin: number; uMax: number };
 }
@@ -156,10 +166,18 @@ export function buildCityLayout(): CityLayout {
         venueId = venue;
       } else if (col === 12 && row === 14) {
         kind = 'loft_plaza';
-      } else if (col === 23 && row === 27) {
+      } else if (col === 22 && row === 27) {
         kind = 'loft_hotel';
-      } else if (col === 24 && row === 28) {
+      } else if (
+        (col === 24 && row === 27) ||
+        (col === 23 && row === 28) ||
+        (col === 24 && row === 28)
+      ) {
+        // Three adjacent blocks form the international terminal and apron.
         kind = 'airport';
+      } else if (col === 13 && row === 15) {
+        // LoftLife Threads gets its own midtown block near the plaza.
+        kind = 'clothing_store';
       } else if (
         (col === 11 && row === 14) ||
         (col === 6 && row === 8) ||
@@ -225,13 +243,34 @@ export function buildCityLayout(): CityLayout {
   const hotelCenterX = hotelMidU + CITY_SLOPE * hotelMidZ;
   const loftDoorZ = hotelBlock.zMin + 6.4;
   const loftDoorX = hotelMidU + CITY_SLOPE * loftDoorZ;
-  const airportBlock = blocks.find((b) => b.kind === 'airport')!;
-  const airportMidU = (airportBlock.uMin + airportBlock.uMax) / 2;
-  const airportMidZ = (airportBlock.zMin + airportBlock.zMax) / 2;
+  // The airport is a three-block complex, so derive its centre and entrance
+  // from the combined footprint rather than a single block.
+  const airportBlocks = blocks.filter((b) => b.kind === 'airport');
+  const airportU0 = Math.min(...airportBlocks.map((b) => b.uMin));
+  const airportU1 = Math.max(...airportBlocks.map((b) => b.uMax));
+  const airportZ0 = Math.min(...airportBlocks.map((b) => b.zMin));
+  const airportZ1 = Math.max(...airportBlocks.map((b) => b.zMax));
+  const airportMidU = (airportU0 + airportU1) / 2;
+  const airportMidZ = (airportZ0 + airportZ1) / 2;
   const airportCenterX = airportMidU + CITY_SLOPE * airportMidZ;
-  const airportArrivalPos = { x: airportCenterX, z: airportMidZ + 7.2 };
-  const airportDeparturePos = { x: airportCenterX + 4.4, z: airportMidZ + 6.5 };
-  const airportShopPos = { x: airportCenterX - 4.4, z: airportMidZ + 6.5 };
+  // Terminal doors face north, toward the city street between hotel and apron.
+  const airportDoorZ = airportZ0 + 2.0;
+  const airportDoorX = uzToWorldX(airportMidU, airportDoorZ);
+  const airportDoorPos = { x: airportDoorX, z: airportDoorZ };
+  const airportEntrancePos = { x: airportDoorX, z: airportDoorZ - 4.2 };
+  const airportArrivalPos = { x: airportDoorX - 2.5, z: airportDoorZ - 8.5 };
+  const airportDeparturePos = { ...airportEntrancePos };
+
+  const storeBlock = blocks.find((b) => b.kind === 'clothing_store')!;
+  const storeMidU = (storeBlock.uMin + storeBlock.uMax) / 2;
+  const storeDoorZ = storeBlock.zMax - 1.8;
+  const storeDoorX = uzToWorldX(storeMidU, storeDoorZ);
+  const clothingStoreCenter = {
+    x: uzToWorldX(storeMidU, (storeBlock.zMin + storeBlock.zMax) / 2),
+    z: (storeBlock.zMin + storeBlock.zMax) / 2,
+  };
+  const clothingStoreDoorPos = { x: storeDoorX, z: storeDoorZ };
+  const clothingStoreArrivalPos = { x: storeDoorX, z: storeDoorZ + 4.8 };
   const salonPos = { x: loftCenterX - 7.4, z: loftCenterZ + 5.4 };
 
   // Major intersections get working Traffic Lights
@@ -297,9 +336,13 @@ export function buildCityLayout(): CityLayout {
     loftDoorPos: { x: loftDoorX, z: loftDoorZ },
     hotelCenter: { x: hotelCenterX, z: hotelMidZ },
     airportCenter: { x: airportCenterX, z: airportMidZ },
+    airportDoorPos,
+    airportEntrancePos,
     airportArrivalPos,
     airportDeparturePos,
-    airportShopPos,
+    clothingStoreCenter,
+    clothingStoreDoorPos,
+    clothingStoreArrivalPos,
     salonPos,
     bounds: {
       uMin: uLines[0] - 8.0,

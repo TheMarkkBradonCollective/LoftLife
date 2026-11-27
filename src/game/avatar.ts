@@ -165,8 +165,12 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
     clearGroup(rightLegPivot);
 
     const skinColor = new THREE.Color(cfg.skinTone);
-    const makeupColors = { natural: '#9e4c4c', soft: '#c96f85', bold: '#8b254e' };
-    const lipColor = skinColor.clone().lerp(new THREE.Color(makeupColors[cfg.makeupStyle ?? 'natural']), cfg.makeupStyle === 'bold' ? 0.58 : cfg.makeupStyle === 'soft' ? 0.46 : 0.36);
+    const makeupColors = { none: '#b06a5f', natural: '#9e4c4c', soft: '#c96f85', bold: '#8b254e' };
+    const makeupStyle = cfg.makeupStyle ?? 'none';
+    const lipColor = skinColor.clone().lerp(
+      new THREE.Color(makeupColors[makeupStyle]),
+      makeupStyle === 'bold' ? 0.58 : makeupStyle === 'soft' ? 0.46 : makeupStyle === 'natural' ? 0.36 : 0.18
+    );
 
     const skinMat = new THREE.MeshPhysicalMaterial({
       color: skinColor,
@@ -242,7 +246,8 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
     torso.add(chest);
 
     // Style-specific tailoring
-    if (cfg.topStyle === 'hoodie') {
+    const bottomStyle = cfg.bottomStyle ?? 'jeans';
+    if (cfg.topStyle === 'hoodie' || cfg.topStyle === 'crop_hoodie') {
       const hood = new THREE.Mesh(
         new THREE.TorusGeometry(0.095, 0.036, 12, 20, Math.PI * 1.45),
         topMat
@@ -265,7 +270,13 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
       const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.11, 0.025), topMat);
       pocket.position.set(0, 0.18, 0.105);
       torso.add(pocket);
-    } else if (cfg.topStyle === 'blazer') {
+      if (cfg.topStyle === 'crop_hoodie') {
+        const hem = new THREE.Mesh(new THREE.CylinderGeometry(0.158, 0.163, 0.045, 18), topMat);
+        hem.scale.set(1.05, 1, 0.7);
+        hem.position.y = 0.15;
+        torso.add(hem);
+      }
+    } else if (cfg.topStyle === 'blazer' || cfg.topStyle === 'suit') {
       const innerShirt = new THREE.Mesh(
         new THREE.CylinderGeometry(0.08, 0.06, 0.26, 12),
         soleMat
@@ -280,6 +291,22 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
         lapel.rotation.z = lx < 0 ? -0.18 : 0.18;
         torso.add(lapel);
       }
+      if (cfg.topStyle === 'suit') {
+        const tie = new THREE.Mesh(
+          new THREE.CapsuleGeometry(0.013, 0.16, 4, 8),
+          new THREE.MeshStandardMaterial({ color: 0x7a2632, roughness: 0.45 })
+        );
+        tie.position.set(0, 0.33, 0.122);
+        torso.add(tie);
+        for (let b = 0; b < 3; b++) {
+          const button = new THREE.Mesh(
+            new THREE.SphereGeometry(0.007, 8, 6),
+            new THREE.MeshStandardMaterial({ color: 0x1b1d21, roughness: 0.4 })
+          );
+          button.position.set(0, 0.24 - b * 0.07, 0.118);
+          torso.add(button);
+        }
+      }
     } else if (cfg.topStyle === 'turtleneck') {
       const collar = new THREE.Mesh(
         new THREE.CylinderGeometry(0.064, 0.072, 0.085, 16),
@@ -287,6 +314,102 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
       );
       collar.position.set(0, 0.555, 0);
       torso.add(collar);
+    } else if (cfg.topStyle === 'button_shirt') {
+      for (const sx of [-1, 1]) {
+        const collar = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.05, 0.025), soleMat);
+        collar.position.set(sx * 0.035, 0.545, 0.092);
+        collar.rotation.z = sx * 0.4;
+        torso.add(collar);
+      }
+      const placket = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.42, 0.012), soleMat);
+      placket.position.set(0, 0.35, 0.118);
+      torso.add(placket);
+      for (let b = 0; b < 5; b++) {
+        const button = new THREE.Mesh(new THREE.SphereGeometry(0.006, 8, 6), darkMat);
+        button.position.set(0, 0.5 - b * 0.075, 0.126);
+        torso.add(button);
+      }
+      const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.055, 0.012), topMat);
+      pocket.position.set(-0.07, 0.43, 0.118);
+      torso.add(pocket);
+    } else if (cfg.topStyle === 'sweater') {
+      const collar = new THREE.Mesh(new THREE.TorusGeometry(0.062, 0.016, 10, 20), topMat);
+      collar.rotation.x = Math.PI / 2;
+      collar.position.set(0, 0.535, 0.005);
+      torso.add(collar);
+      const hem = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.16, 0.05, 18), topMat);
+      hem.scale.set(1.05, 1, 0.7);
+      hem.position.y = 0.1;
+      torso.add(hem);
+      const weave = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.153, 0.16, 0.3, 18, 1, true),
+        new THREE.MeshStandardMaterial({ color: cfg.topColor, roughness: 0.95, wireframe: true })
+      );
+      weave.scale.set(1.05, 1, 0.7);
+      weave.position.y = 0.3;
+      torso.add(weave);
+    } else if (cfg.topStyle === 'jacket') {
+      const zipper = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.38, 0.014), soleMat);
+      zipper.position.set(0, 0.34, 0.12);
+      torso.add(zipper);
+      const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.073, 0.08, 0.06, 16), topMat);
+      collar.position.set(0, 0.545, 0);
+      torso.add(collar);
+      for (const sx of [-1, 1]) {
+        const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.07, 0.015), topMat);
+        pocket.position.set(sx * 0.09, 0.23, 0.115);
+        torso.add(pocket);
+      }
+    } else if (cfg.topStyle === 'tank') {
+      for (const sx of [-1, 1]) {
+        const strap = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.14, 0.02), topMat);
+        strap.position.set(sx * 0.075, 0.49, 0.06);
+        strap.rotation.z = sx * 0.12;
+        torso.add(strap);
+      }
+    } else if (cfg.topStyle === 'varsity') {
+      const stripeMat = new THREE.MeshStandardMaterial({ color: 0xe7e0d2, roughness: 0.7 });
+      const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.074, 0.078, 0.045, 16), stripeMat);
+      collar.position.set(0, 0.55, 0);
+      torso.add(collar);
+      for (const sx of [-1, 1]) {
+        const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.04, 0.035, 12), stripeMat);
+        stripe.position.set(sx * 0.205, 0.44, 0);
+        torso.add(stripe);
+      }
+    } else if (cfg.topStyle === 'raincoat') {
+      const hood = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.045, 10, 20, Math.PI * 1.4), topMat);
+      hood.rotation.x = Math.PI / 2 + 0.4;
+      hood.position.set(0, 0.53, -0.05);
+      torso.add(hood);
+      const stormFlap = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.3, 0.015), soleMat);
+      stormFlap.position.set(0.05, 0.34, 0.122);
+      torso.add(stormFlap);
+      const beltMat = new THREE.MeshStandardMaterial({ color: 0x24272d, roughness: 0.4 });
+      const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.158, 0.16, 0.035, 18), beltMat);
+      belt.scale.set(1.05, 1, 0.7);
+      belt.position.y = 0.12;
+      torso.add(belt);
+    } else if (cfg.topStyle === 'dress') {
+      for (const sx of [-1, 1]) {
+        const strap = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.13, 0.02), topMat);
+        strap.position.set(sx * 0.075, 0.49, 0.055);
+        torso.add(strap);
+      }
+    } else if (cfg.topStyle === 'cardigan') {
+      const placket = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.36, 0.014), soleMat);
+      placket.position.set(0, 0.34, 0.12);
+      torso.add(placket);
+      for (let b = 0; b < 4; b++) {
+        const button = new THREE.Mesh(new THREE.SphereGeometry(0.0065, 8, 6), darkMat);
+        button.position.set(0, 0.47 - b * 0.075, 0.126);
+        torso.add(button);
+      }
+      for (const sx of [-1, 1]) {
+        const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.06, 0.012), topMat);
+        pocket.position.set(sx * 0.085, 0.22, 0.116);
+        torso.add(pocket);
+      }
     }
 
     // Neck
@@ -304,7 +427,7 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
       shoulder.scale.set(0.95, 0.9, 0.9);
       pivot.add(shoulder);
 
-      const longSleeve = cfg.topStyle !== 'tee';
+      const longSleeve = !['tee', 'tank', 'dress'].includes(cfg.topStyle);
       const upperLen = 0.24;
       const upperArm = new THREE.Mesh(
         new THREE.CylinderGeometry(0.046, 0.039, upperLen, 14),
@@ -392,6 +515,50 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
     buildLeg(leftLegPivot);
     buildLeg(rightLegPivot);
 
+    // --- Bottoms: silhouette differences layered over the shared leg mesh ---
+    if (bottomStyle === 'skirt' || cfg.topStyle === 'dress') {
+      const skirtMat = cfg.topStyle === 'dress' ? topMat : bottomMat;
+      const skirt = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.17, 0.3, cfg.topStyle === 'dress' ? 0.58 : 0.4, 20, 1, true),
+        skirtMat
+      );
+      skirt.scale.set(1.06, 1, 0.72);
+      skirt.position.y = cfg.topStyle === 'dress' ? -0.24 : -0.15;
+      pelvis.add(skirt);
+      const waist = new THREE.Mesh(new THREE.CylinderGeometry(0.153, 0.158, 0.035, 18), skirtMat);
+      waist.scale.set(1.06, 1, 0.7);
+      waist.position.y = 0.02;
+      pelvis.add(waist);
+    }
+    if (bottomStyle === 'shorts') {
+      for (const legPivot of [leftLegPivot, rightLegPivot]) {
+        const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.083, 0.088, 0.24, 14), bottomMat);
+        cuff.position.y = -0.23;
+        legPivot.add(cuff);
+      }
+    }
+    if (bottomStyle === 'joggers') {
+      for (const legPivot of [leftLegPivot, rightLegPivot]) {
+        const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.049, 0.054, 0.075, 12), bottomMat);
+        cuff.position.y = -0.68;
+        legPivot.add(cuff);
+      }
+    }
+    if (bottomStyle === 'cargo') {
+      for (const sx of [-1, 1]) {
+        const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.075, 0.025), bottomMat);
+        pocket.position.set(sx * 0.065, -0.26, 0.035);
+        (sx < 0 ? leftLegPivot : rightLegPivot).add(pocket);
+      }
+    }
+    if (bottomStyle === 'chinos' || bottomStyle === 'dress_pants') {
+      for (const legPivot of [leftLegPivot, rightLegPivot]) {
+        const crease = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.5, 0.008), soleMat);
+        crease.position.set(0, -0.4, 0.055);
+        legPivot.add(crease);
+      }
+    }
+
     // --- Sculpted Human Head & Realistic Facial Features ---
     const head = new THREE.Mesh(SHARED_HEAD_GEO, skinMat);
     head.position.y = 0.145;
@@ -414,7 +581,22 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
     // Layered Realistic Eyes (Sclera + Iris + Pupil + Brow)
     const scleraMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.25 });
     const eyelinerMat = new THREE.MeshStandardMaterial({ color: cfg.makeupStyle === 'bold' ? 0x21131e : 0x342a2b, roughness: 0.55 });
-    const irisMat = new THREE.MeshStandardMaterial({ color: 0x3b5c49, roughness: 0.2 });
+    const eyeColors: Record<string, number> = {
+      warm_brown: 0x6b4b2f,
+      deep_brown: 0x3b2418,
+      hazel: 0x7a6a35,
+      green: 0x3f6b4a,
+      blue: 0x3b6f9e,
+      gray: 0x6b7a86,
+    };
+    const irisMat = new THREE.MeshStandardMaterial({
+      color: eyeColors[cfg.eyeStyle ?? 'warm_brown'] ?? 0x6b4b2f,
+      roughness: 0.2,
+    });
+    const browStyle = cfg.eyebrows ?? 'natural';
+    const browWidth = browStyle === 'bold' ? 0.042 : browStyle === 'thin' ? 0.03 : 0.036;
+    const browHeight = browStyle === 'bold' ? 0.008 : browStyle === 'thin' ? 0.003 : 0.0055;
+    const browTilt = browStyle === 'arched' ? 0.13 : 0.06;
 
     const buildEye = (x: number): THREE.Mesh => {
       const eyeGroup = new THREE.Group();
@@ -439,9 +621,9 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
       lash.position.set(0, 0.009, 0.008);
       eyeGroup.add(lash);
 
-      const brow = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.0055, 0.008), hairMat);
+      const brow = new THREE.Mesh(new THREE.BoxGeometry(browWidth, browHeight, 0.008), hairMat);
       brow.position.set(0, 0.023, 0.008);
-      brow.rotation.z = x < 0 ? 0.06 : -0.06;
+      brow.rotation.z = x < 0 ? browTilt : -browTilt;
       eyeGroup.add(brow);
 
       headPivot.add(eyeGroup);
@@ -457,6 +639,41 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
     lips.rotation.z = Math.PI / 2;
     lips.position.set(0, 0.088, 0.11);
     headPivot.add(lips);
+
+    // --- Facial hair ---
+    const facialHair = cfg.facialHair ?? 'none';
+    if (facialHair !== 'none') {
+      const facialMat = new THREE.MeshStandardMaterial({
+        color: cfg.hairColor,
+        roughness: 0.85,
+        transparent: facialHair === 'stubble',
+        opacity: facialHair === 'stubble' ? 0.55 : 1,
+      });
+      if (facialHair === 'mustache' || facialHair === 'beard' || facialHair === 'goatee') {
+        const mustache = new THREE.Mesh(new THREE.CapsuleGeometry(0.007, 0.026, 4, 8), facialMat);
+        mustache.rotation.z = Math.PI / 2;
+        mustache.position.set(0, 0.075, 0.112);
+        headPivot.add(mustache);
+      }
+      if (facialHair === 'beard' || facialHair === 'goatee' || facialHair === 'stubble') {
+        const chin = new THREE.Mesh(new THREE.SphereGeometry(0.036, 12, 8), facialMat);
+        chin.scale.set(1.1, 0.7, 0.5);
+        chin.position.set(0, 0.042, 0.095);
+        headPivot.add(chin);
+        for (let i = 0; i < 5; i++) {
+          const a = -0.9 + i * 0.45;
+          const patch = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 6), facialMat);
+          patch.scale.set(0.7, 1.4, 0.45);
+          patch.position.set(Math.sin(a) * 0.085, 0.06 + Math.cos(a) * 0.025, 0.083);
+          headPivot.add(patch);
+        }
+      }
+      if (facialHair === 'goatee') {
+        const goatee = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.06, 8), facialMat);
+        goatee.position.set(0, 0.018, 0.1);
+        headPivot.add(goatee);
+      }
+    }
 
     // --- Volumetric Realistic Hair Styles ---
     const hairCap = new THREE.Mesh(
@@ -511,6 +728,90 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
         tuft.rotation.x = 0.26;
         headPivot.add(tuft);
       }
+    } else if (cfg.hairStyle === 'long_waves') {
+      const back = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.28, 8, 16), hairMat);
+      back.scale.set(1.0, 1, 0.55);
+      back.position.set(0, 0.03, -0.075);
+      headPivot.add(back);
+      for (const sx of [-1, 1]) {
+        const side = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, 0.25, 6, 10), hairMat);
+        side.position.set(sx * 0.12, 0.05, 0.01);
+        side.rotation.z = sx * 0.08;
+        headPivot.add(side);
+      }
+    } else if (cfg.hairStyle === 'buzz' || cfg.hairStyle === 'fade') {
+      hairCap.scale.set(0.99, 0.9, 1.02);
+      hairCap.position.y = 0.18;
+      const hairline = new THREE.Mesh(new THREE.TorusGeometry(0.092, 0.008, 8, 24, Math.PI), hairMat);
+      hairline.rotation.x = -1.2;
+      hairline.position.set(0, 0.22, 0.045);
+      headPivot.add(hairline);
+    } else if (cfg.hairStyle === 'curls') {
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2;
+        const curl = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8), hairMat);
+        curl.position.set(Math.cos(a) * 0.09, 0.24 + Math.sin(i * 1.7) * 0.035, Math.sin(a) * 0.07);
+        headPivot.add(curl);
+      }
+    } else if (cfg.hairStyle === 'locs') {
+      for (let i = 0; i < 8; i++) {
+        const a = -1.25 + (i / 7) * 2.5;
+        const loc = new THREE.Mesh(new THREE.CapsuleGeometry(0.016, 0.22 + (i % 3) * 0.04, 4, 8), hairMat);
+        loc.position.set(Math.sin(a) * 0.1, 0.1, Math.cos(a) * 0.075 - 0.03);
+        loc.rotation.x = 0.08;
+        headPivot.add(loc);
+      }
+    } else if (cfg.hairStyle === 'pixie') {
+      const sweep = new THREE.Mesh(new THREE.SphereGeometry(0.105, 16, 12), hairMat);
+      sweep.scale.set(1.22, 0.62, 0.92);
+      sweep.position.set(0.02, 0.25, 0.045);
+      sweep.rotation.z = -0.28;
+      headPivot.add(sweep);
+      const nape = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.08, 6, 10), hairMat);
+      nape.position.set(0, 0.12, -0.08);
+      headPivot.add(nape);
+    } else if (cfg.hairStyle === 'middle_part' || cfg.hairStyle === 'curtain') {
+      const long = cfg.hairStyle === 'middle_part';
+      for (const sx of [-1, 1]) {
+        const curtain = new THREE.Mesh(new THREE.SphereGeometry(0.085, 14, 12), hairMat);
+        curtain.scale.set(0.62, long ? 1.8 : 1.15, 0.72);
+        curtain.position.set(sx * 0.075, long ? 0.06 : 0.17, 0.035);
+        curtain.rotation.z = sx * 0.1;
+        headPivot.add(curtain);
+      }
+    } else if (cfg.hairStyle === 'top_knot') {
+      const knot = new THREE.Mesh(new THREE.SphereGeometry(0.06, 14, 10), hairMat);
+      knot.position.set(0, 0.325, -0.02);
+      headPivot.add(knot);
+      const band = new THREE.Mesh(new THREE.TorusGeometry(0.036, 0.009, 8, 16), hairMat);
+      band.rotation.x = Math.PI / 2;
+      band.position.set(0, 0.285, -0.02);
+      headPivot.add(band);
+    } else if (cfg.hairStyle === 'shoulder_waves') {
+      for (const sx of [-1, 1]) {
+        const wave = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.2, 6, 12), hairMat);
+        wave.scale.set(1, 1, 0.75);
+        wave.position.set(sx * 0.115, 0.08, -0.02);
+        wave.rotation.z = sx * 0.12;
+        headPivot.add(wave);
+      }
+      const topVolume = new THREE.Mesh(new THREE.SphereGeometry(0.115, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.6), hairMat);
+      topVolume.position.set(0, 0.2, 0);
+      headPivot.add(topVolume);
+    } else if (cfg.hairStyle === 'braids') {
+      for (let i = 0; i < 6; i++) {
+        const a = -1.1 + (i / 5) * 2.2;
+        const braid = new THREE.Mesh(new THREE.CapsuleGeometry(0.014, 0.3, 4, 8), hairMat);
+        braid.position.set(Math.sin(a) * 0.1, 0.02, Math.cos(a) * 0.07 - 0.04);
+        braid.rotation.x = 0.06;
+        headPivot.add(braid);
+      }
+    } else if (cfg.hairStyle === 'undercut') {
+      const top = new THREE.Mesh(new THREE.SphereGeometry(0.106, 16, 12), hairMat);
+      top.scale.set(1.2, 0.7, 1.0);
+      top.position.set(0.025, 0.245, 0.02);
+      top.rotation.z = -0.2;
+      headPivot.add(top);
     } else {
       // sidepart
       const swoop = new THREE.Mesh(new THREE.SphereGeometry(0.095, 16, 14), hairMat);
@@ -577,6 +878,121 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
       cuff.rotation.x = Math.PI / 2 - 0.18;
       cuff.position.set(0, 0.2, 0);
       headPivot.add(cuff);
+    } else if (cfg.accessory === 'cap') {
+      const capMat = new THREE.MeshStandardMaterial({ color: cfg.topColor, roughness: 0.72 });
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(0.13, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), capMat);
+      dome.scale.set(1.02, 0.85, 1.04);
+      dome.position.set(0, 0.235, 0);
+      headPivot.add(dome);
+      const brim = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.018, 0.11), capMat);
+      brim.position.set(0, 0.225, 0.115);
+      brim.rotation.x = -0.08;
+      headPivot.add(brim);
+    } else if (cfg.accessory === 'bucket_hat') {
+      const bucketMat = new THREE.MeshStandardMaterial({ color: cfg.topColor, roughness: 0.86 });
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 0.11, 20), bucketMat);
+      crown.position.set(0, 0.26, 0);
+      headPivot.add(crown);
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.018, 24), bucketMat);
+      brim.position.set(0, 0.205, 0);
+      headPivot.add(brim);
+    } else if (cfg.accessory === 'sunglasses') {
+      const frameMat = new THREE.MeshStandardMaterial({ color: 0x1a1c20, roughness: 0.28, metalness: 0.6 });
+      const lensMat = new THREE.MeshPhysicalMaterial({ color: 0x171c22, roughness: 0.06, metalness: 0.6, clearcoat: 1 });
+      for (const gx of [-0.043, 0.043]) {
+        const lens = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.036, 0.008), lensMat);
+        lens.position.set(gx, 0.162, 0.126);
+        lens.rotation.y = gx < 0 ? -0.16 : 0.16;
+        headPivot.add(lens);
+        const rim = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.042, 0.004), frameMat);
+        rim.position.set(gx, 0.162, 0.122);
+        rim.rotation.y = gx < 0 ? -0.16 : 0.16;
+        headPivot.add(rim);
+      }
+      const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.006, 0.006), frameMat);
+      bridge.position.set(0, 0.166, 0.128);
+      headPivot.add(bridge);
+    } else if (cfg.accessory === 'scarf') {
+      const scarfMat = new THREE.MeshStandardMaterial({ color: cfg.topColor, roughness: 0.95 });
+      const wrap = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.028, 10, 22), scarfMat);
+      wrap.rotation.x = Math.PI / 2;
+      wrap.position.set(0, 0.545, 0);
+      torso.add(wrap);
+      for (const sx of [-1, 1]) {
+        const tail = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.025), scarfMat);
+        tail.position.set(sx * 0.03, 0.43, 0.1);
+        tail.rotation.z = sx * 0.08;
+        torso.add(tail);
+      }
+    }
+
+    // --- Jewelry & carry ---
+    if (cfg.jewelry === 'chain') {
+      const chain = new THREE.Mesh(
+        new THREE.TorusGeometry(0.075, 0.005, 8, 24),
+        new THREE.MeshStandardMaterial({ color: 0xd9b45c, roughness: 0.22, metalness: 0.9 })
+      );
+      chain.rotation.x = Math.PI / 2;
+      chain.position.set(0, 0.515, 0.02);
+      torso.add(chain);
+      const pendant = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.014, 0),
+        new THREE.MeshStandardMaterial({ color: 0xf0d789, roughness: 0.2, metalness: 0.85 })
+      );
+      pendant.position.set(0, 0.47, 0.095);
+      torso.add(pendant);
+    }
+    if (cfg.jewelry === 'watch') {
+      const watch = new THREE.Mesh(
+        new THREE.BoxGeometry(0.032, 0.014, 0.038),
+        new THREE.MeshStandardMaterial({ color: 0xc9ced6, roughness: 0.2, metalness: 0.9 })
+      );
+      watch.position.set(0, -0.43, 0.04);
+      leftArmPivot.add(watch);
+    }
+    if (cfg.jewelry === 'earrings') {
+      for (const ex of [-0.116, 0.116]) {
+        const earring = new THREE.Mesh(
+          new THREE.SphereGeometry(0.009, 8, 8),
+          new THREE.MeshStandardMaterial({ color: 0xe6c46a, roughness: 0.2, metalness: 0.9 })
+        );
+        earring.position.set(ex, 0.115, 0.01);
+        headPivot.add(earring);
+      }
+    }
+    if (cfg.jewelry === 'bracelet') {
+      const bracelet = new THREE.Mesh(
+        new THREE.TorusGeometry(0.036, 0.005, 8, 18),
+        new THREE.MeshStandardMaterial({ color: 0xd9b45c, roughness: 0.3, metalness: 0.8 })
+      );
+      bracelet.rotation.x = Math.PI / 2;
+      bracelet.position.set(0, -0.455, 0.035);
+      rightArmPivot.add(bracelet);
+    }
+    if (cfg.carry === 'backpack') {
+      const packMat = new THREE.MeshStandardMaterial({ color: cfg.topColor, roughness: 0.85 });
+      const pack = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.3, 0.12), packMat);
+      pack.position.set(0, 0.32, -0.15);
+      torso.add(pack);
+      const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.05), packMat);
+      pocket.position.set(0, 0.25, -0.22);
+      torso.add(pocket);
+      for (const sx of [-1, 1]) {
+        const strap = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.29, 0.015), packMat);
+        strap.position.set(sx * 0.07, 0.37, 0.11);
+        torso.add(strap);
+      }
+    } else if (cfg.carry === 'purse' || cfg.carry === 'tote') {
+      const bagMat = new THREE.MeshStandardMaterial({ color: cfg.bottomColor, roughness: 0.6 });
+      const bag = new THREE.Mesh(
+        new THREE.BoxGeometry(cfg.carry === 'tote' ? 0.18 : 0.13, cfg.carry === 'tote' ? 0.19 : 0.14, 0.07),
+        bagMat
+      );
+      bag.position.set(0.18, 0.2, 0.02);
+      torso.add(bag);
+      const strap = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.006, 8, 18, Math.PI), bagMat);
+      strap.position.set(0.18, 0.31, 0.02);
+      torso.add(strap);
     }
 
     root.traverse((obj) => {

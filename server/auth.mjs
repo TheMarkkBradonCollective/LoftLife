@@ -197,7 +197,12 @@ export function registerUser({ handle, email, password, displayName, avatar }) {
     // Own whatever clothing the chosen starting outfit uses, so the account is
     // never rejected by wardrobe ownership checks on first save.
     const clothingIds = new Set(CLOTHING_SHOP.map((entry) => entry.id));
-    for (const piece of [safeAvatar.topStyle, safeAvatar.accessory]) {
+    for (const piece of [
+      safeAvatar.topStyle,
+      safeAvatar.accessory,
+      safeAvatar.jewelry,
+      safeAvatar.carry,
+    ]) {
       if (!clothingIds.has(piece)) continue;
       db.prepare(
         `INSERT INTO inventory (id, user_id, kind, catalog_id, qty, acquired_at)

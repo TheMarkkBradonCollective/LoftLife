@@ -6,9 +6,67 @@
 import { badRequest } from './errors.mjs';
 import { isKnownFurniture } from './economy.mjs';
 
-export const HAIR_STYLES = ['bob', 'afro', 'ponytail', 'sidepart', 'buns', 'spiky'];
-export const TOP_STYLES = ['hoodie', 'blazer', 'tee', 'turtleneck'];
-export const ACCESSORIES = ['none', 'glasses', 'headphones', 'beanie'];
+export const HAIR_STYLES = [
+  'bob',
+  'afro',
+  'ponytail',
+  'sidepart',
+  'buns',
+  'spiky',
+  'long_waves',
+  'buzz',
+  'curls',
+  'locs',
+  'pixie',
+  'middle_part',
+  'top_knot',
+  'shoulder_waves',
+  'braids',
+  'undercut',
+  'fade',
+  'curtain',
+];
+export const TOP_STYLES = [
+  'hoodie',
+  'blazer',
+  'tee',
+  'turtleneck',
+  'button_shirt',
+  'sweater',
+  'jacket',
+  'tank',
+  'varsity',
+  'raincoat',
+  'suit',
+  'dress',
+  'crop_hoodie',
+  'cardigan',
+];
+export const BOTTOM_STYLES = [
+  'jeans',
+  'chinos',
+  'shorts',
+  'skirt',
+  'joggers',
+  'dress_pants',
+  'cargo',
+];
+export const ACCESSORIES = [
+  'none',
+  'glasses',
+  'headphones',
+  'beanie',
+  'cap',
+  'bucket_hat',
+  'sunglasses',
+  'scarf',
+];
+export const JEWELRY = ['none', 'chain', 'watch', 'earrings', 'bracelet'];
+export const CARRY = ['none', 'backpack', 'purse', 'tote'];
+export const FACIAL_HAIR = ['none', 'stubble', 'beard', 'goatee', 'mustache'];
+export const EYEBROWS = ['natural', 'bold', 'thin', 'arched'];
+export const EYE_STYLES = ['warm_brown', 'deep_brown', 'hazel', 'green', 'blue', 'gray'];
+export const MAKEUP_STYLES = ['none', 'natural', 'soft', 'bold'];
 
 /** Neutral starting look, shared by registration, edge accounts and tests. */
 export const DEFAULT_AVATAR = {
@@ -18,9 +76,16 @@ export const DEFAULT_AVATAR = {
   hairColor: '#2f2119',
   topStyle: 'tee',
   topColor: '#e6dfd3',
+  bottomStyle: 'jeans',
   bottomColor: '#2b3a2a',
   shoeColor: '#1b1b1b',
   accessory: 'none',
+  jewelry: 'none',
+  carry: 'none',
+  facialHair: 'none',
+  eyebrows: 'natural',
+  eyeStyle: 'warm_brown',
+  makeupStyle: 'none',
 };
 export const FLOOR_STYLES = ['oak_parquet', 'walnut_herringbone', 'terrazzo', 'concrete', 'boucle_carpet'];
 export const WALL_STYLES = [
@@ -81,9 +146,16 @@ export function sanitizeAvatar(input, fallbackName = 'Newcomer') {
     hairColor: hex(input.hairColor, '#2f2119'),
     topStyle: oneOf(input.topStyle, TOP_STYLES, 'avatar.topStyle'),
     topColor: hex(input.topColor, '#e6dfd3'),
+    bottomStyle: oneOf(input.bottomStyle ?? 'jeans', BOTTOM_STYLES, 'avatar.bottomStyle'),
     bottomColor: hex(input.bottomColor, '#2b3a2a'),
     shoeColor: hex(input.shoeColor, '#1b1b1b'),
     accessory: oneOf(input.accessory, ACCESSORIES, 'avatar.accessory'),
+    jewelry: oneOf(input.jewelry ?? 'none', JEWELRY, 'avatar.jewelry'),
+    carry: oneOf(input.carry ?? 'none', CARRY, 'avatar.carry'),
+    facialHair: oneOf(input.facialHair ?? 'none', FACIAL_HAIR, 'avatar.facialHair'),
+    eyebrows: oneOf(input.eyebrows ?? 'natural', EYEBROWS, 'avatar.eyebrows'),
+    eyeStyle: oneOf(input.eyeStyle ?? 'warm_brown', EYE_STYLES, 'avatar.eyeStyle'),
+    makeupStyle: oneOf(input.makeupStyle ?? 'none', MAKEUP_STYLES, 'avatar.makeupStyle'),
   };
 }
 

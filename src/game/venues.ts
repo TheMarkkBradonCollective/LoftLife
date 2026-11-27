@@ -12,14 +12,13 @@ export type VenueId =
   | 'library'
   | 'med_deck'
   | 'community_center'
-  | 'clothing_store'
   | 'cafe'
   | 'market'
   | 'cinema';
 
 export type DoorSide = 'north' | 'south' | 'east' | 'west';
 
-export type VenueInteractionKind = 'shop_clothing' | 'shop_furniture' | 'inspect';
+export type VenueInteractionKind = 'shop_furniture' | 'inspect';
 
 export interface VenueInteractionPoint {
   id: string;
@@ -136,25 +135,6 @@ const SPECS: Array<{
     },
   },
   {
-    id: 'clothing_store',
-    col: 13,
-    row: 13,
-    doorSide: 'south',
-    height: 10.4,
-    name: 'The Thread Loft',
-    tagline: 'Try it on, buy it here — every piece lands in your wardrobe.',
-    district: 'Civic Row',
-    sign: 'THE THREAD LOFT',
-    palette: {
-      body: '#25292f',
-      trim: '#0f1216',
-      glass: '#6f93a8',
-      accent: '#39ff14',
-      floor: '#d8d2c6',
-      awning: '#111418',
-    },
-  },
-  {
     id: 'library',
     col: 11,
     row: 15,
@@ -194,7 +174,7 @@ const SPECS: Array<{
   },
   {
     id: 'med_deck',
-    col: 13,
+    col: 14,
     row: 15,
     doorSide: 'north',
     height: 16.8,

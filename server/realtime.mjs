@@ -59,6 +59,8 @@ const ALLOWED_LOCATIONS = new Set([
   'hallway',
   'room',
   'resident_room',
+  'airport',
+  'clothing_store',
   'transit',
 ]);
 const LOCAL_RANGES = { whisper: 4, say: 14, shout: 35 };
@@ -94,13 +96,21 @@ function worldInstance(instanceId, worldId, capacity) {
   return makeInstance({ id: instanceId, kind: 'world', worldId, capacity });
 }
 
+function uniquePlayers(instance) {
+  const byUser = new Map();
+  for (const player of instance.members.values()) {
+    const previous = byUser.get(player.userId);
+    if (!previous || Number(player.lastSeen ?? 0) >= Number(previous.lastSeen ?? 0)) byUser.set(player.userId, player);
+  }
+  return [...byUser.values()];
+}
 function publicInstance(instance) {
   return {
     id: instance.id,
     kind: instance.kind,
     worldId: instance.worldId,
     capacity: instance.capacity,
-    count: instance.members.size,
+    count: uniquePlayers(instance).length,
   };
 }
 
@@ -184,7 +194,17 @@ function broadcast(instance, payload, exceptConnId = null) {
 }
 
 function joinInstance(player, instance) {
-  if (instance.members.size >= instance.capacity) {
+  if (!player.isGuest) for (const currentInstance of [...instances.values()]) {
+    for (const existing of [...currentInstance.members.values()]) {
+      if (existing.userId === player.userId) {
+        send(existing.ws, { t: 'replaced', reason: 'This account connected from another session' });
+        leaveInstance(existing);
+        existing.ws.close(4003, 'replaced');
+      }
+    }
+  }
+  const activePlayers = uniquePlayers(instance);
+  if (activePlayers.length >= instance.capacity && !activePlayers.some((entry) => entry.userId === player.userId)) {
     fail(player.ws, 'instance_full', instance.kind === 'city' ? 'TheCity is full' : 'That instance is full');
     player.ws.close(1013, 'instance_full');
     return false;
@@ -204,7 +224,7 @@ function joinInstance(player, instance) {
     t: 'ready',
     instance: publicInstance(instance),
     you: playerView(player),
-    players: [...instance.members.values()].map(playerView),
+    players: uniquePlayers(instance).map(playerView),
     vehicles: vehiclesFor(instance.id),
   });
   broadcast(
@@ -712,6 +732,7 @@ export function attachRealtime(httpServer) {
       }
 
       if (!player.userId) return fail(ws, 'unauthorized', 'Send hello first');
+      player.lastSeen = now();
 
       switch (msg.t) {
         case 'pose': {
@@ -762,7 +783,7 @@ export function attachRealtime(httpServer) {
       const vehicles = vehiclesFor(instance.id, timestamp);
       // A solo rider still needs vehicle state to render the moving bus.
       if (instance.members.size < 2 && vehicles.length === 0) continue;
-      const players = [...instance.members.values()].map(playerView);
+      const players = uniquePlayers(instance).map(playerView);
       broadcast(instance, {
         t: 'snapshot',
         instanceId: instance.id,

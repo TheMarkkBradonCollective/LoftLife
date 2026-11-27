@@ -34,6 +34,9 @@ export default defineConfig(() => {
       },
     },
     server: {
+      // Empty by default: Cloud previews inject their own exact hostname through
+      // __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS, never a blanket wildcard.
+      allowedHosts: [],
       // The API + realtime gateway runs separately (npm run server). Proxying
       // keeps the browser on one origin, so cookies/WebSockets stay same-site.
       proxy: {

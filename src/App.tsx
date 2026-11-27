@@ -5,6 +5,7 @@ import { CityMapModal } from './components/CityMapModal';
 import { ElevatorPanelModal } from './components/ElevatorPanelModal';
 import { HotelDoorTerminalModal } from './components/HotelDoorTerminalModal';
 import { AirportTravelModal } from './components/AirportTravelModal';
+import { HOTEL_FLOOR_COUNT, roomRangeLabel } from '../shared/hotel-layout.mjs';
 import { RoomSettingsModal } from './components/RoomSettingsModal';
 import { SyncConflictModal } from './components/SyncConflictModal';
 import { ShopModal } from './components/ShopModal';
@@ -125,6 +126,13 @@ const avatarFingerprint = (avatar: AvatarConfig) =>
     avatar.bottomColor,
     avatar.shoeColor,
     avatar.accessory,
+    avatar.bottomStyle ?? '',
+    avatar.jewelry ?? '',
+    avatar.carry ?? '',
+    avatar.facialHair ?? '',
+    avatar.eyebrows ?? '',
+    avatar.eyeStyle ?? '',
+    avatar.makeupStyle ?? '',
   ].join(':');
 
 /** Identity of a suite + character, ignoring server/local id churn. */
@@ -240,7 +248,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [doorTerminalOpen, setDoorTerminalOpen] = useState(false);
   const [elevatorModalOpen, setElevatorModalOpen] = useState(false);
   const [airportDepartureOpen, setAirportDepartureOpen] = useState(false);
-  const [clothingShopOpen, setClothingShopOpen] = useState(false);
+  const [clothingStoreOpen, setClothingStoreOpen] = useState(false);
   const [furnitureShopOpen, setFurnitureShopOpen] = useState(false);
   // City directory: one-shot walk-in request handed to the viewport.
   const [travelRequest, setTravelRequest] = useState<{
@@ -600,6 +608,10 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         );
       } else if (next === 'lobby') {
         showHint('Main Lobby · Walk into the North brass elevator to ride to your residential floor');
+      } else if (next === 'airport') {
+        showHint('TheCity International Airport · Check in at a counter, clear security, then find your gate');
+      } else if (next === 'clothing_store') {
+        showHint('LoftLife Threads · Browse racks and mannequins, then purchase at the checkout counter');
       } else if (next === 'hallway') {
         setActiveResident(null);
         showHint(`Floor ${hallwayFloor} Hallway · Find a numbered suite door or ride the elevator`);
@@ -1375,7 +1387,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     doorTerminalOpen ||
     elevatorModalOpen ||
     airportDepartureOpen ||
-    clothingShopOpen ||
+    clothingStoreOpen ||
     furnitureShopOpen ||
     roomSettingsOpen ||
     authOpen ||
@@ -1544,8 +1556,12 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     ? `${activeWorld.name}${activeWorld.canEdit ? ' · Building' : ' · Visiting'}`
     : location === 'world'
     ? 'Main City'
+    : location === 'airport'
+    ? 'TheCity International Airport'
+    : location === 'clothing_store'
+    ? 'LoftLife Threads'
     : location === 'lobby'
-    ? 'Hotel Lobby'
+    ? `Grand Hotel Lobby · ${HOTEL_FLOOR_COUNT} Floors`
     : location === 'hallway'
     ? `Floor ${hallwayFloor} Hallway`
     : location === 'resident_room' && activeResident
@@ -1556,10 +1572,14 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     ? `Player world · ${items.length} items · ${session.presenceOnline} online`
     : location === 'world'
     ? cityStreet
+    : location === 'airport'
+    ? 'Concourse A · Check-in · Security · Gates'
+    : location === 'clothing_store'
+    ? 'City retail · Clothing & accessories'
     : location === 'lobby'
     ? 'Floor 1 · Concierge & Elevator'
     : location === 'hallway'
-    ? `Suites ${hallwayFloor}01–${hallwayFloor}04`
+    ? `Suites ${roomRangeLabel(hallwayFloor)}`
     : location === 'resident_room' && activeResident
     ? `Floor ${activeResident.floor} · Guest Visit`
     : `Floor ${playerSuiteFloor} · ${items.length} items`;
@@ -1640,7 +1660,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onCityStreetChange={setCityStreet}
         onOpenDoorTerminal={() => setDoorTerminalOpen(true)}
         onOpenAirportDeparture={() => setAirportDepartureOpen(true)}
-        onOpenClothingShop={() => setClothingShopOpen(true)}
+        onOpenClothingStore={() => setClothingStoreOpen(true)}
         onOpenFurnitureShop={() => setFurnitureShopOpen(true)}
         travelRequest={travelRequest}
         onEnterGuestRoom={handleEnterGuestRoom}
@@ -1900,6 +1920,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       <CityMapModal
         open={cityMapOpen}
         currentStreet={cityStreet}
+        location={location}
         playerPoseRef={playerPoseRef}
         onTravel={(target) => {
           setTravelRequest({ ...target, at: Date.now() });
@@ -1973,7 +1994,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         else if (session.status === 'guest') void session.endGuest();
         else if (session.status === 'online') session.exitCity();
       }} />
-      <ShopModal open={clothingShopOpen} onClose={() => setClothingShopOpen(false)} initialTab="clothing" readOnly={session.status === 'guest'} />
+      <ShopModal open={clothingStoreOpen} onClose={() => setClothingStoreOpen(false)} initialTab="clothing" readOnly={session.status === 'guest'} />
       <ShopModal open={furnitureShopOpen} onClose={() => setFurnitureShopOpen(false)} initialTab="furniture" readOnly={session.status === 'guest'} />
 
       {/* Hotel Brass Elevator Floor Selector */}

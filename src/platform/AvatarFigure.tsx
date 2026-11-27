@@ -22,7 +22,7 @@ export function AvatarFigure({
   const { skinTone, hairColor, hairStyle, topColor, topStyle, bottomColor, shoeColor, accessory } =
     config;
 
-  const hair = {
+  const hairStyles: Record<string, React.ReactNode> = {
     bob: (
       <>
         <path d="M38 50 Q37 24 60 22 Q83 24 82 50 L82 64 Q74 57 74 44 Q68 36 60 36 Q52 36 46 44 Q46 57 38 64 Z" fill={hairColor} />
@@ -59,7 +59,68 @@ export function AvatarFigure({
         <path d="M37 49 L40 26 L48 34 L50 19 L59 30 L63 17 L71 31 L79 24 L82 49 Q72 36 60 36 Q48 36 37 49 Z" fill={hairColor} />
       </>
     ),
-  }[hairStyle];
+    long_waves: (
+      <>
+        <path d="M36 52 Q35 24 60 22 Q85 24 84 52 Q88 72 82 86 Q78 66 76 52 Q68 38 60 38 Q52 38 44 52 Q42 66 38 86 Q32 72 36 52 Z" fill={hairColor} />
+      </>
+    ),
+    buzz: <path d="M40 49 Q39 29 60 27 Q81 29 80 49 Q72 40 60 40 Q48 40 40 49 Z" fill={hairColor} />,
+    curls: (
+      <>
+        <circle cx="60" cy="34" r="24" fill={hairColor} />
+        {[36, 44, 52, 60, 68, 76, 84].map((x, i) => (
+          <circle key={x} cx={x} cy={i % 2 ? 30 : 40} r="9" fill={hairColor} />
+        ))}
+      </>
+    ),
+    locs: (
+      <>
+        <path d="M38 50 Q37 24 60 22 Q83 24 82 50 Q74 38 60 38 Q46 38 38 50 Z" fill={hairColor} />
+        {[40, 47, 54, 66, 73, 80].map((x, i) => (
+          <rect key={x} x={x} y={40 + (i % 3) * 4} width="5" height={34 + (i % 4) * 8} rx="2" fill={hairColor} />
+        ))}
+      </>
+    ),
+    pixie: (
+      <path d="M37 51 Q36 24 60 22 Q82 24 84 45 Q76 35 70 39 Q60 31 48 41 Q42 45 37 51 Z" fill={hairColor} />
+    ),
+    middle_part: (
+      <>
+        <path d="M38 52 Q37 24 60 22 Q83 24 82 52 Q76 40 62 40 L60 30 L58 40 Q44 40 38 52 Z" fill={hairColor} />
+        <path d="M38 52 Q35 74 40 88 Q45 68 46 54 Z M82 52 Q85 74 80 88 Q75 68 74 54 Z" fill={hairColor} />
+      </>
+    ),
+    top_knot: (
+      <>
+        <path d="M38 51 Q37 25 60 23 Q83 25 82 51 Q74 38 60 38 Q46 38 38 51 Z" fill={hairColor} />
+        <circle cx="60" cy="17" r="10" fill={hairColor} />
+      </>
+    ),
+    shoulder_waves: (
+      <>
+        <path d="M37 50 Q36 24 60 22 Q84 24 83 50 Q86 66 82 76 Q77 60 75 50 Q67 37 60 37 Q53 37 45 50 Q43 60 38 76 Q34 66 37 50 Z" fill={hairColor} />
+      </>
+    ),
+    braids: (
+      <>
+        <path d="M38 50 Q37 24 60 22 Q83 24 82 50 Q74 38 60 38 Q46 38 38 50 Z" fill={hairColor} />
+        {[36, 42, 48, 72, 78, 84].map((x) => (
+          <path key={x} d={`M${x} 46 Q${x - 3} 66 ${x + 2} 86`} stroke={hairColor} strokeWidth="5" fill="none" strokeLinecap="round" />
+        ))}
+      </>
+    ),
+    undercut: (
+      <>
+        <path d="M40 48 Q40 28 60 26 Q80 28 80 48 Q72 38 60 38 Q48 38 40 48 Z" fill={hairColor} />
+        <path d="M44 44 Q52 28 76 32 Q66 34 60 44 Z" fill={hairColor} opacity="0.8" />
+      </>
+    ),
+    fade: <path d="M40 48 Q40 30 60 28 Q80 30 80 48 Q73 40 60 40 Q47 40 40 48 Z" fill={hairColor} />,
+    curtain: (
+      <path d="M38 50 Q38 24 60 22 Q82 24 82 50 Q76 42 70 38 Q66 48 60 48 Q54 48 50 38 Q44 42 38 50 Z" fill={hairColor} />
+    ),
+  };
+  const hair = hairStyles[hairStyle] ?? hairStyles.bob;
 
   return (
     <svg

@@ -3,7 +3,19 @@ import { X, Check, Lock } from 'lucide-react';
 import { HAIR_COLORS, OUTFIT_COLORS } from '../game/catalog';
 import { sfx } from '../game/audio';
 import { api, type ShopEntry } from '../net/api';
-import type { AccessoryId, AvatarConfig, HairStyleId, MakeupStyleId, TopStyleId } from '../game/types';
+import type {
+  AccessoryId,
+  AvatarConfig,
+  BottomStyleId,
+  CarryId,
+  EyebrowStyleId,
+  EyeStyleId,
+  FacialHairId,
+  HairStyleId,
+  JewelryId,
+  MakeupStyleId,
+  TopStyleId,
+} from '../game/types';
 
 interface AvatarModalProps {
   open: boolean;
@@ -26,21 +38,109 @@ const HAIR_STYLES: { id: HairStyleId; label: string }[] = [
   { id: 'sidepart', label: 'Side Part' },
   { id: 'buns', label: 'Twin Buns' },
   { id: 'spiky', label: 'Spiky Crop' },
+  { id: 'long_waves', label: 'Long Waves' },
+  { id: 'buzz', label: 'Buzz Cut' },
+  { id: 'curls', label: 'Tight Curls' },
+  { id: 'locs', label: 'Locs' },
+  { id: 'pixie', label: 'Pixie' },
+  { id: 'middle_part', label: 'Middle Part' },
+  { id: 'top_knot', label: 'Top Knot' },
+  { id: 'shoulder_waves', label: 'Shoulder Waves' },
+  { id: 'braids', label: 'Braids' },
+  { id: 'undercut', label: 'Undercut' },
+  { id: 'fade', label: 'Fade' },
+  { id: 'curtain', label: 'Curtain' },
 ];
 
 const TOP_STYLES: { id: TopStyleId; label: string }[] = [
-  { id: 'hoodie', label: 'Hoodie' },
-  { id: 'blazer', label: 'Blazer' },
   { id: 'tee', label: 'Casual Tee' },
+  { id: 'hoodie', label: 'Hoodie' },
+  { id: 'crop_hoodie', label: 'Crop Hoodie' },
+  { id: 'button_shirt', label: 'Button Shirt' },
+  { id: 'blazer', label: 'Blazer' },
+  { id: 'suit', label: 'Suit Jacket' },
   { id: 'turtleneck', label: 'Turtleneck' },
+  { id: 'sweater', label: 'Knit Sweater' },
+  { id: 'cardigan', label: 'Cardigan' },
+  { id: 'jacket', label: 'Zip Jacket' },
+  { id: 'varsity', label: 'Varsity' },
+  { id: 'raincoat', label: 'Raincoat' },
+  { id: 'tank', label: 'Tank Top' },
+  { id: 'dress', label: 'Dress' },
+];
+
+const BOTTOM_STYLES: { id: BottomStyleId; label: string }[] = [
+  { id: 'jeans', label: 'Jeans' },
+  { id: 'chinos', label: 'Chinos' },
+  { id: 'dress_pants', label: 'Dress Pants' },
+  { id: 'joggers', label: 'Joggers' },
+  { id: 'cargo', label: 'Cargo Pants' },
+  { id: 'shorts', label: 'Shorts' },
+  { id: 'skirt', label: 'Skirt' },
 ];
 
 const ACCESSORIES: { id: AccessoryId; label: string }[] = [
   { id: 'none', label: 'None' },
   { id: 'glasses', label: 'Round Glasses' },
+  { id: 'sunglasses', label: 'Sunglasses' },
   { id: 'headphones', label: 'Headphones' },
   { id: 'beanie', label: 'Knit Beanie' },
+  { id: 'cap', label: 'Baseball Cap' },
+  { id: 'bucket_hat', label: 'Bucket Hat' },
+  { id: 'scarf', label: 'Scarf' },
 ];
+
+const JEWELRY: { id: JewelryId; label: string }[] = [
+  { id: 'none', label: 'None' },
+  { id: 'chain', label: 'Chain' },
+  { id: 'watch', label: 'Watch' },
+  { id: 'earrings', label: 'Earrings' },
+  { id: 'bracelet', label: 'Bracelet' },
+];
+
+const CARRY: { id: CarryId; label: string }[] = [
+  { id: 'none', label: 'None' },
+  { id: 'backpack', label: 'Backpack' },
+  { id: 'purse', label: 'Purse' },
+  { id: 'tote', label: 'Tote Bag' },
+];
+
+const EYEBROWS: { id: EyebrowStyleId; label: string }[] = [
+  { id: 'natural', label: 'Natural' },
+  { id: 'bold', label: 'Bold' },
+  { id: 'thin', label: 'Thin' },
+  { id: 'arched', label: 'Arched' },
+];
+
+const EYE_STYLES: { id: EyeStyleId; label: string }[] = [
+  { id: 'warm_brown', label: 'Warm Brown' },
+  { id: 'deep_brown', label: 'Deep Brown' },
+  { id: 'hazel', label: 'Hazel' },
+  { id: 'green', label: 'Green' },
+  { id: 'blue', label: 'Blue' },
+  { id: 'gray', label: 'Gray' },
+];
+
+const FACIAL_HAIR: { id: FacialHairId; label: string }[] = [
+  { id: 'none', label: 'Clean' },
+  { id: 'stubble', label: 'Stubble' },
+  { id: 'mustache', label: 'Mustache' },
+  { id: 'goatee', label: 'Goatee' },
+  { id: 'beard', label: 'Full Beard' },
+];
+
+interface SavedOutfit {
+  id: string;
+  name: string;
+  topStyle: TopStyleId;
+  topColor: string;
+  bottomStyle?: BottomStyleId;
+  bottomColor: string;
+  shoeColor: string;
+  accessory: AccessoryId;
+  jewelry?: JewelryId;
+  carry?: CarryId;
+}
 
 export const AvatarModal: React.FC<AvatarModalProps> = ({
   open,
@@ -53,12 +153,12 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
 }) => {
   const [clothingShop, setClothingShop] = useState<ShopEntry[]>([]);
   const [outfitName, setOutfitName] = useState('My Outfit');
-  const [savedOutfits, setSavedOutfits] = useState<Array<{ id: string; name: string; topStyle: TopStyleId; topColor: string; bottomColor: string; shoeColor: string; accessory: AccessoryId }>>([]);
+  const [savedOutfits, setSavedOutfits] = useState<SavedOutfit[]>([]);
   useEffect(() => {
     try { const raw = localStorage.getItem(`loftlife_outfits_${outfitStorageKey}`); setSavedOutfits(raw ? JSON.parse(raw) : []); }
     catch { setSavedOutfits([]); }
   }, [outfitStorageKey]);
-  const persistOutfits = (next: typeof savedOutfits) => {
+  const persistOutfits = (next: SavedOutfit[]) => {
     setSavedOutfits(next);
     try { localStorage.setItem(`loftlife_outfits_${outfitStorageKey}`, JSON.stringify(next)); } catch { /* Keep the current session usable if storage is full. */ }
   };
@@ -171,9 +271,68 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
           <div className="space-y-2">
             <span className="block text-xs font-medium text-slate-300">Makeup</span>
             <div className="grid grid-cols-3 gap-2">
-              {([{id:'natural',label:'Natural'},{id:'soft',label:'Soft'},{id:'bold',label:'Bold'}] as {id:MakeupStyleId;label:string}[]).map((style) => (
+              {([{id:'none',label:'None'},{id:'natural',label:'Natural'},{id:'soft',label:'Soft'},{id:'bold',label:'Bold'}] as {id:MakeupStyleId;label:string}[]).map((style) => (
                 <button key={style.id} type="button" onClick={() => update({ makeupStyle: style.id })} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${(config.makeupStyle ?? 'natural') === style.id ? 'border-[#39ff14] bg-[#39ff14] text-[#051205]' : 'border-white/12 bg-[#101713] text-slate-200'}`}>{style.label}</button>
               ))}
+            </div>
+          </div>
+
+          <div className="space-y-2 border-t border-white/10 pt-4">
+            <span className="block text-xs font-medium text-slate-300">Eyebrow Shape</span>
+            <div className="grid grid-cols-4 gap-1.5">
+              {EYEBROWS.map((style) => {
+                const active = (config.eyebrows ?? 'natural') === style.id;
+                return (
+                  <button
+                    key={style.id}
+                    type="button"
+                    onClick={() => update({ eyebrows: style.id })}
+                    className={`rounded-lg border px-1.5 py-2 text-[10px] font-semibold ${active ? 'border-[#39ff14] bg-[#39ff14] text-[#051205]' : 'border-white/12 bg-[#101713] text-slate-200'}`}
+                  >
+                    {style.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <span className="block text-xs font-medium text-slate-300">Eye Color</span>
+            <div className="grid grid-cols-3 gap-1.5">
+              {EYE_STYLES.map((style) => {
+                const active = (config.eyeStyle ?? 'warm_brown') === style.id;
+                const swatch = { warm_brown: '#6b4b2f', deep_brown: '#3b2418', hazel: '#7a6a35', green: '#3f6b4a', blue: '#3b6f9e', gray: '#6b7a86' }[style.id];
+                return (
+                  <button
+                    key={style.id}
+                    type="button"
+                    onClick={() => update({ eyeStyle: style.id })}
+                    className={`flex items-center gap-1.5 rounded-lg border px-2 py-2 text-[10px] font-semibold ${active ? 'border-[#39ff14] bg-[#39ff14]/15 text-white' : 'border-white/12 bg-[#101713] text-slate-300'}`}
+                  >
+                    <span className="h-2.5 w-2.5 rounded-full ring-1 ring-white/30" style={{ backgroundColor: swatch }} />
+                    <span className="truncate">{style.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <span className="block text-xs font-medium text-slate-300">Facial Hair</span>
+            <div className="grid grid-cols-3 gap-1.5">
+              {FACIAL_HAIR.map((style) => {
+                const active = (config.facialHair ?? 'none') === style.id;
+                return (
+                  <button
+                    key={style.id}
+                    type="button"
+                    onClick={() => update({ facialHair: style.id })}
+                    className={`rounded-lg border px-2 py-2 text-[10px] font-semibold ${active ? 'border-[#39ff14] bg-[#39ff14] text-[#051205]' : 'border-white/12 bg-[#101713] text-slate-200'}`}
+                  >
+                    {style.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -257,6 +416,26 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
             </div>
           </div>
 
+          {/* Bottom Style */}
+          <div className="space-y-2">
+            <span className="block text-xs font-medium text-slate-300">Bottom Style</span>
+            <div className="grid grid-cols-3 gap-1.5">
+              {BOTTOM_STYLES.map((style) => {
+                const active = (config.bottomStyle ?? 'jeans') === style.id;
+                return (
+                  <button
+                    key={style.id}
+                    type="button"
+                    onClick={() => update({ bottomStyle: style.id })}
+                    className={`rounded-lg border px-1.5 py-2 text-[10px] font-semibold ${active ? 'border-[#39ff14] bg-[#39ff14] text-[#051205]' : 'border-white/12 bg-[#101713] text-slate-200'}`}
+                  >
+                    {style.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Bottoms Color */}
           <div className="space-y-2">
             <span className="block text-xs font-medium text-slate-300">Bottoms Color</span>
@@ -290,6 +469,37 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
                         }`}
                       />
                     )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Shoes */}
+          <div className="space-y-2">
+            <span className="block text-xs font-medium text-slate-300">Shoe Color</span>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { label: 'White', hex: '#eae4d8' },
+                { label: 'Black', hex: '#26282e' },
+                { label: 'Tan', hex: '#c7b08e' },
+                { label: 'Brown', hex: '#7a5236' },
+                { label: 'Olive', hex: '#556652' },
+                { label: 'Burgundy', hex: '#7a2632' },
+                { label: 'Blue', hex: '#3b5c86' },
+                { label: 'Pink', hex: '#d697a0' },
+              ].map((c) => {
+                const active = config.shoeColor === c.hex;
+                return (
+                  <button
+                    key={c.hex}
+                    type="button"
+                    title={c.label}
+                    onClick={() => update({ shoeColor: c.hex })}
+                    className={`w-7 h-7 rounded-full border-2 flex items-center justify-center ${active ? 'border-[#39ff14] scale-110 ring-2 ring-[#39ff14]/35' : 'border-white/20 hover:scale-105'}`}
+                    style={{ backgroundColor: c.hex }}
+                  >
+                    {active && <Check className={`w-3 h-3 ${c.hex === '#eae4d8' ? 'text-slate-900' : 'text-white'}`} />}
                   </button>
                 );
               })}
@@ -339,16 +549,66 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
             </div>
           </div>
 
+          {/* Jewelry */}
+          <div className="space-y-2">
+            <span className="block text-xs font-medium text-slate-300">Jewelry</span>
+            <div className="grid grid-cols-3 gap-1.5">
+              {JEWELRY.map((item) => {
+                const active = (config.jewelry ?? 'none') === item.id;
+                const locked = isLocked(item.id);
+                const price = priceFor(item.id);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    disabled={locked}
+                    title={locked ? `Buy ${item.label} at LoftLife Threads` : item.label}
+                    onClick={() => { if (!locked) update({ jewelry: item.id }); }}
+                    className={`flex items-center justify-center gap-1 rounded-lg border px-1.5 py-2 text-[10px] font-semibold ${active ? 'border-[#39ff14] bg-[#39ff14] text-[#051205]' : locked ? 'border-white/8 bg-[#0c110e] text-slate-500' : 'border-white/12 bg-[#101713] text-slate-200'}`}
+                  >
+                    {locked && <Lock className="w-3 h-3" />}
+                    <span className="truncate">{item.label}</span>
+                    {locked && price && <span className="text-[9px] text-amber-300/80">{price.currency === 'tongbao' ? '宝' : '元'}{price.price}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Bags */}
+          <div className="space-y-2">
+            <span className="block text-xs font-medium text-slate-300">Bag / Carry</span>
+            <div className="grid grid-cols-4 gap-1.5">
+              {CARRY.map((item) => {
+                const active = (config.carry ?? 'none') === item.id;
+                const locked = isLocked(item.id);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    disabled={locked}
+                    title={locked ? `Buy ${item.label} at LoftLife Threads` : item.label}
+                    onClick={() => { if (!locked) update({ carry: item.id }); }}
+                    className={`flex items-center justify-center gap-1 rounded-lg border px-1.5 py-2 text-[10px] font-semibold ${active ? 'border-[#39ff14] bg-[#39ff14] text-[#051205]' : locked ? 'border-white/8 bg-[#0c110e] text-slate-500' : 'border-white/12 bg-[#101713] text-slate-200'}`}
+                  >
+                    {locked && <Lock className="w-3 h-3" />}
+                    <span className="truncate">{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="space-y-2 border-t border-white/10 pt-4">
             <div className="text-xs font-semibold text-slate-300">Saved Outfits</div>
             <div className="flex gap-2">
               <input value={outfitName} onChange={(event) => setOutfitName(event.target.value)} maxLength={32} aria-label="Outfit name" className="min-w-0 flex-1 rounded-lg border border-white/12 bg-black/30 px-3 py-2 text-xs text-white" />
-              <button type="button" onClick={() => { const name = outfitName.trim() || 'My Outfit'; persistOutfits([...savedOutfits, { id: crypto.randomUUID(), name, topStyle: config.topStyle, topColor: config.topColor, bottomColor: config.bottomColor, shoeColor: config.shoeColor, accessory: config.accessory }]); }} className="rounded-lg bg-[#39ff14] px-3 py-2 text-xs font-bold text-[#051205]">Save</button>
+              <button type="button" onClick={() => { const name = outfitName.trim() || 'My Outfit'; persistOutfits([...savedOutfits, { id: crypto.randomUUID(), name, topStyle: config.topStyle, topColor: config.topColor, bottomStyle: config.bottomStyle, bottomColor: config.bottomColor, shoeColor: config.shoeColor, accessory: config.accessory, jewelry: config.jewelry, carry: config.carry }]); }} className="rounded-lg bg-[#39ff14] px-3 py-2 text-xs font-bold text-[#051205]">Save</button>
             </div>
             {savedOutfits.length === 0 ? <p className="text-[11px] text-slate-500">Save as many outfit combinations as you like on this device.</p> : savedOutfits.map((outfit) => (
               <div key={outfit.id} className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 p-2">
                 <span className="min-w-0 flex-1 truncate text-xs text-slate-200">{outfit.name}</span>
-                <button type="button" onClick={() => update({ topStyle: outfit.topStyle, topColor: outfit.topColor, bottomColor: outfit.bottomColor, shoeColor: outfit.shoeColor, accessory: outfit.accessory })} className="rounded-md bg-white/10 px-2 py-1 text-[11px]">Wear</button>
+                <button type="button" onClick={() => update({ topStyle: outfit.topStyle, topColor: outfit.topColor, bottomStyle: outfit.bottomStyle, bottomColor: outfit.bottomColor, shoeColor: outfit.shoeColor, accessory: outfit.accessory, jewelry: outfit.jewelry, carry: outfit.carry })} className="rounded-md bg-white/10 px-2 py-1 text-[11px]">Wear</button>
                 <button type="button" aria-label={`Delete ${outfit.name}`} onClick={() => persistOutfits(savedOutfits.filter((item) => item.id !== outfit.id))} className="rounded-md bg-white/10 px-2 py-1 text-[11px] text-red-300">Delete</button>
               </div>
             ))}

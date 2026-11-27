@@ -394,16 +394,6 @@ function buildFacade(
     builder.box('glass', venue.doorWidth + 3.4, 0.28, 3.4, venue.doorU, 3.9, faceZ + (doorSide === 'north' ? 1.0 : -1.0));
   }
 
-  if (venue.id === 'clothing_store') {
-    // Mannequins in the shop windows.
-    for (const offset of [-3.1, -1.6, 2.1]) {
-      const u = venue.doorU + offset;
-      builder.box('fabric', 0.34, 0.9, 0.26, u, 1.05, faceZ - 0.7);
-      builder.cylinder('fabric', 0.13, 0.5, u, 1.7, faceZ - 0.7, 8);
-      builder.cylinder('metal', 0.05, 0.55, u, 0.3, faceZ - 0.7, 6);
-    }
-  }
-
   if (venue.id === 'cinema') {
     // Marquee with warm bulbs.
     const marqueeZ = faceU + (doorSide === 'west' ? -1.1 : 1.1);
@@ -513,61 +503,6 @@ function buildLibraryInterior(b: VenueMeshBuilder, v: CityVenue, seats: VenueSea
     b.blob('leaf', 0.42, u, 0.85, z, 1.1);
     obstacles.push({ type: 'circle', ...venueToWorld(u, z), r: 0.45 });
   }
-}
-
-function buildClothingInterior(b: VenueMeshBuilder, v: CityVenue, seats: VenueSeat[], interactions: VenueInteractionPoint[], obstacles: VenueObstacle[]) {
-  const { iu0, iu1, iz0, iz1 } = v;
-  const midU = (iu0 + iu1) / 2;
-  // Ready-to-wear racks down both sides.
-  for (let i = 0; i < 3; i += 1) {
-    const z = iz0 + 2.4 + i * 3.4;
-    for (const u of [iu0 + 1.0, iu1 - 1.0]) {
-      b.cylinder('metal', 0.05, 1.7, u, 0.95, z, 6);
-      b.box('metal', 1.6, 0.06, 0.06, u, 1.78, z);
-      for (let g = 0; g < 7; g += 1) {
-        const gu = u - 0.7 + g * 0.23;
-        b.box('fabric', 0.18, 0.95, 0.5, gu, 1.25, z);
-      }
-      obstacles.push({ type: 'box', ...venueToWorld(u, z), hw: 0.9, hd: 0.45 });
-    }
-  }
-  // Fitting rooms.
-  for (let i = 0; i < 2; i += 1) {
-    const z = iz1 - 1.9 - i * 2.0;
-    const u = iu0 + 1.1;
-    b.box('trim', 1.5, 2.3, 0.12, u, 1.15, z - 0.9);
-    b.box('trim', 0.12, 2.3, 1.9, u + 0.75, 1.15, z);
-    b.box('accent', 0.06, 2.0, 1.6, u + 0.72, 1.1, z + 0.05);
-    obstacles.push({ type: 'box', ...venueToWorld(u, z), hw: 0.9, hd: 1.0 });
-  }
-  // Checkout counter with a terminal and a mirror.
-  const counterZ = iz1 - 1.2;
-  b.box('wood', 4.2, 1.02, 0.9, midU + 0.6, 0.51, counterZ);
-  b.box('trim', 4.4, 0.08, 1.0, midU + 0.6, 1.06, counterZ);
-  b.box('emissive', 0.5, 0.34, 0.06, midU + 1.6, 1.28, counterZ - 0.2);
-  b.box('metal', 0.34, 0.24, 0.2, midU + 0.4, 1.16, counterZ - 0.2);
-  obstacles.push({ type: 'box', ...venueToWorld(midU + 0.6, counterZ), hw: 2.2, hd: 0.6 });
-  interactions.push({
-    id: 'clothing_counter',
-    venueId: 'clothing_store',
-    ...venueToWorld(midU + 0.6, counterZ - 1.6),
-    radius: 2.6,
-    label: 'Browse The Thread Loft',
-    kind: 'shop_clothing',
-  });
-  // Floor mirror + shoe wall + plants.
-  b.box('glass', 0.08, 2.2, 1.3, iu1 - 0.5, 1.2, midU ? iz0 + 1.6 : iz0 + 1.6);
-  for (let i = 0; i < 5; i += 1) {
-    b.box('wood', 0.9, 0.22, 0.4, midU + 2.4, 0.4 + i * 0.42, iz0 + 0.9);
-  }
-  for (const [u, z] of [
-    [iu1 - 0.9, iz0 + 0.9],
-    [iu0 + 0.9, iz0 + 0.9],
-  ]) {
-    b.box('trim', 0.45, 0.4, 0.45, u, 0.2, z);
-    b.blob('leaf', 0.38, u, 0.8, z, 1.1);
-  }
-  b.box('fabric', 3.2, 0.02, 5.0, midU, 0.16, (iz0 + iz1) / 2);
 }
 
 function buildMedDeckInterior(b: VenueMeshBuilder, v: CityVenue, seats: VenueSeat[], interactions: VenueInteractionPoint[], obstacles: VenueObstacle[]) {
@@ -790,9 +725,6 @@ function buildVenueInterior(b: VenueMeshBuilder, v: CityVenue, seats: VenueSeat[
   switch (v.id) {
     case 'library':
       buildLibraryInterior(b, v, seats, interactions, obstacles);
-      break;
-    case 'clothing_store':
-      buildClothingInterior(b, v, seats, interactions, obstacles);
       break;
     case 'med_deck':
       buildMedDeckInterior(b, v, seats, interactions, obstacles);

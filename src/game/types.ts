@@ -1,4 +1,11 @@
-export type WorldLocation = 'room' | 'resident_room' | 'hallway' | 'lobby' | 'world';
+export type WorldLocation =
+  | 'room'
+  | 'resident_room'
+  | 'hallway'
+  | 'lobby'
+  | 'world'
+  | 'airport'
+  | 'clothing_store';
 
 export type ViewMode = 'isometric' | 'play';
 
@@ -14,7 +21,13 @@ export type FurnitureCategory =
   | 'living'
   | 'lighting'
   | 'plants_rugs'
-  | 'wall';
+  | 'wall'
+  | 'bedroom'
+  | 'kitchen'
+  | 'bathroom'
+  | 'office'
+  | 'outdoor'
+  | 'decor';
 
 export type PlacementLayer = 'floor' | 'rug' | 'wall';
 
@@ -68,11 +81,67 @@ export interface RoomSurfaceConfig {
   wall: WallStyleId;
 }
 
-export type HairStyleId = 'bob' | 'afro' | 'ponytail' | 'sidepart' | 'buns' | 'spiky';
-export type TopStyleId = 'hoodie' | 'blazer' | 'tee' | 'turtleneck';
-export type AccessoryId = 'none' | 'glasses' | 'headphones' | 'beanie';
+export type HairStyleId =
+  | 'bob'
+  | 'afro'
+  | 'ponytail'
+  | 'sidepart'
+  | 'buns'
+  | 'spiky'
+  | 'long_waves'
+  | 'buzz'
+  | 'curls'
+  | 'locs'
+  | 'pixie'
+  | 'middle_part'
+  | 'top_knot'
+  | 'shoulder_waves'
+  | 'braids'
+  | 'undercut'
+  | 'fade'
+  | 'curtain';
 
-export type MakeupStyleId = 'natural' | 'soft' | 'bold';
+export type TopStyleId =
+  | 'hoodie'
+  | 'blazer'
+  | 'tee'
+  | 'turtleneck'
+  | 'button_shirt'
+  | 'sweater'
+  | 'jacket'
+  | 'tank'
+  | 'varsity'
+  | 'raincoat'
+  | 'suit'
+  | 'dress'
+  | 'crop_hoodie'
+  | 'cardigan';
+
+export type BottomStyleId =
+  | 'jeans'
+  | 'chinos'
+  | 'shorts'
+  | 'skirt'
+  | 'joggers'
+  | 'dress_pants'
+  | 'cargo';
+
+export type AccessoryId =
+  | 'none'
+  | 'glasses'
+  | 'headphones'
+  | 'beanie'
+  | 'cap'
+  | 'bucket_hat'
+  | 'sunglasses'
+  | 'scarf';
+
+export type JewelryId = 'none' | 'chain' | 'watch' | 'earrings' | 'bracelet';
+export type CarryId = 'none' | 'backpack' | 'purse' | 'tote';
+export type FacialHairId = 'none' | 'stubble' | 'beard' | 'goatee' | 'mustache';
+export type EyebrowStyleId = 'natural' | 'bold' | 'thin' | 'arched';
+export type EyeStyleId = 'warm_brown' | 'deep_brown' | 'hazel' | 'green' | 'blue' | 'gray';
+export type MakeupStyleId = 'none' | 'natural' | 'soft' | 'bold';
 
 export interface AvatarConfig {
   name: string;
@@ -82,9 +151,15 @@ export interface AvatarConfig {
   hairColor: string;
   topStyle: TopStyleId;
   topColor: string;
+  bottomStyle?: BottomStyleId;
   bottomColor: string;
   shoeColor: string;
   accessory: AccessoryId;
+  jewelry?: JewelryId;
+  carry?: CarryId;
+  facialHair?: FacialHairId;
+  eyebrows?: EyebrowStyleId;
+  eyeStyle?: EyeStyleId;
 }
 
 export interface RoomPreset {

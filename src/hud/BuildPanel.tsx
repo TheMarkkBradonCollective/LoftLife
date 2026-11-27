@@ -1,6 +1,9 @@
 import React, { useMemo } from 'react';
 import {
   Armchair,
+  Bath,
+  BedDouble,
+  BriefcaseBusiness,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -10,13 +13,16 @@ import {
   Layers,
   Move,
   Paintbrush,
+  Palette,
   PencilRuler,
   RotateCw,
   Sofa,
   Sparkles,
   Sprout,
   Trash2,
+  TreePine,
   Tv,
+  CookingPot,
   Undo2,
   X,
   Check,
@@ -31,6 +37,12 @@ const CATEGORY_TABS: { id: 'all' | FurnitureCategory; label: string }[] = [
   { id: 'seating', label: 'Seating' },
   { id: 'tables', label: 'Tables' },
   { id: 'living', label: 'Living' },
+  { id: 'bedroom', label: 'Bedroom' },
+  { id: 'kitchen', label: 'Kitchen' },
+  { id: 'bathroom', label: 'Bath' },
+  { id: 'office', label: 'Office' },
+  { id: 'outdoor', label: 'Outdoor' },
+  { id: 'decor', label: 'Decor' },
   { id: 'lighting', label: 'Lighting' },
   { id: 'plants_rugs', label: 'Plants' },
   { id: 'wall', label: 'Wall' },
@@ -44,6 +56,18 @@ function catalogIcon(category: FurnitureCategory) {
       return <Layers className="w-4 h-4" />;
     case 'living':
       return <Tv className="w-4 h-4" />;
+    case 'bedroom':
+      return <BedDouble className="w-4 h-4" />;
+    case 'kitchen':
+      return <CookingPot className="w-4 h-4" />;
+    case 'bathroom':
+      return <Bath className="w-4 h-4" />;
+    case 'office':
+      return <BriefcaseBusiness className="w-4 h-4" />;
+    case 'outdoor':
+      return <TreePine className="w-4 h-4" />;
+    case 'decor':
+      return <Palette className="w-4 h-4" />;
     case 'lighting':
       return <LampDesk className="w-4 h-4" />;
     case 'plants_rugs':

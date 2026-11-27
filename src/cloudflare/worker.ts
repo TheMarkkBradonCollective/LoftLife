@@ -77,14 +77,22 @@ const STARTER_SUITE = {
 };
 const DEFAULT_AVATAR = {
   name: 'Newcomer', skinTone: '#e8b48f', hairStyle: 'bob', hairColor: '#2f2119',
-  topStyle: 'tee', topColor: '#e6dfd3', bottomColor: '#2b3a2a',
-  shoeColor: '#1b1b1b', accessory: 'none',
+  topStyle: 'tee', topColor: '#e6dfd3', bottomStyle: 'jeans', bottomColor: '#2b3a2a',
+  shoeColor: '#1b1b1b', accessory: 'none', jewelry: 'none', carry: 'none',
+  facialHair: 'none', eyebrows: 'natural', eyeStyle: 'warm_brown', makeupStyle: 'none',
 };
 const DEFAULT_CLOTHING = ['tee', 'none'];
 const AVATAR_ENUMS = {
-  hairStyle: ['bob', 'afro', 'ponytail', 'sidepart', 'buns', 'spiky'],
-  topStyle: ['hoodie', 'blazer', 'tee', 'turtleneck'],
-  accessory: ['none', 'glasses', 'headphones', 'beanie'],
+  hairStyle: ['bob', 'afro', 'ponytail', 'sidepart', 'buns', 'spiky', 'long_waves', 'buzz', 'curls', 'locs', 'pixie', 'middle_part', 'top_knot', 'shoulder_waves', 'braids', 'undercut', 'fade', 'curtain'],
+  topStyle: ['hoodie', 'blazer', 'tee', 'turtleneck', 'button_shirt', 'sweater', 'jacket', 'tank', 'varsity', 'raincoat', 'suit', 'dress', 'crop_hoodie', 'cardigan'],
+  bottomStyle: ['jeans', 'chinos', 'shorts', 'skirt', 'joggers', 'dress_pants', 'cargo'],
+  accessory: ['none', 'glasses', 'headphones', 'beanie', 'cap', 'bucket_hat', 'sunglasses', 'scarf'],
+  jewelry: ['none', 'chain', 'watch', 'earrings', 'bracelet'],
+  carry: ['none', 'backpack', 'purse', 'tote'],
+  facialHair: ['none', 'stubble', 'beard', 'goatee', 'mustache'],
+  eyebrows: ['natural', 'bold', 'thin', 'arched'],
+  eyeStyle: ['warm_brown', 'deep_brown', 'hazel', 'green', 'blue', 'gray'],
+  makeupStyle: ['none', 'natural', 'soft', 'bold'],
 };
 function safeAvatar(input: unknown, name: string) {
   const raw = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
@@ -95,12 +103,18 @@ function safeAvatar(input: unknown, name: string) {
     skinTone: hex(raw.skinTone, DEFAULT_AVATAR.skinTone),
     hairStyle: pick('hairStyle', DEFAULT_AVATAR.hairStyle),
     hairColor: hex(raw.hairColor, DEFAULT_AVATAR.hairColor),
-    makeupStyle: ['natural','soft','bold'].includes(String(raw.makeupStyle)) ? raw.makeupStyle as 'natural'|'soft'|'bold' : 'natural',
     topStyle: pick('topStyle', DEFAULT_AVATAR.topStyle),
     topColor: hex(raw.topColor, DEFAULT_AVATAR.topColor),
+    bottomStyle: pick('bottomStyle', DEFAULT_AVATAR.bottomStyle),
     bottomColor: hex(raw.bottomColor, DEFAULT_AVATAR.bottomColor),
     shoeColor: hex(raw.shoeColor, DEFAULT_AVATAR.shoeColor),
     accessory: pick('accessory', DEFAULT_AVATAR.accessory),
+    jewelry: pick('jewelry', DEFAULT_AVATAR.jewelry),
+    carry: pick('carry', DEFAULT_AVATAR.carry),
+    facialHair: pick('facialHair', DEFAULT_AVATAR.facialHair),
+    eyebrows: pick('eyebrows', DEFAULT_AVATAR.eyebrows),
+    eyeStyle: pick('eyeStyle', DEFAULT_AVATAR.eyeStyle),
+    makeupStyle: pick('makeupStyle', DEFAULT_AVATAR.makeupStyle),
   };
 }
 async function provisionGameAccount(sql: Sql, account: AccountRow, avatarInput?: unknown) {
@@ -764,29 +778,17 @@ export default {
       }
       if (url.pathname === '/api/presence' && request.method === 'GET') {
         if (!env.REALTIME) return fail('Realtime Durable Object binding is not configured.',503,'realtime_unconfigured');
-        type PresenceInstance = { id: string; kind: string; worldId: string | null; capacity: number; count: number };
-        type PresenceBody = { online?: number; instances?: PresenceInstance[]; cityCapacity?: number };
-        // The city Durable Object counts every socket in TheCity (registered and
-        // guest); the party coordinator only knows signed-in accounts, so it is
-        // used for world instances.
-        const [cityResponse, worldsResponse] = await Promise.all([
-          env.REALTIME.get(env.REALTIME.idFromName('city:main')).fetch(
-            new Request('https://loftlife-internal/internal/presence')
-          ),
-          env.REALTIME.get(env.REALTIME.idFromName('party:global')).fetch(
-            new Request('https://loftlife-internal/internal/party/presence-snapshot')
-          ),
-        ]);
-        const city = cityResponse.ok ? (await cityResponse.json()) as PresenceBody : {};
-        const worlds = worldsResponse.ok ? (await worldsResponse.json()) as PresenceBody : {};
-        const cityInstances = (city.instances ?? []).filter((entry) => entry.id === 'city:main');
-        const worldInstances = (worlds.instances ?? []).filter((entry) => String(entry.id).startsWith('world:'));
-        const instances = [...cityInstances, ...worldInstances];
-        return json({
-          online: instances.reduce((total, entry) => total + Number(entry.count || 0), 0),
-          instances,
-          cityCapacity: Number(city.cityCapacity ?? 64),
-        });
+        const id = env.REALTIME.idFromName('party:global');
+        return env.REALTIME.get(id).fetch(new Request('https://loftlife-internal/internal/party/presence-snapshot'));
+      }
+
+      if (url.pathname === '/api/admin/monitoring' && request.method === 'GET') {
+        const auth = await currentAccount(request, env);
+        if (!auth) return fail('Sign in to continue.',401,'unauthorized');
+        if (auth.account.role !== 'admin') return fail('Administrator access required.',403,'forbidden');
+        if (!env.REALTIME) return fail('Realtime Durable Object binding is not configured.',503,'realtime_unconfigured');
+        const id = env.REALTIME.idFromName('party:global');
+        return env.REALTIME.get(id).fetch(new Request('https://loftlife-internal/internal/party/presence-snapshot?details=1'));
       }
 
       if (url.pathname === '/api/settings' || url.pathname.startsWith('/api/messages/')) {

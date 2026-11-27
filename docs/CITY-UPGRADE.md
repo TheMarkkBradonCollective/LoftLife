@@ -5,8 +5,10 @@ blocks around LoftLife Plaza, what is explorable, and how it was checked.
 
 ## What changed
 
-- **Seven public destinations** now occupy their own downtown blocks and are
-  authored as real buildings with interiors, not decorative shells.
+- **Six new public destinations** now occupy their own downtown blocks and are
+  authored as real buildings with interiors, not decorative shells. Together with
+  the LoftLife Threads clothing store and Central Park that makes eight
+  walk-up destinations around the plaza.
 - **Streets** keep the original ordered grid: A–Z lettered streets run diagonally,
   1st–26th+ numbered streets stay in numeric order, and blocks keep their varied
   dimensions. Roadway, curbs, crosswalks, parking bays and lane markings were
@@ -23,12 +25,12 @@ blocks around LoftLife Plaza, what is explorable, and how it was checked.
 | --- | --- | --- |
 | LoftLife Community Center | 11,13 | Stage, folding tables, notice board |
 | Bean & Loft Café | 12,13 | Espresso bar, stools, terrace tables |
-| The Thread Loft (clothing) | 13,13 | Garment racks, fitting rooms, checkout counter |
 | LoftLife Cinema | 13,14 | Box office, arcade cabinet, raked seats, screen |
 | Public Library | 11,15 | Shelving, reading tables, public computers |
 | Market Hall | 12,15 | Produce aisles, crates, checkout |
-| The Med Deck (hospital) | 13,15 | Reception, waiting seats, treatment beds |
+| The Med Deck (hospital) | 14,15 | Reception, waiting seats, treatment beds |
 | Central Park | 11,14 | Paths, lawns, seating (retained) |
+| LoftLife Threads (clothing) | 13,15 | Separate store location: racks, fitting rooms, checkout, stylist |
 
 The hotel, airport, transit and plaza blocks keep their coordinates, and the
 city map still lists every landmark in the same place.
@@ -38,13 +40,12 @@ city map still lists every landmark in the same place.
 - Every venue has a storefront opening on its street frontage. Walk through it to
   enter; the roof, ceiling, front wall and awning of the venue you are inside are
   hidden (a cutaway) so the chase camera can see the room.
-- Seats, counters and kiosks are interaction points. The clothes counter opens
-  **The Thread Loft** shop, the Market Hall counter opens the furniture catalogue,
-  and the rest raise an inspect prompt.
-- **Clothing is no longer sold at the airport.** The airport keeps only the
-  DEPARTURES kiosk. Clothing, previewing and purchasing all go through the
-  Thread Loft counter and the existing `ShopModal` clothing tab, so purchases
-  land in the same inventory as before.
+- Seats, counters and kiosks are interaction points. The Market Hall counter
+  opens the furniture catalogue; the rest raise an inspect prompt.
+- **Clothing is its own city destination, not an airport kiosk.** LoftLife
+  Threads has a dedicated storefront on N St and its own interior location; the
+  checkout opens the existing `ShopModal` clothing tab, so purchases land in the
+  same wardrobe/inventory as before.
 - The city map (`Open city map`) gained a **Public destinations** directory. Its
   buttons fast-travel the player to the street in front of the venue, facing the
   doors.
@@ -70,7 +71,7 @@ Ran in this change:
   shell inside the block, interior inside the shell, doors on the facade, arrival
   point on the street side, plausible heights/ceiling, hotel/airport/plaza blocks
   intact, street counts and ordering unchanged).
-- In-browser (cloud Chromium preview): the city map lists all seven destinations,
+- In-browser (cloud Chromium preview): the city map lists every public destination,
   fast travel lands on the correct street (HUD reads e.g. `15th St near N St`),
   the storefront/sign/awning/tree frontage renders, walking through the opening
   enters the shop and the cutaway reveals the checkout counter, racks and shelving.

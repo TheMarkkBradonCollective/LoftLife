@@ -5,6 +5,7 @@ import type {
   RoomPreset,
   WallStyleId,
 } from './types';
+import { EXTRA_FURNITURE } from './furnitureCatalogExtra';
 
 export const GRID_SIZE = 14; // 14 x 14m Grand Hotel Penthouse Suite
 export const PLAYER_SUITE_NUMBER = '402';
@@ -370,6 +371,10 @@ export const FURNITURE_CATALOG: FurnitureCatalogItem[] = [
   },
 ];
 
+// The expanded collection lands here so every existing id and preset above is
+// untouched. See furnitureCatalogExtra.ts for the added categories.
+FURNITURE_CATALOG.push(...EXTRA_FURNITURE);
+
 export const FLOOR_STYLES: { id: FloorStyleId; label: string; color: string }[] = [
   { id: 'oak_parquet', label: 'Warm Oak', color: '#c89b67' },
   { id: 'walnut_herringbone', label: 'Herringbone', color: '#785035' },
@@ -613,6 +618,109 @@ export const HOTEL_RESIDENTS: import('./types').ActiveResident[] = [
       { uid: 'k4', catalogId: 'coffee_table', gx: 5, gz: 3, rot: 0, color: '#2e2d30' },
       { uid: 'k5', catalogId: 'arc_lamp', gx: 8, gz: 5, rot: 0, color: '#b8bec7', active: true },
       { uid: 'k6', catalogId: 'cozy_bed', gx: 10, gz: 9, rot: 3, color: '#39465c' },
+    ],
+  },
+  {
+    id: 'res_jade',
+    name: 'Jade',
+    roomNumber: '505',
+    floor: 5,
+    status: 'Pottery, jazz and a very good espresso machine',
+    greeting: 'Floor 5 is the quiet one — come in, I just pulled a shot of espresso.',
+    avatar: {
+      name: 'Jade',
+      skinTone: '#ae7248',
+      hairStyle: 'locs',
+      hairColor: '#2d2320',
+      topStyle: 'cardigan',
+      topColor: '#d49a45',
+      bottomStyle: 'chinos',
+      bottomColor: '#c7b08e',
+      shoeColor: '#32363f',
+      accessory: 'none',
+      jewelry: 'earrings',
+      eyebrows: 'arched',
+      eyeStyle: 'hazel',
+    },
+    surfaces: { floor: 'walnut_herringbone', wall: 'terracotta' },
+    mood: 'golden',
+    items: [
+      { uid: 'j1', catalogId: 'round_rug', gx: 5, gz: 5, rot: 0, color: '#d7a8a6' },
+      { uid: 'j2', catalogId: 'loveseat', gx: 5, gz: 3, rot: 0, color: '#3f6b56' },
+      { uid: 'j3', catalogId: 'coffee_table_round', gx: 5, gz: 5, rot: 0, color: '#684730' },
+      { uid: 'j4', catalogId: 'bookshelf_tall', gx: 10, gz: 0, rot: 0, color: '#684730' },
+      { uid: 'j5', catalogId: 'plant_tall', gx: 1, gz: 1, rot: 0, color: '#c46c4e' },
+      { uid: 'j6', catalogId: 'king_bed', gx: 9, gz: 9, rot: 3, color: '#e8e1d4' },
+      { uid: 'j7', catalogId: 'floor_lamp', gx: 8, gz: 4, rot: 0, color: '#d4af5a', active: true },
+      { uid: 'j8', catalogId: 'wall_art_set', gx: 4, gz: 0, rot: 0, wall: 'north', color: '#c86b51' },
+    ],
+  },
+  {
+    id: 'res_marco',
+    name: 'Marco',
+    roomNumber: '608',
+    floor: 6,
+    status: 'Watching the game with the windows open',
+    greeting: 'Suite 608! Grab the armchair — the match is about to start.',
+    avatar: {
+      name: 'Marco',
+      skinTone: '#d3976d',
+      hairStyle: 'fade',
+      hairColor: '#2d2320',
+      topStyle: 'varsity',
+      topColor: '#39465c',
+      bottomStyle: 'jeans',
+      bottomColor: '#364152',
+      shoeColor: '#f0ece3',
+      accessory: 'cap',
+      facialHair: 'stubble',
+      eyebrows: 'bold',
+      eyeStyle: 'deep_brown',
+    },
+    surfaces: { floor: 'concrete', wall: 'slate_blue' },
+    mood: 'night',
+    items: [
+      { uid: 'ma1', catalogId: 'woven_rug', gx: 4, gz: 5, rot: 0, color: '#4b5f7e' },
+      { uid: 'ma2', catalogId: 'tv_console', gx: 5, gz: 0, rot: 0, color: '#684730', active: true },
+      { uid: 'ma3', catalogId: 'sectional_sofa', gx: 5, gz: 4, rot: 2, color: '#393e48' },
+      { uid: 'ma4', catalogId: 'armchair', gx: 2, gz: 4, rot: 1, color: '#a66238' },
+      { uid: 'ma5', catalogId: 'king_bed', gx: 9, gz: 9, rot: 3, color: '#4a5b6e' },
+      { uid: 'ma6', catalogId: 'dresser', gx: 12, gz: 3, rot: 3, color: '#684730' },
+    ],
+  },
+  {
+    id: 'res_ivy',
+    name: 'Ivy',
+    roomNumber: '703',
+    floor: 7,
+    status: 'Top-floor sunrise and a very large bathtub',
+    greeting: 'You made it to the top floor! Suite 703 has the best view in the hotel.',
+    avatar: {
+      name: 'Ivy',
+      skinTone: '#f6d5be',
+      hairStyle: 'long_waves',
+      hairColor: '#b36b7b',
+      topStyle: 'dress',
+      topColor: '#785874',
+      bottomStyle: 'skirt',
+      bottomColor: '#785874',
+      shoeColor: '#eae4d8',
+      accessory: 'sunglasses',
+      jewelry: 'bracelet',
+      eyebrows: 'thin',
+      eyeStyle: 'green',
+      makeupStyle: 'soft',
+    },
+    surfaces: { floor: 'boucle_carpet', wall: 'soft_blush' },
+    mood: 'morning',
+    items: [
+      { uid: 'iv1', catalogId: 'round_rug', gx: 5, gz: 5, rot: 0, color: '#e8e1d4' },
+      { uid: 'iv2', catalogId: 'loveseat', gx: 5, gz: 3, rot: 0, color: '#d7a8a6' },
+      { uid: 'iv3', catalogId: 'coffee_table_round', gx: 5, gz: 5, rot: 0, color: '#dfd0b8' },
+      { uid: 'iv4', catalogId: 'king_bed', gx: 9, gz: 9, rot: 3, color: '#e8e1d4' },
+      { uid: 'iv5', catalogId: 'vanity_desk', gx: 11, gz: 2, rot: 3, color: '#efeae1' },
+      { uid: 'iv6', catalogId: 'plant_tall', gx: 1, gz: 1, rot: 0, color: '#7b9984' },
+      { uid: 'iv7', catalogId: 'wall_mirror', gx: 4, gz: 0, rot: 0, wall: 'north', color: '#d4af5a' },
     ],
   },
   {

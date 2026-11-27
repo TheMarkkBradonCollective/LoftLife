@@ -1,4 +1,10 @@
 import * as THREE from 'three';
+import {
+  HOUSEKEEPING_FLOOR,
+  roomNumberForSlot,
+  roomRangeLabel,
+  roomsOnFloor,
+} from '../../shared/hotel-layout.mjs';
 import { createAvatarRig, type AvatarRig } from './avatar';
 
 import type { ActiveResident, EmoteType } from './types';
@@ -45,7 +51,9 @@ export interface HallwayDoorSlot {
   x: number;
   z: number;
   roomNumber: string;
-  side: 'north' | 'south';
+  side: 'north' | 'south' | 'end';
+  /** Floor 7's east-end door is the housekeeping room, not a suite. */
+  kind: 'suite' | 'housekeeping';
   resident: ActiveResident | null;
   isPlayerSuite: boolean;
   unlocked: boolean;
@@ -199,6 +207,35 @@ function buildLobbySofa(): THREE.Group {
     for (const lz of [-0.34, 0.34]) {
       const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.02, 0.12, 8), brassMat);
       leg.position.set(lx, 0.06, lz);
+      g.add(leg);
+    }
+  }
+  return g;
+}
+
+function buildLobbyChair(): THREE.Group {
+  const g = new THREE.Group();
+  const velvetMat = new THREE.MeshStandardMaterial({ color: 0x2f5d4d, roughness: 0.74 });
+  const brassMat = new THREE.MeshStandardMaterial({
+    color: 0xd4af5a,
+    roughness: 0.25,
+    metalness: 0.85,
+  });
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.32, 0.86), velvetMat);
+  base.position.y = 0.27;
+  base.castShadow = true;
+  g.add(base);
+  const back = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.58, 0.2), velvetMat);
+  back.position.set(0, 0.64, -0.33);
+  back.castShadow = true;
+  g.add(back);
+  for (const lx of [-0.46, 0.46]) {
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.46, 0.86), velvetMat);
+    arm.position.set(lx, 0.45, 0);
+    g.add(arm);
+    for (const lz of [-0.32, 0.32]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.02, 0.13, 8), brassMat);
+      leg.position.set(lx, 0.065, lz);
       g.add(leg);
     }
   }
@@ -485,6 +522,120 @@ export function buildHotelLobby(maxAnisotropy: number): HotelLobbyHandles {
   coffeeTable.castShadow = true;
   lobbyGroup.add(coffeeTable);
 
+  // Lounge rug with a brass border anchors the seating group.
+  const rugBorder = new THREE.Mesh(
+    new THREE.PlaneGeometry(5.1, 4.1),
+    new THREE.MeshStandardMaterial({ color: 0xb99a5e, roughness: 0.86 })
+  );
+  rugBorder.rotation.x = -Math.PI / 2;
+  rugBorder.position.set(4.35, 0.012, 0.4);
+  rugBorder.receiveShadow = true;
+  lobbyGroup.add(rugBorder);
+  const rug = new THREE.Mesh(
+    new THREE.PlaneGeometry(4.8, 3.8),
+    new THREE.MeshStandardMaterial({ color: 0x24483c, roughness: 0.94 })
+  );
+  rug.rotation.x = -Math.PI / 2;
+  rug.position.set(4.35, 0.014, 0.4);
+  rug.receiveShadow = true;
+  lobbyGroup.add(rug);
+
+  // Two club chairs complete the conversation group around the coffee table.
+  const chairSpecs = [
+    { id: 'lobby_chair_north', x: 3.15, z: 2.15, yaw: Math.PI, approachZ: 3.05 },
+    { id: 'lobby_chair_south', x: 3.15, z: -1.35, yaw: 0, approachZ: -2.25 },
+  ];
+  for (const spec of chairSpecs) {
+    const chair = buildLobbyChair();
+    chair.position.set(spec.x, 0, spec.z);
+    chair.rotation.y = spec.yaw;
+    chair.userData.hotelSeatId = spec.id;
+    lobbyGroup.add(chair);
+    seats.push({
+      id: spec.id,
+      label: 'Lobby Club Chair',
+      mesh: chair,
+      seatPos: { x: spec.x, y: 0.44, z: spec.z },
+      approachPos: { x: spec.x, z: spec.approachZ },
+      facingYaw: spec.yaw,
+    });
+  }
+
+  // Side table with a warm lamp between the sofa and the north chair.
+  const sideTable = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.36, 0.3, 0.06, 18),
+    new THREE.MeshStandardMaterial({ color: 0x2b2a27, roughness: 0.42 })
+  );
+  sideTable.position.set(6.35, 0.56, 2.15);
+  lobbyGroup.add(sideTable);
+  const sideStem = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.56, 10), brassMat);
+  sideStem.position.set(6.35, 0.28, 2.15);
+  lobbyGroup.add(sideStem);
+  const lampShade = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.2, 0.26, 0.32, 14),
+    new THREE.MeshStandardMaterial({
+      color: 0xffe8c2,
+      emissive: 0xffc477,
+      emissiveIntensity: 0.8,
+      roughness: 0.6,
+    })
+  );
+  lampShade.position.set(6.35, 0.92, 2.15);
+  lobbyGroup.add(lampShade);
+
+  // Slim console and framed art on the east wall.
+  const consoleTop = new THREE.Mesh(
+    new THREE.BoxGeometry(0.42, 0.08, 2.1),
+    new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.6 })
+  );
+  consoleTop.position.set(8.25, 0.85, -4.1);
+  consoleTop.castShadow = true;
+  lobbyGroup.add(consoleTop);
+  for (const cz of [-4.95, -3.25]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.84, 0.08), brassMat);
+    leg.position.set(8.25, 0.42, cz);
+    lobbyGroup.add(leg);
+  }
+  const vase = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.14, 0.2, 0.42, 12),
+    new THREE.MeshStandardMaterial({ color: 0x6f8e7a, roughness: 0.4 })
+  );
+  vase.position.set(8.25, 1.1, -4.1);
+  lobbyGroup.add(vase);
+  const artMat = new THREE.MeshStandardMaterial({ color: 0x8d6b45, roughness: 0.85 });
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0x201a15, roughness: 0.5 });
+  for (let i = 0; i < 3; i++) {
+    const frame = new THREE.Mesh(new THREE.PlaneGeometry(0.92, 1.15), frameMat);
+    frame.position.set(8.94, 2.15, -5.0 + i * 0.95);
+    frame.rotation.y = -Math.PI / 2;
+    lobbyGroup.add(frame);
+    const art = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 1.02), artMat);
+    art.position.set(8.93, 2.15, -5.0 + i * 0.95);
+    art.rotation.y = -Math.PI / 2;
+    lobbyGroup.add(art);
+  }
+
+  // Brass wall sconces wash the east wall and elevator bay in warm light.
+  const sconceBulb = new THREE.MeshStandardMaterial({
+    color: 0xfff1cf,
+    emissive: 0xffc777,
+    emissiveIntensity: 1.2,
+  });
+  const sconceSpots: [number, number, number][] = [
+    [8.82, 2.5, -1.4],
+    [8.82, 2.5, 3.4],
+    [-2.3, 2.55, -7.85],
+    [2.3, 2.55, -7.85],
+  ];
+  for (const [sx, sy, sz] of sconceSpots) {
+    const backplate = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.34, 0.14), brassMat);
+    backplate.position.set(sx, sy, sz);
+    lobbyGroup.add(backplate);
+    const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, 0.3, 10), sconceBulb);
+    shade.position.set(sx - (sx > 0 ? 0.1 : -0.1), sy + 0.12, sz);
+    lobbyGroup.add(shade);
+  }
+
   // Decorative Potted Lobby Palms
   const potMat = new THREE.MeshStandardMaterial({ color: 0xd4af5a, roughness: 0.3, metalness: 0.5 });
   const leafMat = new THREE.MeshStandardMaterial({ color: 0x3b6e4c, roughness: 0.75 });
@@ -578,6 +729,12 @@ export function buildHotelLobby(maxAnisotropy: number): HotelLobbyHandles {
       return false;
     }
     if (Math.hypot(x - 3.15, z - 0.4) < 0.62 + radius) return false;
+    // Club chairs, side table and east console
+    for (const spec of chairSpecs) {
+      if (Math.abs(x - spec.x) < 0.56 + radius && Math.abs(z - spec.z) < 0.52 + radius) return false;
+    }
+    if (Math.hypot(x - 6.35, z - 2.15) < 0.4 + radius) return false;
+    if (x > 7.95 - radius && z > -5.25 - radius && z < -2.95 + radius) return false;
     // Corner palms
     for (const [px, pz] of palmSpots) {
       if (Math.hypot(x - px, z - pz) < 0.45 + radius) return false;
@@ -643,9 +800,12 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
 
   // Five suite doors on each side of the corridor (ten total per floor).
   const doorXs = [-9.2, -4.6, 0, 4.6, 9.2];
+  // Five suites on the north side, five on the south, and one east-end room.
+  // Floor 7 turns the end door into housekeeping, giving 65 total suites.
   const doorSlots = [
     ...doorXs.map((x) => ({ x, side: 'north' as const })),
     ...doorXs.map((x) => ({ x, side: 'south' as const })),
+    { x: 11.96, side: 'end' as const },
   ];
   for (const side of ['north', 'south'] as const) {
     const wallZ = side === 'north' ? -4.32 : 4.32;
@@ -667,10 +827,20 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
     }
   }
 
-  // East End Wall (x = +12.12)
-  const eastWall = new THREE.Mesh(new THREE.BoxGeometry(0.24, 3.4, 8.84), wallMat);
-  eastWall.position.set(12.12, 1.7, 0);
-  hallwayGroup.add(eastWall);
+  // East End Wall (x = +12.12) with the eleventh end-room door at z = 0.
+  for (const [z0, z1] of [
+    [-4.42, -0.7],
+    [0.7, 4.42],
+  ]) {
+    const seg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 3.4, z1 - z0), wallMat);
+    seg.position.set(12.12, 1.7, (z0 + z1) / 2);
+    seg.castShadow = true;
+    seg.receiveShadow = true;
+    hallwayGroup.add(seg);
+  }
+  const endDoorHeader = new THREE.Mesh(new THREE.BoxGeometry(0.24, 1.05, 1.4), wallMat);
+  endDoorHeader.position.set(12.12, 2.875, 0);
+  hallwayGroup.add(endDoorHeader);
 
   // The south corridor wall mirrors the north wall with five resident doors.
 
@@ -743,8 +913,9 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
   // Build 10 numbered suite doors, five on each corridor side.
   const doors: HallwayDoorSlot[] = doorSlots.map(({ x: dx, side }, idx) => {
     const doorGroup = new THREE.Group();
-    doorGroup.position.set(dx, 0, side === 'north' ? -4.2 : 4.2);
-    doorGroup.rotation.y = side === 'north' ? 0 : Math.PI;
+    const isEnd = side === 'end';
+    doorGroup.position.set(isEnd ? 11.96 : dx, 0, isEnd ? 0 : side === 'north' ? -4.2 : 4.2);
+    doorGroup.rotation.y = isEnd ? -Math.PI / 2 : side === 'north' ? 0 : Math.PI;
     doorGroup.userData.hallDoorIndex = idx;
 
     // Door Jambs
@@ -786,7 +957,7 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
 
     // Plaque above door
     const plaqueTex = createSignCanvasTexture(
-      `SUITE 4${String(idx + 1).padStart(2, '0')}`,
+      idx === 10 ? 'SUITE 411' : `SUITE 4${String(idx + 1).padStart(2, '0')}`,
       'VACANT',
       '#1e222b',
       '#d4af5a',
@@ -818,10 +989,11 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
 
     return {
       index: idx,
-      x: dx,
-      z: side === 'north' ? -4.2 : 4.2,
+      x: isEnd ? 11.96 : dx,
+      z: isEnd ? 0 : side === 'north' ? -4.2 : 4.2,
       side,
-      roomNumber: `4${String(idx + 1).padStart(2, '0')}`,
+      roomNumber: idx === 10 ? '411' : `4${String(idx + 1).padStart(2, '0')}`,
+      kind: 'suite',
       resident: null,
       isPlayerSuite: false,
       unlocked: false,
@@ -844,7 +1016,7 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
   ) {
     const nextFloorTex = createSignCanvasTexture(
       `FLOOR ${floor}`,
-      `SUITES ${floor}01 – ${floor}10`,
+      `SUITES ${roomRangeLabel(floor)}`,
       '#181b24',
       '#d4af5a',
       anisotropy
@@ -855,27 +1027,33 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
     floorSignTex = nextFloorTex;
 
     doors.forEach((d, idx) => {
-      const roomNum = `${floor}${String(idx + 1).padStart(2, '0')}`;
-      const isPlayer = floor === playerSuiteFloor && roomNum === playerSuiteNumber;
-      const resident = residents.find((r) => r.roomNumber === roomNum) ?? null;
-      const unlocked = unlockedRooms.has(roomNum);
+      const roomNum = roomNumberForSlot(floor, idx);
+      const isHousekeeping = roomNum === null;
+      const isPlayer = !isHousekeeping && floor === playerSuiteFloor && roomNum === playerSuiteNumber;
+      const resident = roomNum
+        ? residents.find((r) => r.roomNumber === roomNum) ?? null
+        : null;
+      const unlocked = Boolean(roomNum && unlockedRooms.has(roomNum));
 
-      d.roomNumber = roomNum;
+      d.roomNumber = roomNum ?? 'HOUSEKEEPING';
+      d.kind = isHousekeeping ? 'housekeeping' : 'suite';
       d.isPlayerSuite = isPlayer;
       d.resident = resident;
       d.unlocked = unlocked;
 
-      const subLabel = isPlayer
+      const subLabel = isHousekeeping
+        ? 'HOUSEKEEPING'
+        : isPlayer
         ? `${playerName.toUpperCase()} (YOU)`
         : resident
         ? resident.name.toUpperCase()
         : 'VACANT SUITE';
 
       const nextTex = createSignCanvasTexture(
-        `SUITE ${roomNum}`,
+        isHousekeeping ? 'STAFF ONLY' : `SUITE ${roomNum}`,
         subLabel,
         isPlayer ? '#0c2414' : resident ? '#101613' : '#181c1a',
-        unlocked ? '#39ff14' : '#64748b',
+        unlocked ? '#39ff14' : isHousekeeping ? '#f59e0b' : '#64748b',
         anisotropy
       );
       d.plaqueMat.map = nextTex;
@@ -883,7 +1061,7 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
       d.plaqueTex.dispose();
       d.plaqueTex = nextTex;
 
-      const ledHex = unlocked ? 0x39ff14 : resident || isPlayer ? 0xf59e0b : 0x64748b;
+      const ledHex = unlocked ? 0x39ff14 : isHousekeeping ? 0xf59e0b : resident || isPlayer ? 0xf59e0b : 0x64748b;
       d.ledMat.color.setHex(ledHex);
       d.ledMat.emissive.setHex(ledHex);
     });
@@ -910,8 +1088,13 @@ export function buildHotelHallway(maxAnisotropy: number): HotelHallwayHandles {
     const inElev = Math.abs(z) < 0.72 && x >= -12.35 && x <= -11.4;
     let inUnlockedDoor = false;
     for (const d of doors) {
-      const inThreshold = d.side === 'north' ? z <= -3.55 && z >= -4.8 : z >= 3.55 && z <= 4.8;
-      if (d.unlocked && Math.abs(x - d.x) < 0.55 && inThreshold) {
+      const inThreshold =
+        d.side === 'north'
+          ? z <= -3.55 && z >= -4.8
+          : d.side === 'south'
+          ? z >= 3.55 && z <= 4.8
+          : x >= 11.1 && x <= 12.45 && Math.abs(z - d.z) < 0.55;
+      if (d.unlocked && Math.abs(x - d.x) < (d.side === 'end' ? 1.3 : 0.55) && inThreshold) {
         inUnlockedDoor = true;
         break;
       }
