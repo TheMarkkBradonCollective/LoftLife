@@ -305,7 +305,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
                 />
               ) : (
                 <img
-                  src={preview.preview ?? ''}
+                  src={preview.preview ? assetUrl(preview.preview) : ''}
                   alt={`${labelFor(preview)} preview`}
                   className="h-full w-full object-contain"
                 />

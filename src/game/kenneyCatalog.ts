@@ -3,7 +3,14 @@ import {
   KENNEY_REPLACEMENTS,
   REPLACED_KENNEY_IDS,
 } from '../../shared/catalog/kenney-replacements.mjs';
+import { VEHICLE_LIBRARY } from '../../shared/catalog/vehicle-library.mjs';
 import type { FurnitureCatalogItem, FurnitureCategory } from './types';
+
+const VEHICLE_BY_ID = new Map(
+  (VEHICLE_LIBRARY.items as { id: string; group: string; groupLabel: string; trafficEligible: boolean }[]).map(
+    (item) => [item.id, item]
+  )
+);
 
 /**
  * Bridges the generated Kenney catalog into the game's typed catalog.
@@ -43,6 +50,9 @@ export const KENNEY_CATALOG: FurnitureCatalogItem[] = KENNEY_ITEMS.filter(
   seatApproach: entry.seatApproach,
   interactive: entry.interactive,
   asset: entry.asset,
+  vehicleGroup: VEHICLE_BY_ID.get(entry.id)?.group,
+  vehicleGroupLabel: VEHICLE_BY_ID.get(entry.id)?.groupLabel,
+  trafficEligible: VEHICLE_BY_ID.get(entry.id)?.trafficEligible,
 }));
 
 /**

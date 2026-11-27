@@ -27,7 +27,7 @@ License: **CC0 1.0 Universal (public domain)** — see
 | Existing catalog items given a Kenney visual | **49** |
 | Additive library rows in the shop/build catalog | **1,627** |
 | Total placeable catalog after integration | **1,971** (344 existing + 1,627 imported, with 49 existing items re-skinned) |
-| Static characters imported as props | **44** (18 Blocky, 26 Mini) |
+| Classified character/accessibility records | **51** (44 Blocky/Mini, 7 from other kits) |
 
 Every record is generated into [`shared/catalog/kenney-library.mjs`](../shared/catalog/kenney-library.mjs)
 by [`scripts/import-kenney-library.mjs`](../scripts/import-kenney-library.mjs). The generated header,
@@ -220,36 +220,82 @@ public/models/kenney/<kit>/Textures/*.png   → catalog/v1/models/kenney/<kit>/T
 shared/catalog/*-manifest.json              → catalog/v1/manifest/*-manifest.json
 ```
 
+### Exact upload commands
+
+Credentials are read from the environment only and are never committed:
+
 ```bash
-CATALOG_R2_BUCKET=loftlife-assets npm run assets:upload -- --dry-run
-CATALOG_R2_BUCKET=loftlife-assets CLOUDFLARE_API_TOKEN=... npm run assets:upload
+export CATALOG_R2_BUCKET="loftlife-assets"          # target bucket
+export CLOUDFLARE_API_TOKEN="..."                    # R2 write access
+export CLOUDFLARE_ACCOUNT_ID="..."                   # only if the token spans accounts
+
+npm run assets:upload -- --dry-run                   # list count + first keys, upload nothing
+npm run assets:upload                                # 3,036 objects: 1,676 GLB, 1,676 preview, textures, manifests
 ```
 
-Then set `VITE_ASSET_BASE_URL=https://<r2-public-host>/catalog/v1` for the built client. In
-development the variable is empty and the same paths are served from `public/`.
+The script refuses to run without `CATALOG_R2_BUCKET` and `CLOUDFLARE_API_TOKEN`, prints every
+failed key with its Wrangler error, and sets a non-zero exit status if any object fails. Re-running
+it is safe: keys are immutable and content-addressed by path. `-- --limit=50` uploads a prefix first
+for a smoke test.
 
-**Status:** the uploader is implemented and dry-run safe, but no R2 bucket or Cloudflare token is
-available in this environment, so **the upload was not executed**. Local assets are complete and the
-production build ships them from `dist/`. The blocker and exact commands are recorded in
-[`plan.md`](../plan.md).
+### Public access and CORS
+
+Enable public read access on the bucket (R2 → Settings → Public access: the `r2.dev` URL or a custom
+domain). Because the GLB and texture requests come from the app origin, add a CORS policy allowing
+`GET`/`HEAD`:
+
+```json
+[{"AllowedOrigins":["https://app.example.com"],"AllowedMethods":["GET","HEAD"],"AllowedHeaders":["*"],"MaxAgeSeconds":86400}]
+```
+
+### Production build
+
+```bash
+VITE_ASSET_BASE_URL="https://assets.example.com/catalog/v1" npm run build
+```
+
+`assetUrl()` (`src/game/assets/assetUrl.ts`) prefixes every relative catalog path with that base, and
+`vite.config.ts` switches `publicDir` off for that build: `public/models/` and
+`public/catalog-previews/` are **not** copied into `dist/`, so the build drops the ~112 MB of binary
+assets. The gallery page is still shipped, with its preview paths rewritten to the bucket. A build
+without the variable keeps the previous behaviour (assets inlined into `dist/`) and prints a warning,
+so an offline/local build still works. Development never uses the variable and is unchanged.
+
+The base is baked in at build time, so change it by rebuilding, not by editing `dist/`. If it is set
+to a non-absolute value the build fails fast with an explanatory error.
+
+**Status:** the uploader and the build split are implemented and verified locally (a build with
+`VITE_ASSET_BASE_URL` set produces no `dist/models` or `dist/catalog-previews`). No R2 bucket or
+Cloudflare token is available in this environment, so **the upload was not executed and the deployed
+origin has not been checked**. The blocker and exact commands are recorded in [`plan.md`](../plan.md).
 
 ---
 
 ## 8. Character and animation audit
 
-The imported character kits (`blocky-characters` ×18, `mini-characters` ×26) are **static props**
-with no skeleton, skinning, rig or animation clips. They are catalogued under **Characters**, can be
-placed as statues/figures, and are **not** used as player avatars. Accessibility props (wheelchairs,
-canes, crutches, glasses, masks) are included as environmental pieces.
+The imported character kits (`blocky-characters` ×18, `mini-characters` ×26, plus 7 character
+records from `mini-arcade`, `mini-market`, `mini-forest` and `mini-skate`) are **static props** with
+no skeleton, skinning, rig or animation clips. `shared/catalog/character-library.mjs` classifies all
+51 records into pedestrians (33), service staff (3), accessibility props (14) and one out-of-world
+fantasy archer. They can be placed in builds and used as the **distant** city-crowd LOD; they are never
+player avatars. Accessibility props (wheelchairs, canes, crutches, glasses, masks) are not randomly
+assigned to pedestrians.
 
-LoftLife's avatar system is untouched: `src/game/avatar.ts`, `src/components/AvatarModal.tsx`,
-`CharacterPreview`, the wardrobe/clothing catalog, emotes and the multiplayer animation state all
-continue to use the existing procedural rig. No imported model is compatible with that rig.
+**Toon Characters and Animated Characters are absent from the available collection.** The source
+`3d/` directory has no toon or animated character kit, so there were no animation clips to import.
+Nearby NPCs therefore use LoftLife's own rig (`createAvatarRig`) with generated `AvatarConfig`s, and
+share the 13-state animation vocabulary with players. LoftLife's avatar customization system is
+untouched: `src/game/avatar.ts`, the makeover service, mirror/salon, clothing shops, inventory,
+closet outfits and multiplayer animation state all continue to use the procedural rig. Every imported
+character record has `playerCompatible: false`.
+
+The city crowd itself is documented in [CHARACTERS-NPCS-VEHICLES.md](CHARACTERS-NPCS-VEHICLES.md):
+sidewalk loops, corner crossings, venue visits, reactions, LOD budgets and recycling.
 
 **Missing character/animation coverage to track:** rigged humanoid characters with a skeleton,
 shared animation clips (idle/walk/sit/dance/emotes), facial rigs, and clothing meshes authored for
-LoftLife's rig. Kenney's 3D collection does not provide these, so they remain a future custom or
-commissioned asset task rather than something this import can misrepresent.
+LoftLife's rig. Kenney's available 3D collection does not provide these, so they remain a future
+custom or commissioned asset task rather than something this import can misrepresent.
 
 ---
 
@@ -258,7 +304,8 @@ commissioned asset task rather than something this import can misrepresent.
 ```bash
 npm run lint                 # tsc --noEmit, clean
 npm run build                # production build, clean
-npm test                     # full API/realtime/catalog suite
+npm test                     # 208 API/realtime/catalog/crowd checks
+npm run check:people         # 120 s real-city crowd simulation
 npm run assets:check         # procedural + Kenney manifest validation
 npm run assets:gallery       # rebuild the visual gallery
 ```
@@ -306,7 +353,8 @@ Two save-path defects surfaced during that check and were fixed:
   art directions apart and the material-role mapping unifies colour, but a Kenney low-poly chair
   will never match a hand-modelled hero prop one-to-one. The procedural models that carry bespoke
   animation were intentionally kept.
-- **Static characters are not avatars** (see §8).
+- **Static characters are not avatars** (see §8). They are used as distant city-crowd LOD and as
+  placeable props; nearby NPCs use the animated LoftLife rig.
 - **No per-model LODs or Draco compression.** GLBs are already small (26.8 kB mean, 920 kB max);
   previews dominate storage. Meshopt/Draco can be added to the importer if payload grows.
 - **Texture recolouring is a tint, not a repaint.** City/food/nature colormaps keep their authored

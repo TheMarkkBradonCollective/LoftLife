@@ -12,6 +12,7 @@ import {
   worldToU,
 } from './cityLayout';
 import { createCityTraffic } from './cityTraffic';
+import { createCityCrowd, type CityCrowdHandles } from './cityCrowd';
 import { buildCityVenues } from './venueBuilder';
 import { CITY_VENUES, type VenueInteractionPoint } from './venues';
 import {
@@ -75,6 +76,8 @@ export interface MainWorldHandles {
   djDeckGroup: THREE.Group;
   seats: WorldSeatTarget[];
   npcs: WorldNpc[];
+  /** Sidewalk population with near-rig / distant-prop LOD. */
+  cityCrowd: CityCrowdHandles;
   /** Counters, racks and desks in the public destinations. */
   venueInteractions: VenueInteractionPoint[];
   /** Building shell boxes for every public destination (u/z space). */
@@ -470,7 +473,11 @@ function buildBusShelter(maxAnisotropy: number): THREE.Group {
   return g;
 }
 
-export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): MainWorldHandles {
+export function buildMainWorld(
+  maxAnisotropy: number,
+  isSoftwareGl: boolean,
+  crowdQuality: 'high' | 'medium' | 'low' = isSoftwareGl ? 'low' : 'high'
+): MainWorldHandles {
   const worldGroup = new THREE.Group();
   const obstacles: WorldObstacle[] = [];
   const seats: WorldSeatTarget[] = [];
@@ -2877,6 +2884,14 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
   // clothing store and cinema, each with a walkable interior.
   const cityVenues = buildCityVenues(maxAnisotropy);
   worldGroup.add(cityVenues.group);
+
+  // 10e. Sidewalk population: animated rigs near the player, static imported
+  // Kenney pedestrians in the middle distance, nothing far away.
+  const cityCrowd = createCityCrowd({ seats: cityVenues.seats, quality: crowdQuality });
+  worldGroup.add(cityCrowd.group);
+  if (import.meta.env.DEV) {
+    (window as unknown as { __loftlifeCrowd?: CityCrowdHandles }).__loftlifeCrowd = cityCrowd;
+  }
   for (const s of cityVenues.seats) {
     const anchor = new THREE.Group();
     anchor.position.set(s.x, 0.14, s.z);
@@ -2899,6 +2914,9 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
   // camera into the facade whenever a player stood at a door.
 
   worldGroup.add(traffic.trafficGroup);
+  if (import.meta.env.DEV) {
+    (window as unknown as { __loftlifeTraffic?: typeof traffic }).__loftlifeTraffic = traffic;
+  }
 
   let partyMode = true;
   function togglePartyMode() {
@@ -2966,6 +2984,7 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
 
     // 4. Cars, Buses, Metro Trains & Traffic Signal Phase
     const phase = traffic.updateTraffic(delta, playerX, playerZ, mood);
+    cityCrowd.update(elapsed, delta, playerX, playerZ);
     ewRedMat.emissiveIntensity = !phase.ewGreen && !phase.ewYellow ? 1.8 : 0.08;
     ewYellowMat.emissiveIntensity = phase.ewYellow ? 1.8 : 0.08;
     ewGreenMat.emissiveIntensity = phase.ewGreen ? 1.8 : 0.08;
@@ -3052,6 +3071,7 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     djDeckGroup,
     seats,
     npcs,
+    cityCrowd,
     venueInteractions: [...cityVenues.interactions, plazaAtm],
     venueFootprints: cityVenues.occluders,
     obstacles,

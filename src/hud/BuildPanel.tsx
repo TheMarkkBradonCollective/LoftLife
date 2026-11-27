@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { CATALOG_CATEGORIES, COLLECTIONS } from '../../shared/catalog/expansion.mjs';
 import { KENNEY_STYLE_GROUPS } from '../../shared/catalog/kenney-library.mjs';
+import { VEHICLE_LIBRARY } from '../../shared/catalog/vehicle-library.mjs';
 import { FLOOR_STYLES, FURNITURE_CATALOG, WALL_STYLES } from '../game/catalog';
 import { catalogPreviewUrl } from '../game/catalogExpansion';
 import { preloadKenneyAsset } from '../game/assets/kenneyRuntime';
@@ -111,6 +112,7 @@ export const BuildPanel: React.FC<BuildPanelProps> = ({ build, presentation, tou
   const [query, setQuery] = useState('');
   const [collection, setCollection] = useState('all');
   const [styleGroup, setStyleGroup] = useState('all');
+  const [vehicleGroup, setVehicleGroup] = useState('all');
   const [visibleCount, setVisibleCount] = useState(72);
 
   const filtered = useMemo(() => {
@@ -122,18 +124,19 @@ export const BuildPanel: React.FC<BuildPanelProps> = ({ build, presentation, tou
       if (styleGroup !== 'all' && styleGroup !== 'signature' && item.asset?.styleGroup !== styleGroup) {
         return false;
       }
+      if (vehicleGroup !== 'all' && item.vehicleGroup !== vehicleGroup) return false;
       if (!search) return true;
       return `${item.name} ${item.description ?? ''} ${(item.styleTags ?? []).join(' ')} ${(item.tags ?? []).join(' ')}`
         .toLowerCase()
         .includes(search);
     });
-  }, [build.categoryFilter, collection, query, styleGroup]);
+  }, [build.categoryFilter, collection, query, styleGroup, vehicleGroup]);
 
   // Filters reset the page window; a 2,000-item catalog must never mount every
   // preview image at once on a phone.
   React.useEffect(() => {
     setVisibleCount(72);
-  }, [build.categoryFilter, collection, query, styleGroup]);
+  }, [build.categoryFilter, collection, query, styleGroup, vehicleGroup]);
 
   const portraitPhone = presentation === 'mobile-portrait';
 
@@ -397,7 +400,44 @@ export const BuildPanel: React.FC<BuildPanelProps> = ({ build, presentation, tou
                     {build.itemCount} in suite
                   </span>
                 </div>
-
+                {build.categoryFilter === 'vehicles' && (
+                  <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                    <button
+                      type="button"
+                      aria-pressed={vehicleGroup === 'all'}
+                      onClick={() => setVehicleGroup('all')}
+                      className={cx(
+                        'll-focus shrink-0 rounded-full border px-2 py-1 text-[10px] font-semibold',
+                        vehicleGroup === 'all'
+                          ? 'border-white bg-white text-[#15181b]'
+                          : 'border-white/15 text-white/55 hover:border-white/30 hover:text-white'
+                      )}
+                    >
+                      All
+                    </button>
+                    {Object.entries(VEHICLE_LIBRARY.groupLabels as Record<string, string>)
+                      .filter(([id]) => ((VEHICLE_LIBRARY.counts as Record<string, number>)[id] ?? 0) > 0)
+                      .map(([id, label]) => (
+                        <button
+                          key={id}
+                          type="button"
+                          aria-pressed={vehicleGroup === id}
+                          onClick={() => setVehicleGroup(id)}
+                          className={cx(
+                            'll-focus shrink-0 rounded-full border px-2 py-1 text-[10px] font-semibold',
+                            vehicleGroup === id
+                              ? 'border-[#39ff14] bg-[#39ff14]/20 text-white'
+                              : 'border-white/15 text-white/55 hover:border-white/30 hover:text-white'
+                          )}
+                        >
+                          {label}
+                          <span className="ml-1 font-mono-tabular text-white/35">
+                            {(VEHICLE_LIBRARY.counts as Record<string, number>)[id]}
+                          </span>
+                        </button>
+                      ))}
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center gap-1.5">
                   <div className="flex min-w-[150px] flex-1 items-center gap-1.5 rounded-lg border border-white/12 bg-black/25 px-2 py-1">
                     <Search className="w-3 h-3 text-white/40" aria-hidden="true" />

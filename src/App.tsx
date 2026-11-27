@@ -578,16 +578,27 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   // Stream position/emote to the realtime gateway while online.
   useEffect(() => {
     if (session.status !== 'online' && session.status !== 'guest') return;
+    // Derive walk/run from the same pose stream the server already receives, so
+    // remote players animate the real gait without an extra network field.
+    let previous: { x: number; z: number; at: number } | null = null;
     const timer = window.setInterval(() => {
       const pose = playerPoseRef.current;
       if (!pose.known) return;
+      const at = performance.now();
+      let locomotion: EmoteType = activeEmote;
+      if (previous) {
+        const seconds = Math.max(0.001, (at - previous.at) / 1000);
+        const speed = Math.hypot(pose.x - previous.x, pose.z - previous.z) / seconds;
+        if (speed > 0.4) locomotion = speed > 6 ? 'run' : 'walk';
+      }
+      previous = { x: pose.x, z: pose.z, at };
       session.setPose({
         x: pose.x,
         y: 0,
         z: pose.z,
         yaw: pose.yaw,
         location,
-        emote: activeEmote,
+        emote: locomotion,
       });
       session.setVoiceAnchor({ x: pose.x, z: pose.z, location });
     }, 100);
