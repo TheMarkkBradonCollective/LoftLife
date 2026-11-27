@@ -253,10 +253,40 @@ function leaveInstance(player) {
   instance.members.delete(player.connId);
   broadcast(instance, { t: 'leave', connId: player.connId, userId: player.userId }, player.connId);
   if (instance.members.size === 0 && instance.kind === 'world') {
+    // Build Mode starts as soon as the last visitor leaves a queued world.
+    if (instance.worldId) {
+      const world = db.prepare('SELECT status FROM worlds WHERE id = ?').get(instance.worldId);
+      if (world?.status === 'build_pending') {
+        db.prepare("UPDATE worlds SET status='build_mode', published=0, updated_at=? WHERE id=?").run(
+          now(),
+          instance.worldId
+        );
+        broadcast(instance, { t: 'world_status', status: 'build_mode' });
+      }
+    }
     // World instances are cheap to keep; city instances stay numbered so
     // friends can rejoin the same shard.
     instances.delete(instance.id);
   }
+}
+
+/* -------------------------- world building presence ---------------------- */
+
+export function worldPlayerCount(worldId) {
+  const instance = instances.get(`world:${worldId}`);
+  return instance ? uniquePlayers(instance).length : 0;
+}
+
+export function worldHasPlayer(worldId, userId) {
+  const instance = instances.get(`world:${worldId}`);
+  return Boolean(instance && uniquePlayers(instance).some((player) => player.userId === userId));
+}
+
+/** Tell everyone editing a world that another builder changed its layout. */
+export function broadcastWorldEdit(worldId, payload) {
+  const instance = instances.get(`world:${worldId}`);
+  if (!instance) return;
+  broadcast(instance, { t: 'world_edit', ...payload });
 }
 
 function profileFor(userId) {

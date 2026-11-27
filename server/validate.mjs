@@ -109,6 +109,8 @@ export const WORLD_KINDS = [
   'venue',
   'neighborhood',
 ];
+export const WORLD_ROLES = ['co_owner', 'moderator', 'builder', 'member'];
+export const WORLD_STATUSES = ['live', 'available', 'offline', 'build_mode', 'build_pending', 'maintenance'];
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 const GRID_SIZE = 14;

@@ -44,8 +44,10 @@ local development and automated parity tests.
 | `ledger` | append-only history | unique partial index on `idempotency_key` |
 | `inventory` | furniture/clothing ownership | unique `(user, kind, catalog_id)`, `qty >= 0` |
 | `suites` | the player's hotel room | one per owner |
-| `worlds` | player-created spaces | `access` enum, `published`, `max_visitors` |
-| `world_collaborators` / `world_invites` | build rights / entry grants | composite PKs |
+| `worlds` | player-created spaces | `access` enum, `published`, `max_visitors`, `status`, `foundation`, layout JSON and revisions |
+| `world_collaborators` / `world_invites` | build rights / entry grants | composite PKs; roles owner/co-owner/builder/member |
+| `world_plots` | build areas and construction approvals | rectangular, non-overlapping, one assigned builder |
+| `world_snapshots` | structural change history | unique `(world_id, revision)`, capped at 40 per world |
 | `friendships` | canonical `a < b` pair | `status` pending/accepted |
 | `blocks` | directed block list | composite PK |
 | `chat_messages` | persisted city/world/DM text | indexed by `(scope, scope_id, created_at)` |

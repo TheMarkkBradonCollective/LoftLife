@@ -1,7 +1,14 @@
 import { invitationsAllowedWith } from './platform';
+import {
+  DEFAULT_FOUNDATION_ID,
+  FOUNDATIONS,
+  FOUNDATION_IDS,
+  emptyLayout,
+} from '../../shared/world-layout.mjs';
+import { createWorldLayoutOnEdge, handleWorldBuildRoute } from './worldBuild';
 
 type Sql = { query(query: string, params?: unknown[]): Promise<unknown[]> };
-type User = { id: string; handle: string };
+type User = { id: string; handle: string; role?: string };
 type World = Record<string, unknown>;
 type RealtimeBinding = { idFromName(name: string): unknown; get(id: unknown): { fetch(request: Request): Promise<Response> } };
 type WorldRole = 'co_owner' | 'moderator' | 'builder' | 'member';
@@ -34,32 +41,41 @@ export async function permission(sql: Sql, world: World, user: User | null) {
     }
   }
   const status = String(world.status ?? 'offline');
+  const staff = user?.role === 'admin' || user?.role === 'staff';
+  const official = Boolean(world.is_official);
+  // The official Main City is staff-only. Staff develop it but get no
+  // build rights in player-owned worlds.
+  if (official && !staff) {
+    return { canEnter: false, canEdit: false, canBuild: false, canManageStatus: false, canViewStudio: false, role: null };
+  }
   if (user && world.owner_id !== user.id) {
     const blocked = await sql.query('SELECT 1 FROM ll_blocks WHERE user_id=$1 AND blocked_id=$2 LIMIT 1', [world.owner_id, user.id]);
-    if (blocked.length) return { canEnter: false, canEdit: false, canBuild: false, canManageStatus: false, role };
+    if (blocked.length) return { canEnter: false, canEdit: false, canBuild: false, canManageStatus: false, canViewStudio: false, role };
   }
   const canBuild = role === 'owner' || role === 'co_owner' || role === 'builder';
   const canManageStatus = role === 'owner' || role === 'co_owner';
-  if (status === 'maintenance') return { canEnter: false, canEdit: false, canBuild, canManageStatus, role };
+  const canViewStudio = canBuild || (official && staff) || false;
+  if (status === 'maintenance') return { canEnter: false, canEdit: false, canBuild, canManageStatus, canViewStudio, role };
   if (status === 'build_mode') {
-    return { canEnter: canBuild, canEdit: canBuild, canBuild, canManageStatus, role };
+    return { canEnter: canBuild, canEdit: canBuild, canBuild, canManageStatus, canViewStudio, role };
   }
   if (status === 'offline') {
-    return { canEnter: canManageStatus, canEdit: false, canBuild, canManageStatus, role };
+    return { canEnter: canManageStatus || official && staff, canEdit: false, canBuild, canManageStatus, canViewStudio, role };
   }
   if (status === 'build_pending') {
-    return { canEnter: false, canEdit: false, canBuild, canManageStatus, role };
+    return { canEnter: false, canEdit: false, canBuild, canManageStatus, canViewStudio, role };
   }
-  if (role === 'owner') return { canEnter: true, canEdit: false, canBuild, canManageStatus, role };
+  if (role === 'owner') return { canEnter: true, canEdit: false, canBuild, canManageStatus, canViewStudio, role };
+  if (official && staff) return { canEnter: true, canEdit: false, canBuild: false, canManageStatus: false, canViewStudio: true, role };
   if (status === 'live') {
-    return { canEnter: true, canEdit: false, canBuild, canManageStatus, role };
+    return { canEnter: true, canEdit: false, canBuild, canManageStatus, canViewStudio, role };
   }
-  if (!user) return { canEnter: false, canEdit: false, canBuild, canManageStatus, role };
+  if (!user) return { canEnter: false, canEdit: false, canBuild, canManageStatus, canViewStudio, role };
   if (world.owner_id === user.id || role) {
-    return { canEnter: true, canEdit: false, canBuild, canManageStatus, role };
+    return { canEnter: true, canEdit: false, canBuild, canManageStatus, canViewStudio, role };
   }
   const blocked = await sql.query('SELECT 1 FROM ll_blocks WHERE user_id=$1 AND blocked_id=$2 LIMIT 1', [world.owner_id, user.id]);
-  if (blocked.length) return { canEnter: false, canEdit: false, canBuild, canManageStatus, role };
+  if (blocked.length) return { canEnter: false, canEdit: false, canBuild, canManageStatus, canViewStudio, role };
   let canEnter = world.access === 'public';
   if (world.access === 'friends') {
     const rows = await sql.query("SELECT 1 FROM ll_friendships WHERE status='accepted' AND ((a=$1 AND b=$2) OR (a=$2 AND b=$1)) LIMIT 1", [world.owner_id, user.id]);
@@ -74,7 +90,7 @@ export async function permission(sql: Sql, world: World, user: User | null) {
     ]);
     canEnter = invites.length > 0 || collaborators.length > 0;
   }
-  return { canEnter, canEdit: false, canBuild, canManageStatus, role };
+  return { canEnter, canEdit: false, canBuild, canManageStatus, canViewStudio, role };
 }
 async function view(sql: Sql, world: World, user: User | null, state = false) {
   const [owners, access] = await Promise.all([
@@ -86,8 +102,10 @@ async function view(sql: Sql, world: World, user: User | null, state = false) {
     access: world.access, status: String(world.status ?? 'offline'), published: String(world.status ?? 'offline') === 'live', ownerId: world.owner_id,
     ownerHandle: owners[0]?.handle ?? 'unknown', maxVisitors: Number(world.max_visitors),
     updatedAt: Number(world.updated_at), createdAt: Number(world.created_at),
+    foundation: world.foundation ?? DEFAULT_FOUNDATION_ID, isOfficial: Boolean(world.is_official),
+    layoutVersion: Number(world.layout_version ?? 0), publishedVersion: Number(world.published_version ?? 0),
     role: access.role, canEdit: access.canEdit, canBuild: access.canBuild,
-    canManageStatus: access.canManageStatus, canEnter: access.canEnter,
+    canManageStatus: access.canManageStatus, canEnter: access.canEnter, canViewStudio: access.canViewStudio,
   };
   if (state && access.canEnter) {
     result.items = parse(world.items_json, []);
@@ -129,22 +147,33 @@ function sanitizeState(body: Record<string, unknown>) {
 export async function handleWorldRoute(request: Request, sql: Sql, user: User | null, realtime?: RealtimeBinding): Promise<Response | null> {
   const url = new URL(request.url);
   const path = url.pathname;
+  // City-building endpoints and the staff-only official workspace share the
+  // same validation engine but live in their own module.
+  const buildResponse = await handleWorldBuildRoute(request, sql, user);
+  if (buildResponse) return buildResponse;
+  if (path === '/api/worlds/foundations' && request.method === 'GET') {
+    return json({ default: DEFAULT_FOUNDATION_ID, foundations: FOUNDATIONS });
+  }
   if (path === '/api/worlds' && request.method === 'POST') {
     if (!user) return fail('Sign in to create a world.',401,'unauthorized');
     const body = await request.json().catch(()=>({})) as World;
     const name = typeof body.name==='string' ? body.name.trim().slice(0,48) : '';
     const kind = String(body.kind ?? 'hangout');
     const access = String(body.access ?? 'private');
-    if (name.length<2 || !KINDS.includes(kind) || !ACCESS.includes(access)) return fail('Invalid world name, kind, or access.',400,'invalid_input');
+    const foundation = String(body.foundation ?? DEFAULT_FOUNDATION_ID);
+    if (name.length<2 || !KINDS.includes(kind) || !ACCESS.includes(access) || !FOUNDATION_IDS.includes(foundation)) return fail('Invalid world name, kind, access, or foundation.',400,'invalid_input');
     const count = await sql.query('SELECT COUNT(*) AS total FROM ll_worlds WHERE owner_id=$1',[user.id]) as Array<{total:string|number}>;
     if (Number(count[0]?.total ?? 0)>=20) return fail('Each account may own at most 20 worlds.',400,'world_limit');
     const id = `wld_${crypto.randomUUID()}`;
     const at = Date.now();
+    const layout = emptyLayout(foundation);
     const created = await sql.query(
-      "INSERT INTO ll_worlds (id,owner_id,name,kind,description,access,published,status,items_json,surfaces_json,mood,max_visitors,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,FALSE,'offline','[]',$7,'morning',30,$8,$8) RETURNING *",
-      [id,user.id,name,kind,typeof body.description==='string'?body.description.slice(0,280):'',access,JSON.stringify({floor:'oak_parquet',wall:'warm_chalk'}),at]
+      "INSERT INTO ll_worlds (id,owner_id,name,kind,description,access,published,status,items_json,surfaces_json,mood,max_visitors,foundation,layout_json,settings_json,layout_version,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,FALSE,'offline','[]',$7,'morning',30,$8,$9,$10,0,$11,$11) RETURNING *",
+      [id,user.id,name,kind,typeof body.description==='string'?body.description.slice(0,280):'',access,JSON.stringify({floor:'oak_parquet',wall:'warm_chalk'}),foundation,JSON.stringify(layout),JSON.stringify(layout.settings),at]
     ) as World[];
-    return json(await view(sql,created[0],user,true),201);
+    await createWorldLayoutOnEdge(sql,id,foundation,user.id);
+    const fresh = await sql.query('SELECT * FROM ll_worlds WHERE id=$1 LIMIT 1',[id]) as World[];
+    return json(await view(sql,fresh[0],user,true),201);
   }
   if (path === '/api/worlds' && request.method === 'GET') {
     const mine = url.searchParams.get('mine') === '1';

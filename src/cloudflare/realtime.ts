@@ -147,6 +147,10 @@ export class LoftLifeRealtime {
         if (status === 'live' && !active.some(player => player.userId === body.userId)) {
           return Response.json({error:'Enter your city before making it Live',code:'must_be_present'},{status:409});
         }
+        // Nobody can shut down a live world while players remain inside.
+        if (String(world.status) === 'live' && status !== 'live' && active.length > 0) {
+          return Response.json({error:'Nobody can shut down a live world while players are still inside',code:'players_present'},{status:409});
+        }
         await this.database().query('UPDATE ll_worlds SET status=$1,published=$2,updated_at=$3 WHERE id=$4',[status,status==='live',Date.now(),worldId]);
         this.broadcast(instanceId,{t:'world_status',status});
         return Response.json({status,activeCount:active.length});
