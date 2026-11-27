@@ -15,12 +15,15 @@ import {
   isHousekeepingFloor,
   roomRangeLabel,
 } from '../../shared/hotel-layout.mjs';
+import { CITY_VENUES, venueWorldX } from '../game/venues';
 
 interface CityMapModalProps {
   open: boolean;
   currentStreet: string;
   location: WorldLocation;
   playerPoseRef: React.MutableRefObject<{ x: number; z: number; yaw: number }>;
+  /** Walk to a public destination's entrance. */
+  onTravel?: (target: { x: number; z: number; label: string; yaw: number }) => void;
   onClose: () => void;
 }
 
@@ -64,6 +67,7 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
   currentStreet,
   location,
   playerPoseRef,
+  onTravel,
   onClose,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -330,6 +334,24 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
         ctx.fillStyle = color;
         ctx.fillText(label, labelX, y + 3);
       };
+      // Public destinations: accent squares with short labels.
+      for (const venue of CITY_VENUES) {
+        const cu = (venue.u0 + venue.u1) / 2;
+        const cz = (venue.z0 + venue.z1) / 2;
+        const [vx, vy] = toPx(venueWorldX(cu, cz), cz);
+        ctx.fillStyle = '#e6f5ea';
+        ctx.strokeStyle = '#39ff14';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.rect(vx - 3.5, vy - 3.5, 7, 7);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#d6e8dc';
+        ctx.font = '600 9px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(venue.sign, vx + 7, vy + 3);
+      }
+
 
       drawLandmark(CITY_LAYOUT.loftCenter, '#39ff14', 'GRAND HOTEL', 'H');
       drawLandmark(CITY_LAYOUT.airportCenter, '#38bdf8', 'INTERNATIONAL AIRPORT', 'A');
@@ -515,6 +537,36 @@ export const CityMapModal: React.FC<CityMapModalProps> = ({
               </div>
             </section>
           </aside>
+        </div>
+
+        <div className="px-4 pb-4 bg-[#080c0a]">
+          <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500 mb-2">
+            Public destinations
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {CITY_VENUES.map((venue) => (
+              <button
+                key={venue.id}
+                type="button"
+                disabled={!onTravel}
+                onClick={() =>
+                  onTravel?.({
+                    x: venue.arrivalPos.x,
+                    z: venue.arrivalPos.z,
+                    label: venue.name,
+                    yaw: Math.atan2(
+                      venueWorldX((venue.u0 + venue.u1) / 2, (venue.z0 + venue.z1) / 2) - venue.arrivalPos.x,
+                      (venue.z0 + venue.z1) / 2 - venue.arrivalPos.z
+                    ),
+                  })
+                }
+                className="text-left rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2 hover:border-[#39ff14]/50 hover:bg-white/[0.06] disabled:opacity-50 transition-colors"
+              >
+                <div className="text-[11px] font-semibold text-slate-100 truncate">{venue.name}</div>
+                <div className="text-[10px] text-slate-500 truncate">{venue.district}</div>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>

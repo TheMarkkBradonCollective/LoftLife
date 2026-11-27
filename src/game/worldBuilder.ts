@@ -10,6 +10,8 @@ import {
   worldToU,
 } from './cityLayout';
 import { createCityTraffic } from './cityTraffic';
+import { buildCityVenues } from './venueBuilder';
+import { CITY_VENUES, type VenueInteractionPoint } from './venues';
 import {
   createAsphaltTexture,
   createBuildingFacadeTextures,
@@ -71,6 +73,10 @@ export interface MainWorldHandles {
   djDeckGroup: THREE.Group;
   seats: WorldSeatTarget[];
   npcs: WorldNpc[];
+  /** Counters, racks and desks in the public destinations. */
+  venueInteractions: VenueInteractionPoint[];
+  /** Building shell boxes for every public destination (u/z space). */
+  venueFootprints: ReturnType<typeof buildCityVenues>['occluders'];
   obstacles: WorldObstacle[];
   cameraOccluders: CityCameraBox[];
   updateWorld: (
@@ -729,6 +735,13 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
       blk.kind === 'airport' ||
       blk.kind === 'clothing_store'
     ) {
+      pushSlantedPrism(sidewalkAcc, blk.uMin + 0.4, blk.uMax - 0.4, blk.zMin + 0.4, blk.zMax - 0.4, 0.14, 0.17, 6, 6, true);
+      continue;
+    }
+
+    if (blk.kind === 'venue') {
+      // The public destinations build their own storefronts, interiors and
+      // landscaping in venueBuilder; only the block sidewalk is shared.
       pushSlantedPrism(sidewalkAcc, blk.uMin + 0.4, blk.uMax - 0.4, blk.zMin + 0.4, blk.zMax - 0.4, 0.14, 0.17, 6, 6, true);
       continue;
     }
@@ -2175,6 +2188,31 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
 
   // 12. Real-time Cars, Buses & Elevated Metro Trains
   const traffic = createCityTraffic(maxAnisotropy);
+  // 10d. Public destinations: library, Med Deck, community centre, café, market,
+  // clothing store and cinema, each with a walkable interior.
+  const cityVenues = buildCityVenues(maxAnisotropy);
+  worldGroup.add(cityVenues.group);
+  for (const s of cityVenues.seats) {
+    const anchor = new THREE.Group();
+    anchor.position.set(s.x, 0.14, s.z);
+    worldGroup.add(anchor);
+    seats.push({
+      id: s.id,
+      label: s.label,
+      mesh: anchor,
+      seatPos: { x: s.x, y: 0.14, z: s.z },
+      approachPos: {
+        x: s.x + Math.sin(s.facingYaw) * 0.75,
+        z: s.z + Math.cos(s.facingYaw) * 0.75,
+      },
+      facingYaw: s.facingYaw,
+    });
+  }
+  obstacles.push(...cityVenues.obstacles.map((o) => ({ ...o })));
+  // Venue shells are intentionally not camera occluders: the front wall is a
+  // cutaway, and treating the whole block as an occluder snapped the chase
+  // camera into the facade whenever a player stood at a door.
+
   worldGroup.add(traffic.trafficGroup);
 
   let partyMode = true;
@@ -2205,6 +2243,10 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     mood: LightingMood
   ) {
     skyDome.setMood(mood);
+
+    // Public destinations open their roof and ceiling while you are inside so
+    // the chase camera can see the interior instead of a solid lid.
+    cityVenues.update(playerX, playerZ);
 
     // 1. Fountain water droplets
     droplets.forEach((drop, idx) => {
@@ -2315,6 +2357,8 @@ export function buildMainWorld(maxAnisotropy: number, isSoftwareGl: boolean): Ma
     djDeckGroup,
     seats,
     npcs,
+    venueInteractions: cityVenues.interactions,
+    venueFootprints: cityVenues.occluders,
     obstacles,
     cameraOccluders,
     updateWorld,
@@ -2481,6 +2525,29 @@ export function isMainWorldPosWalkable(
         return false;
       }
     }
+  }
+
+  // Public destinations: you may walk the interior floor and through the
+  // storefront doorway, but the rest of the shell is solid.
+  for (const blk of blocks) {
+    if (blk.kind !== 'venue') continue;
+    const venue = CITY_VENUES.find((v) => v.id === blk.venueId);
+    if (!venue) continue;
+    const inShell = u > venue.u0 - radius && u < venue.u1 + radius && z > venue.z0 - radius && z < venue.z1 + radius;
+    if (!inShell) continue;
+    const inInterior =
+      u > venue.iu0 + radius && u < venue.iu1 - radius && z > venue.iz0 + radius && z < venue.iz1 - radius;
+    if (inInterior) continue;
+    const halfDoor = Math.max(0.6, venue.doorWidth / 2 - radius);
+    const nearDoorU = Math.abs(u - venue.doorU) < halfDoor;
+    const nearDoorZ = Math.abs(z - venue.doorZ) < halfDoor;
+    const inDoorway =
+      (venue.doorSide === 'north' && nearDoorU && z >= venue.z0 - 1.4 && z <= venue.iz0 + 0.7) ||
+      (venue.doorSide === 'south' && nearDoorU && z <= venue.z1 + 1.4 && z >= venue.iz1 - 0.7) ||
+      (venue.doorSide === 'west' && nearDoorZ && u >= venue.u0 - 1.4 && u <= venue.iu0 + 0.7) ||
+      (venue.doorSide === 'east' && nearDoorZ && u <= venue.u1 + 1.4 && u >= venue.iu1 - 0.7);
+    if (inDoorway) continue;
+    return false;
   }
 
   // Check building footprints (leaving 2.6m walkable sidewalk around every uneven block)

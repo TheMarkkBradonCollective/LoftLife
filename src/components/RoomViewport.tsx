@@ -168,6 +168,10 @@ interface RoomViewportProps {
   onOpenDoorTerminal: () => void;
   onOpenAirportDeparture: () => void;
   onOpenClothingStore: () => void;
+  /** Market Hall furniture counter. */
+  onOpenFurnitureShop?: () => void;
+  /** One-shot request to walk to a public destination's entrance. */
+  travelRequest?: { x: number; z: number; label: string; yaw?: number; at: number } | null;
   onEnterGuestRoom: () => void;
   onOpenCloset: () => void;
   onOpenBathroomMirror: () => void;
@@ -282,6 +286,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   onOpenDoorTerminal,
   onOpenAirportDeparture,
   onOpenClothingStore,
+  onOpenFurnitureShop,
+  travelRequest,
   onEnterGuestRoom,
   onOpenCloset,
   onOpenBathroomMirror,
@@ -363,6 +369,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onOpenDoorTerminal,
     onOpenAirportDeparture,
     onOpenClothingStore,
+    onOpenFurnitureShop,
+    travelRequest,
     onEnterGuestRoom,
     onOpenCloset,
     onOpenBathroomMirror,
@@ -420,6 +428,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onOpenDoorTerminal,
     onOpenAirportDeparture,
     onOpenClothingStore,
+    onOpenFurnitureShop,
+    travelRequest,
     onEnterGuestRoom,
     onOpenCloset,
     onOpenBathroomMirror,
@@ -749,6 +759,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     scene.add(rippleMesh);
     let rippleLife = 0;
 
+    let lastTravelAt = 0;
     const handles = {
       scene,
       camera,
@@ -1388,6 +1399,29 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       }
 
       // 4. Outdoor Main City ('world')
+      // 4. Outdoor Main City ('world')
+      for (const spot of mainWorld.venueInteractions) {
+        if (Math.hypot(av.x - spot.x, av.z - spot.z) < spot.radius) {
+          if (spot.kind === 'shop_furniture') {
+            return {
+              label: actionLabel(spot.label),
+              execute: () => {
+                releaseCursorForModal();
+                sfx.playClick();
+                propsRef.current.onOpenFurnitureShop?.();
+              },
+            };
+          }
+          return {
+            label: actionLabel(spot.label),
+            execute: () => {
+              sfx.playClick();
+              propsRef.current.onWalkHint?.(spot.hint ?? spot.label);
+            },
+          };
+        }
+      }
+
       if (Math.hypot(av.x - CITY_LAYOUT.clothingStoreDoorPos.x, av.z - CITY_LAYOUT.clothingStoreDoorPos.z) < 2.4) {
         return { label: actionLabel('Enter LoftLife Threads'), execute: () => { sfx.playToggle(true); propsRef.current.onChangeLocation('clothing_store'); } };
       }
@@ -2893,6 +2927,27 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             }
           }
         }
+      }
+
+      // City directory: place the avatar at a chosen public destination.
+      const travel = propsRef.current.travelRequest;
+      if (travel && travel.at !== lastTravelAt) {
+        lastTravelAt = travel.at;
+        if (currentLoc !== 'world') {
+          propsRef.current.onChangeLocation('world');
+        }
+        av.x = travel.x;
+        av.z = travel.z;
+        if (typeof travel.yaw === 'number') {
+          av.yaw = travel.yaw;
+          // Put the chase camera behind the avatar on the street side.
+          handles.playCam.yaw = travel.yaw + Math.PI;
+          handles.playCam.lastManualLookTime = 0;
+        }
+        av.path = [];
+        av.pendingPortal = null;
+        av.portalCooldown = 1.4;
+        propsRef.current.onWalkHint?.(`Arrived at ${travel.label}`);
       }
 
       // Share player coords for live City Map & Street HUD

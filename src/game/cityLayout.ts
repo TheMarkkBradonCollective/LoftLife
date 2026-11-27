@@ -1,4 +1,14 @@
 export const DIAGONAL_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''); // 26: A St .. Z St
+
+/** block coordinate -> destination id for the downtown civic district. */
+const VENUE_BLOCKS: Record<string, string> = {
+  '11,13': 'community_center',
+  '12,13': 'cafe',
+  '11,15': 'library',
+  '12,15': 'market',
+  '14,15': 'med_deck',
+  '13,14': 'cinema',
+};
 export const HORIZONTAL_COUNT = 30; // 1st St .. 30th St
 export const CITY_SLOPE = 0.42; // Diagonal slant dx/dz for A-Z streets
 
@@ -9,7 +19,16 @@ export interface CityBlock {
   uMax: number;
   zMin: number;
   zMax: number;
-  kind: 'loft_plaza' | 'loft_hotel' | 'airport' | 'clothing_store' | 'park' | 'building';
+  kind:
+    | 'loft_plaza'
+    | 'loft_hotel'
+    | 'airport'
+    | 'clothing_store'
+    | 'park'
+    | 'building'
+    | 'venue';
+  /** Public destination that owns this block (see src/game/venues.ts). */
+  venueId?: string;
   height: number;
   /** Secondary upper setback height (0 if single volume) */
   setbackHeight: number;
@@ -137,8 +156,15 @@ export function buildCityLayout(): CityLayout {
       const zMax = zLines[row + 1] - zHalfWidths[row + 1];
 
       let kind: CityBlock['kind'] = 'building';
+      let venueId: string | undefined;
+      // Downtown civic district, arranged around the plaza so every public
+      // destination is reachable on foot from LoftLife Plaza.
+      const venue = VENUE_BLOCKS[`${col},${row}`];
       // Central LoftLife Grand Hotel & Plaza between M St (12)->N St (13) and 15th St (14)->16th St (15)
-      if (col === 12 && row === 14) {
+      if (venue) {
+        kind = 'venue';
+        venueId = venue;
+      } else if (col === 12 && row === 14) {
         kind = 'loft_plaza';
       } else if (col === 22 && row === 27) {
         kind = 'loft_hotel';
@@ -192,6 +218,7 @@ export function buildCityLayout(): CityLayout {
         zMin,
         zMax,
         kind,
+        venueId,
         height,
         setbackHeight,
         facadeStyle: Math.floor(seededRand(col * 29 + row * 43) * 6),

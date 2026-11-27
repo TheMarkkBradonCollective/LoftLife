@@ -249,6 +249,15 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [elevatorModalOpen, setElevatorModalOpen] = useState(false);
   const [airportDepartureOpen, setAirportDepartureOpen] = useState(false);
   const [clothingStoreOpen, setClothingStoreOpen] = useState(false);
+  const [furnitureShopOpen, setFurnitureShopOpen] = useState(false);
+  // City directory: one-shot walk-in request handed to the viewport.
+  const [travelRequest, setTravelRequest] = useState<{
+    x: number;
+    z: number;
+    label: string;
+    yaw: number;
+    at: number;
+  } | null>(null);
   const [avatarStudioMode, setAvatarStudioMode] = useState<'hair' | 'closet'>('hair');
 
   // Runtime environment decides controls and gameplay access. Width is never
@@ -1379,6 +1388,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     elevatorModalOpen ||
     airportDepartureOpen ||
     clothingStoreOpen ||
+    furnitureShopOpen ||
     roomSettingsOpen ||
     authOpen ||
     menuOpen ||
@@ -1651,6 +1661,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onOpenDoorTerminal={() => setDoorTerminalOpen(true)}
         onOpenAirportDeparture={() => setAirportDepartureOpen(true)}
         onOpenClothingStore={() => setClothingStoreOpen(true)}
+        onOpenFurnitureShop={() => setFurnitureShopOpen(true)}
+        travelRequest={travelRequest}
         onEnterGuestRoom={handleEnterGuestRoom}
         onOpenCloset={() => { setAvatarStudioMode('closet'); setAvatarModalOpen(true); }}
         onOpenBathroomMirror={() => { setAvatarStudioMode('hair'); setAvatarModalOpen(true); }}
@@ -1910,6 +1922,10 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         currentStreet={cityStreet}
         location={location}
         playerPoseRef={playerPoseRef}
+        onTravel={(target) => {
+          setTravelRequest({ ...target, at: Date.now() });
+          setCityMapOpen(false);
+        }}
         onClose={() => setCityMapOpen(false)}
       />
 
@@ -1979,6 +1995,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         else if (session.status === 'online') session.exitCity();
       }} />
       <ShopModal open={clothingStoreOpen} onClose={() => setClothingStoreOpen(false)} initialTab="clothing" readOnly={session.status === 'guest'} />
+      <ShopModal open={furnitureShopOpen} onClose={() => setFurnitureShopOpen(false)} initialTab="furniture" readOnly={session.status === 'guest'} />
 
       {/* Hotel Brass Elevator Floor Selector */}
       <ElevatorPanelModal
