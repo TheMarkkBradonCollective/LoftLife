@@ -1,6 +1,8 @@
 # LoftLife Discord Community Integration
 
-_Status: Product plan / not yet connected to a live Discord server_
+_Status: Official Discord server created; integration is not yet connected._
+
+**Community invite:** https://discord.gg/X4nADtJxK
 
 ## Goal
 
