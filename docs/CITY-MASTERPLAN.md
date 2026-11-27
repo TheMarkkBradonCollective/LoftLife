@@ -190,7 +190,7 @@ Run on the final geometry:
 | Master plan | `npm run check:city` | **Pass** — 11 destinations, 13 districts, 725 blocks |
 | Types | `npm run lint` | **Pass** (exit 0) |
 | Production build | `npm run build` | **Pass** (only the pre-existing chunk-size warning) |
-| Server + multiplayer suite | `npm test` | **Pass** — 155/155 |
+| Server + multiplayer suite | `npm test` | **Pass** — 170/170 |
 
 The master-plan gate asserts, among other things:
 

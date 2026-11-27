@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Backpack,
   BadgeCheck,
+  Building2,
   Crown,
   DoorOpen,
   Eye,
@@ -120,6 +121,7 @@ export interface GameMenuProps {
   onOpenRoomSettings: () => void;
   onOpenAvatar: () => void;
   onOpenShop: () => void;
+  onOpenBank: () => void;
   onOpenWorlds: () => void;
   onOpenAuth: () => void;
   onOpenControls: () => void;
@@ -580,6 +582,8 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                         <div className="flex flex-wrap items-center gap-2">
                           <HudBadge tone="dark">元 {session.wallet.yuanzi}</HudBadge>
                           <HudBadge>宝 {session.wallet.tongbao}</HudBadge>
+                          <HudBadge tone="dark">₡ {session.wallet.cubits}</HudBadge>
+                          <HudBadge>Cash ₡ {session.wallet.cash}</HudBadge>
                           <HudButton
                             theme="light"
                             variant="quiet"
@@ -593,6 +597,13 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                             disabled={!online}
                           >
                             Daily reward
+                          </HudButton>
+                          <HudButton
+                            theme="light"
+                            icon={<Building2 className="w-4 h-4" />}
+                            onClick={() => closeThen(props.onOpenBank)}
+                          >
+                            TG-Banking
                           </HudButton>
                           <HudButton
                             theme="light"

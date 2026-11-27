@@ -12,6 +12,7 @@ import { HOTEL_FLOOR_COUNT, roomRangeLabel } from '../shared/hotel-layout.mjs';
 import { RoomSettingsModal } from './components/RoomSettingsModal';
 import { SyncConflictModal } from './components/SyncConflictModal';
 import { ShopModal } from './components/ShopModal';
+import { BankModal } from './components/BankModal';
 import { WorldsModal } from './components/WorldsModal';
 import { WorldStudio } from './components/WorldStudio';
 import { GameInterface } from './hud/GameInterface';
@@ -332,6 +333,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [worldMenuTab, setWorldMenuTab] = useState<'map' | 'world' | 'manage' | 'controls'>('map');
   const [socialIntent, setSocialIntent] = useState<SocialIntent>('chat');
   const [shopOpen, setShopOpen] = useState(false);
+  const [bankOpen, setBankOpen] = useState(false);
+  const [bankAtm, setBankAtm] = useState<string | undefined>(undefined);
   const [worldsOpen, setWorldsOpen] = useState(false);
   const [studioWorldId, setStudioWorldId] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -2001,6 +2004,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onHailTaxi={handleHailTaxi}
         onOpenClothingStore={() => setClothingStoreOpen(true)}
         onOpenFurnitureShop={() => setFurnitureShopOpen(true)}
+        onOpenBank={(atmId) => { setBankAtm(atmId); setBankOpen(true); }}
         travelRequest={travelRequest}
         onEnterGuestRoom={handleEnterGuestRoom}
         onOpenCloset={() => { setAvatarStudioMode('closet'); setAvatarModalOpen(true); }}
@@ -2139,6 +2143,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onOpenRoomSettings={() => setRoomSettingsOpen(true)}
         onOpenAvatar={() => { setAvatarStudioMode('studio'); setAvatarModalOpen(true); }}
         onOpenShop={() => setShopOpen(true)}
+        onOpenBank={() => { setBankAtm(undefined); setBankOpen(true); }}
         onOpenWorlds={() => setWorldsOpen(true)}
         onOpenAuth={() => setAuthOpen(true)}
         onOpenControls={openWorldControls}
@@ -2173,6 +2178,11 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         open={shopOpen}
         onClose={() => setShopOpen(false)}
         readOnly={session.status === 'guest'}
+      />
+      <BankModal
+        open={bankOpen && session.status !== 'guest'}
+        onClose={() => setBankOpen(false)}
+        atmId={bankAtm}
       />
       <WorldsModal
         open={worldsOpen && session.status !== 'guest'}

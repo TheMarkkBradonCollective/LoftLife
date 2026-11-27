@@ -1,3 +1,4 @@
+import { EXPANSION_PRICES } from '../../shared/catalog/expansion.mjs';
 import { neon } from '@neondatabase/serverless';
 import { handleWorldRoute, permission } from './worlds';
 import { handleSocialRoute } from './social';
@@ -20,6 +21,7 @@ import { normalizeVoicePreferences } from '../../shared/voice-controls.mjs';
 import { resolveInstance } from '../../shared/instance.mjs';
 import { roomForAllocationIndex } from '../../shared/hotel-layout.mjs';
 import { normalizeControlsPayload } from '../../shared/keybindings.mjs';
+import { GENERAL_STORE_SHOP, TG_BANK, WELCOME_BALANCES } from '../../shared/finance.mjs';
 import {
   ACCESSORIES,
   BODY_PRESETS,
@@ -156,15 +158,22 @@ async function provisionGameAccount(sql: Sql, account: AccountRow, avatarInput?:
     [account.id, account.display_name || account.handle, JSON.stringify(avatar), '', at]
   );
   const createdWallet = await sql.query(
-    'INSERT INTO ll_wallets (user_id, yuanzi, tongbao) VALUES ($1,500,25) ON CONFLICT (user_id) DO NOTHING RETURNING user_id',
-    [account.id]
+    'INSERT INTO ll_wallets (user_id, yuanzi, tongbao, cubits, cash) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id) DO NOTHING RETURNING user_id',
+    [account.id, WELCOME_BALANCES.yuanzi, WELCOME_BALANCES.tongbao, WELCOME_BALANCES.cubits, WELCOME_BALANCES.cash]
   ) as Array<{ user_id: string }>;
   if (createdWallet.length) {
-    await sql.query(
-      'INSERT INTO ll_ledger (id,user_id,currency,delta,balance_after,reason,ref,idempotency_key,created_at) VALUES ($1,$2,$3,$4,$5,$6,NULL,$7,$8),($9,$2,$10,$11,$12,$6,NULL,$13,$8) ON CONFLICT DO NOTHING',
-      [crypto.randomUUID(), account.id, 'yuanzi', 500, 500, 'welcome_grant', `welcome:${account.id}:yuanzi`, at, crypto.randomUUID(), 'tongbao', 25, 25, `welcome:${account.id}:tongbao`]
-    );
+    for (const [currency, amount] of Object.entries(WELCOME_BALANCES)) {
+      await sql.query(
+        'INSERT INTO ll_ledger (id,user_id,currency,account,delta,balance_after,reason,ref,idempotency_key,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8,$9) ON CONFLICT DO NOTHING',
+        [crypto.randomUUID(), account.id, currency, currency === 'cash' ? 'cash' : 'wallet', amount, amount, 'welcome_grant', `welcome:${account.id}:${currency}`, at]
+      );
+    }
   }
+  await sql.query(
+    `INSERT INTO ll_bank_accounts (user_id,account_number,card_last4,card_status,balance,created_at,updated_at)
+     VALUES ($1,$2,$3,$4,0,$5,$5) ON CONFLICT (user_id) DO NOTHING`,
+    [account.id, `${TG_BANK.accountPrefix}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, String(Math.floor(1000 + Math.random() * 9000)), TG_BANK.cardStatus, at]
+  );
   await sql.query(
     'INSERT INTO ll_hotel_room_allocations (owner_id, created_at) VALUES ($1,$2) ON CONFLICT (owner_id) DO NOTHING',
     [account.id, at]
@@ -240,6 +249,39 @@ const SCHEMA_STATEMENTS = [
      created_at BIGINT NOT NULL
    )`,
   `CREATE INDEX IF NOT EXISTS ll_outfits_user ON ll_outfits(user_id, created_at DESC)`,
+  `ALTER TABLE ll_wallets ADD COLUMN IF NOT EXISTS cubits BIGINT NOT NULL DEFAULT 0 CHECK (cubits >= 0)`,
+  `ALTER TABLE ll_wallets ADD COLUMN IF NOT EXISTS cash BIGINT NOT NULL DEFAULT 0 CHECK (cash >= 0)`,
+  `ALTER TABLE ll_ledger ADD COLUMN IF NOT EXISTS account TEXT NOT NULL DEFAULT 'wallet'`,
+  `ALTER TABLE ll_ledger DROP CONSTRAINT IF EXISTS ll_ledger_currency_check`,
+  `ALTER TABLE ll_ledger ADD CONSTRAINT ll_ledger_currency_check CHECK (currency IN ('yuanzi','tongbao','cubits','cash'))`,
+  `CREATE TABLE IF NOT EXISTS ll_bank_accounts (
+     user_id TEXT PRIMARY KEY REFERENCES ll_accounts(id) ON DELETE CASCADE,
+     account_number TEXT NOT NULL UNIQUE,
+     card_last4 TEXT NOT NULL,
+     card_status TEXT NOT NULL DEFAULT 'active',
+     balance BIGINT NOT NULL DEFAULT 0 CHECK (balance >= 0),
+     created_at BIGINT NOT NULL,
+     updated_at BIGINT NOT NULL
+   )`,
+  `CREATE TABLE IF NOT EXISTS ll_bank_payments (
+     id TEXT PRIMARY KEY,
+     user_id TEXT NOT NULL REFERENCES ll_accounts(id) ON DELETE CASCADE,
+     kind TEXT NOT NULL CHECK (kind IN ('deposit','withdrawal','payment')),
+     method TEXT NOT NULL CHECK (method IN ('wallet','card','cash')),
+     amount BIGINT NOT NULL CHECK (amount > 0),
+     currency TEXT NOT NULL DEFAULT 'cubits' CHECK (currency = 'cubits'),
+     merchant TEXT,
+     ref TEXT,
+     atm_id TEXT,
+     idempotency_key TEXT NOT NULL UNIQUE,
+     created_at BIGINT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS ll_bank_payments_user ON ll_bank_payments(user_id, created_at DESC)`,
+  `CREATE OR REPLACE FUNCTION ll_reject_financial_mutation() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'financial history is append-only'; END; $$ LANGUAGE plpgsql`,
+  `DROP TRIGGER IF EXISTS ll_ledger_immutable ON ll_ledger`,
+  `CREATE TRIGGER ll_ledger_immutable BEFORE UPDATE OR DELETE ON ll_ledger FOR EACH ROW EXECUTE FUNCTION ll_reject_financial_mutation()`,
+  `DROP TRIGGER IF EXISTS ll_bank_payment_immutable ON ll_bank_payments`,
+  `CREATE TRIGGER ll_bank_payment_immutable BEFORE UPDATE OR DELETE ON ll_bank_payments FOR EACH ROW EXECUTE FUNCTION ll_reject_financial_mutation()`,
   `ALTER TABLE ll_worlds ADD COLUMN IF NOT EXISTS foundation TEXT NOT NULL DEFAULT 'TG-MapDefault'`,
   `ALTER TABLE ll_worlds ADD COLUMN IF NOT EXISTS layout_json TEXT`,
   `ALTER TABLE ll_worlds ADD COLUMN IF NOT EXISTS published_layout_json TEXT`,
@@ -616,6 +658,7 @@ const FURNITURE_PRICES: Record<string, number> = {
   record_console:150, media_tv:300, fireplace:340, bookshelf:130, arc_lamp:60,
   table_lamp:35, monstera_plant:40, olive_tree:75, woven_rug:55, wall_art:65,
   wall_shelf:50, floor_mirror:110, neon_sign:90,
+  ...Object.fromEntries(Object.entries(EXPANSION_PRICES).map(([id, entry]) => [id, entry.price])),
 };
 const FLOOR_STYLES = ['oak_parquet','walnut_herringbone','terrazzo','concrete','boucle_carpet'];
 const WALL_STYLES = ['warm_chalk','sage_plaster','terracotta','slate_blue','charcoal_loft','soft_blush'];
@@ -679,19 +722,20 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
     return json({
       furniture: Object.entries(FURNITURE_PRICES).map(([id, price]) => ({ id, kind:'furniture', price, currency:'yuanzi' })),
       clothing: CLOTHING_SHOP,
+      general: GENERAL_STORE_SHOP,
     });
   }
   if (path === '/api/auth/me' && request.method === 'GET' && sql && account) {
     const [profiles,wallets,inventory,suites,outfits] = await Promise.all([
       sql.query('SELECT * FROM ll_profiles WHERE user_id=$1 LIMIT 1',[account.id]),
-      sql.query('SELECT yuanzi,tongbao FROM ll_wallets WHERE user_id=$1 LIMIT 1',[account.id]),
+      sql.query('SELECT yuanzi,tongbao,cubits,cash FROM ll_wallets WHERE user_id=$1 LIMIT 1',[account.id]),
       sql.query('SELECT kind,catalog_id,qty,acquired_at FROM ll_inventory WHERE user_id=$1 ORDER BY acquired_at DESC',[account.id]),
       sql.query('SELECT * FROM ll_suites WHERE owner_id=$1 LIMIT 1',[account.id]),
       sql.query('SELECT id,name,config_json,created_at FROM ll_outfits WHERE user_id=$1 ORDER BY created_at DESC',[account.id]),
     ]) as [Array<Record<string,unknown>>,Array<Record<string,unknown>>,Array<Record<string,unknown>>,Array<Record<string,unknown>>,Array<Record<string,unknown>>];
     return json({
       user: publicAccount(account), profile: profileView(account,profiles[0]),
-      wallet: wallets[0] ?? {yuanzi:0,tongbao:0},
+      wallet: wallets[0] ?? {yuanzi:0,tongbao:0,cubits:0,cash:0},
       inventory: inventory.map(row=>({kind:row.kind,catalogId:row.catalog_id,qty:Number(row.qty),acquiredAt:Number(row.acquired_at)})),
       outfits: outfits.map(row=>({id:row.id,name:row.name,config:parseJsonField(row.config_json,{}),createdAt:Number(row.created_at)})),
       suite: suiteView(suites[0]),
@@ -735,7 +779,7 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
     const next = safeAvatar(body.avatar, current.name || account.handle);
     const foundation = foundationalChanges(current, next);
     if (foundation.length === 0) {
-      return json({profile:profileView(account,{...rows[0],avatar_json:JSON.stringify(next)}),wallet:(await sql.query('SELECT yuanzi,tongbao FROM ll_wallets WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>)[0] ?? {yuanzi:0,tongbao:0},charged:0,duplicate:false,changed:[]});
+      return json({profile:profileView(account,{...rows[0],avatar_json:JSON.stringify(next)}),wallet:(await sql.query('SELECT yuanzi,tongbao,cubits,cash FROM ll_wallets WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>)[0] ?? {yuanzi:0,tongbao:0,cubits:0,cash:0},charged:0,duplicate:false,changed:[]});
     }
     const missing = await missingWardrobe(sql, account.id, next);
     if (missing.length > 0) return fail(`You do not own: ${missing.join(', ')}.`,403,'forbidden',{missing});
@@ -767,12 +811,12 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
     const outcome = result[0] ?? {};
     if (outcome.prior_id && outcome.prior_user_id !== account.id) return fail('That idempotency key has already been used.',409,'conflict');
     if (!outcome.prior_id && !outcome.ledger_id) {
-      const balances = await sql.query('SELECT yuanzi,tongbao FROM ll_wallets WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
+      const balances = await sql.query('SELECT yuanzi,tongbao,cubits,cash FROM ll_wallets WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
       return fail('Not enough yuanzi for a Character Makeover.',402,'insufficient_funds',{currency:'yuanzi',required:CHARACTER_MAKEOVER.price,available:Number(balances[0]?.yuanzi ?? 0)});
     }
     const [saved, walletRows] = await Promise.all([
       sql.query('SELECT * FROM ll_profiles WHERE user_id=$1 LIMIT 1',[account.id]),
-      sql.query('SELECT yuanzi,tongbao FROM ll_wallets WHERE user_id=$1 LIMIT 1',[account.id]),
+      sql.query('SELECT yuanzi,tongbao,cubits,cash FROM ll_wallets WHERE user_id=$1 LIMIT 1',[account.id]),
     ]) as [Array<Record<string,unknown>>,Array<Record<string,unknown>>];
     return json({profile:profileView(account,saved[0]),wallet:walletRows[0] ?? {yuanzi:0,tongbao:0},charged:outcome.prior_id?0:CHARACTER_MAKEOVER.price,duplicate:Boolean(outcome.prior_id),changed:foundation});
   }
@@ -824,13 +868,13 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
     return json(rows.map(row=>({kind:row.kind,catalogId:row.catalog_id,qty:Number(row.qty),acquiredAt:Number(row.acquired_at)})));
   }
   if (path === '/api/economy/wallet' && request.method === 'GET' && sql && account) {
-    const rows = await sql.query('SELECT yuanzi,tongbao FROM ll_wallets WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
-    return json(rows[0] ?? {yuanzi:0,tongbao:0});
+    const rows = await sql.query('SELECT yuanzi,tongbao,cubits,cash FROM ll_wallets WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
+    return json(rows[0] ?? {yuanzi:0,tongbao:0,cubits:0,cash:0});
   }
   if (path === '/api/economy/history' && request.method === 'GET' && sql && account) {
     const limit = Math.max(1,Math.min(200,Number(url.searchParams.get('limit'))||50));
-    const rows = await sql.query('SELECT id,currency,delta,balance_after,reason,ref,created_at FROM ll_ledger WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2',[account.id,limit]) as Array<Record<string,unknown>>;
-    return json(rows.map(row=>({id:row.id,currency:row.currency,delta:Number(row.delta),balanceAfter:Number(row.balance_after),reason:row.reason,ref:row.ref,createdAt:Number(row.created_at)})));
+    const rows = await sql.query('SELECT id,currency,account,delta,balance_after,reason,ref,created_at FROM ll_ledger WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2',[account.id,limit]) as Array<Record<string,unknown>>;
+    return json(rows.map(row=>({id:row.id,currency:row.currency,account:row.account??'wallet',delta:Number(row.delta),balanceAfter:Number(row.balance_after),reason:row.reason,ref:row.ref,createdAt:Number(row.created_at)})));
   }
   if (path === '/api/suite' && request.method === 'GET' && sql && account) {
     const rows = await sql.query('SELECT * FROM ll_suites WHERE owner_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
@@ -974,7 +1018,12 @@ export default {
         if (gameResponse) return gameResponse;
       }
 
-      if (url.pathname === '/api/economy/purchase' || url.pathname === '/api/economy/daily') {
+      if (
+        url.pathname === '/api/economy/purchase' ||
+        url.pathname === '/api/economy/daily' ||
+        url.pathname === '/api/bank' ||
+        url.pathname.startsWith('/api/bank/')
+      ) {
         const auth = await currentAccount(request, env);
         const sql = auth?.sql ?? await database(env);
         if (!sql) return fail('DATABASE_URL is not configured.', 503, 'unconfigured');

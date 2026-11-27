@@ -1,16 +1,31 @@
 /**
- * Yuanzi / Tongbao economy.
+ * LoftLife economy: CUBITS, TG-Banking, cash, wallets, ledger and shops.
  *
  * Every balance change goes through the append-only `ledger`, inside an
- * IMMEDIATE transaction, with an optional idempotency key so a retried request
- * cannot double-charge or double-grant. Prices live here (the server) — the
- * client can render them but never decides them.
+ * IMMEDIATE transaction, with an idempotency key where retries are possible.
+ * Prices live here (the server) - the client can render them but never decides
+ * them. YUANZI and TONGBAO are preserved as legacy currencies; CUBITS is added
+ * without an exchange rate or conversion.
  */
 import { db, newId, now, tx, audit } from './db.mjs';
 import { ApiError, badRequest, conflict, notFound } from './errors.mjs';
+import { EXPANSION_BY_ID, EXPANSION_PRICES } from '../shared/catalog/expansion.mjs';
 import { CLOTHING_CATALOG, CLOTHING_SHOP, STARTER_CLOTHING } from '../shared/character.mjs';
+import {
+  ATM_IDS,
+  ATM_LOCATIONS,
+  CASH,
+  CUBITS,
+  DAILY_REWARD,
+  GENERAL_STORE,
+  GENERAL_STORE_SHOP,
+  TG_BANK,
+  WALLET_CURRENCIES,
+  WELCOME_BALANCES,
+  isPaymentMethod,
+} from '../shared/finance.mjs';
 
-export const CURRENCIES = /** @type {const} */ (['yuanzi', 'tongbao']);
+export const CURRENCIES = WALLET_CURRENCIES;
 
 /** All furniture ids shipped in src/game/catalog.ts, with server-owned prices. */
 export const FURNITURE_PRICES = {
@@ -88,26 +103,44 @@ export const FURNITURE_PRICES = {
   plant_small: 25,
   tv_console: 360,
   wall_art_set: 85,
+  // Construction, business, nightlife, specialty, event, outdoor and vehicle
+  // catalog — prices come from the shared catalog so the client, the shop and
+  // room validation can never disagree about what exists or what it costs.
+  ...Object.fromEntries(
+    Object.entries(EXPANSION_PRICES).map(([id, entry]) => [id, entry.price])
+  ),
 };
 
 /** Free starting wardrobe so a new character is never locked out of dressing. */
 export const DEFAULT_OWNED_CLOTHING = STARTER_CLOTHING;
 
-export const FURNITURE_SHOP = Object.entries(FURNITURE_PRICES).map(([id, price]) => ({
-  id,
-  kind: 'furniture',
-  price,
-  currency: 'yuanzi',
-}));
+export const FURNITURE_SHOP = Object.entries(FURNITURE_PRICES).map(([id, price]) => {
+  const entry = EXPANSION_BY_ID[id];
+  return {
+    id,
+    kind: 'furniture',
+    price,
+    currency: entry?.currency ?? 'yuanzi',
+    label: entry?.name,
+    category: entry?.category,
+    subcategory: entry?.subcategory,
+    description: entry?.description,
+    // Every catalog item ships a preview rendered from its own model; legacy
+    // pieces use the same naming convention.
+    preview: `/${entry?.previewBase ?? `catalog-previews/${id}`}.png`,
+  };
+});
 
 /** Prices and labels live in shared/character.mjs so the edge agrees exactly. */
-export { CLOTHING_SHOP };
+export { CLOTHING_SHOP, GENERAL_STORE_SHOP };
 
 export function isKnownClothing(id) {
   return Object.hasOwn(CLOTHING_CATALOG, id);
 }
 
-const SHOP = new Map([...FURNITURE_SHOP, ...CLOTHING_SHOP].map((entry) => [entry.id, entry]));
+const SHOP = new Map(
+  [...FURNITURE_SHOP, ...CLOTHING_SHOP, ...GENERAL_STORE_SHOP].map((entry) => [entry.id, entry])
+);
 
 export function getShopItem(id) {
   return SHOP.get(id) ?? null;
@@ -117,62 +150,304 @@ export function isKnownFurniture(id) {
   return Object.hasOwn(FURNITURE_PRICES, id);
 }
 
+export function isGeneralStore(id) {
+  return Object.hasOwn(GENERAL_STORE, id);
+}
+
+const EMPTY_WALLET = { yuanzi: 0, tongbao: 0, cubits: 0, cash: 0 };
+
 export function getWallet(userId) {
-  const row = db.prepare('SELECT yuanzi, tongbao FROM wallets WHERE user_id = ?').get(userId);
-  return row ? { yuanzi: row.yuanzi, tongbao: row.tongbao } : { yuanzi: 0, tongbao: 0 };
+  const row = db
+    .prepare('SELECT yuanzi, tongbao, cubits, cash FROM wallets WHERE user_id = ?')
+    .get(userId);
+  return row ? { ...EMPTY_WALLET, ...row } : { ...EMPTY_WALLET };
 }
 
 function readBalance(userId, currency) {
-  const row = db.prepare('SELECT yuanzi, tongbao FROM wallets WHERE user_id = ?').get(userId);
+  if (!WALLET_CURRENCIES.includes(currency)) throw badRequest(`Unknown currency: ${currency}`);
+  const row = db
+    .prepare('SELECT yuanzi, tongbao, cubits, cash FROM wallets WHERE user_id = ?')
+    .get(userId);
   if (!row) throw notFound('Wallet not found');
-  return row[currency];
+  return Number(row[currency] ?? 0);
 }
 
 /**
- * Append a ledger entry and move the balance. MUST be called inside tx().
- * Returns { entry, duplicate } — duplicates happen when an idempotency key is
- * replayed and no balance change is applied.
+ * Append a wallet ledger entry and move the balance. MUST be called inside tx().
+ * Cash uses currency='cash' and account='cash'; CUBITS in the digital wallet
+ * uses currency='cubits' and account='wallet'.
  */
-export function applyLedger({ userId, currency, delta, reason, ref = null, idempotencyKey = null }) {
-  if (!CURRENCIES.includes(currency)) throw badRequest(`Unknown currency: ${currency}`);
+export function applyLedger({
+  userId,
+  currency,
+  delta,
+  reason,
+  ref = null,
+  idempotencyKey = null,
+  account = currency === CASH ? 'cash' : 'wallet',
+}) {
+  if (!WALLET_CURRENCIES.includes(currency)) throw badRequest(`Unknown currency: ${currency}`);
   if (!Number.isInteger(delta) || delta === 0) throw badRequest('delta must be a non-zero integer');
 
   if (idempotencyKey) {
     const prior = db.prepare('SELECT * FROM ledger WHERE idempotency_key = ?').get(idempotencyKey);
-    if (prior) return { entry: prior, duplicate: true };
+    if (prior) {
+      if (prior.user_id !== userId) throw conflict('That idempotency key has already been used');
+      return { entry: prior, duplicate: true };
+    }
   }
 
   const current = readBalance(userId, currency);
   const next = current + delta;
   if (next < 0) {
-    throw new ApiError(
-      402,
-      'insufficient_funds',
-      `Not enough ${currency}`,
-      { currency, required: Math.abs(delta), available: current }
-    );
+    throw new ApiError(402, 'insufficient_funds', `Not enough ${currency}`, {
+      currency,
+      required: Math.abs(delta),
+      available: current,
+    });
   }
 
   db.prepare(`UPDATE wallets SET ${currency} = ? WHERE user_id = ?`).run(next, userId);
   const id = newId('led');
   db.prepare(
-    `INSERT INTO ledger (id, user_id, currency, delta, balance_after, reason, ref, idempotency_key, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, userId, currency, delta, next, reason, ref, idempotencyKey, now());
+    `INSERT INTO ledger (id, user_id, currency, account, delta, balance_after, reason, ref, idempotency_key, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, userId, currency, account, delta, next, reason, ref, idempotencyKey, now());
 
   return { entry: db.prepare('SELECT * FROM ledger WHERE id = ?').get(id), duplicate: false };
+}
+
+/** Move deposited CUBITS in the TG-Banking account, not the digital wallet. */
+export function applyBankLedger({
+  userId,
+  delta,
+  reason,
+  ref = null,
+  idempotencyKey = null,
+}) {
+  if (!Number.isInteger(delta) || delta === 0) throw badRequest('delta must be a non-zero integer');
+  const account = ensureBankAccount(userId);
+  if (idempotencyKey) {
+    const prior = db.prepare('SELECT * FROM ledger WHERE idempotency_key = ?').get(idempotencyKey);
+    if (prior) {
+      if (prior.user_id !== userId) throw conflict('That idempotency key has already been used');
+      return { entry: prior, duplicate: true };
+    }
+  }
+  const next = account.balance + delta;
+  if (next < 0) {
+    throw new ApiError(402, 'insufficient_funds', 'Not enough CUBITS in the TG-Banking account', {
+      currency: CUBITS,
+      required: Math.abs(delta),
+      available: account.balance,
+    });
+  }
+  db.prepare('UPDATE bank_accounts SET balance = ?, updated_at = ? WHERE user_id = ?').run(
+    next,
+    now(),
+    userId
+  );
+  const id = newId('led');
+  db.prepare(
+    `INSERT INTO ledger (id, user_id, currency, account, delta, balance_after, reason, ref, idempotency_key, created_at)
+     VALUES (?, ?, ?, 'bank', ?, ?, ?, ?, ?, ?)`
+  ).run(id, userId, CUBITS, delta, next, reason, ref, idempotencyKey, now());
+  return { entry: db.prepare('SELECT * FROM ledger WHERE id = ?').get(id), duplicate: false };
+}
+
+function accountView(row) {
+  if (!row) return null;
+  return {
+    accountNumber: row.account_number,
+    balance: Number(row.balance),
+    cardLast4: row.card_last4,
+    cardStatus: row.card_status,
+    cardBrand: TG_BANK.cardBrand,
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
+export function ensureBankAccount(userId) {
+  const existing = db.prepare('SELECT * FROM bank_accounts WHERE user_id = ?').get(userId);
+  if (existing) return accountView(existing);
+  const at = now();
+  const suffix = String(Math.floor(1000 + Math.random() * 9000));
+  const accountNumber = `${TG_BANK.accountPrefix}-${newId('acct').slice(-8).toUpperCase()}`;
+  db.prepare(
+    `INSERT INTO bank_accounts (user_id, account_number, card_last4, card_status, balance, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 0, ?, ?)`
+  ).run(userId, accountNumber, suffix, TG_BANK.cardStatus, at, at);
+  audit(userId, 'bank.account.open', accountNumber);
+  return accountView(db.prepare('SELECT * FROM bank_accounts WHERE user_id = ?').get(userId));
+}
+
+export function listBankPayments(userId, limit = 40) {
+  return db
+    .prepare(
+      `SELECT id, kind, method, amount, currency, merchant, ref, atm_id, created_at
+       FROM bank_payments WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`
+    )
+    .all(userId, Math.min(200, Math.max(1, Number(limit) || 40)))
+    .map((row) => ({
+      id: row.id,
+      kind: row.kind,
+      method: row.method,
+      amount: row.amount,
+      currency: row.currency,
+      merchant: row.merchant,
+      ref: row.ref,
+      atmId: row.atm_id,
+      createdAt: row.created_at,
+    }));
+}
+
+export function getBankOverview(userId) {
+  const account = ensureBankAccount(userId);
+  return {
+    account,
+    card: {
+      brand: TG_BANK.cardBrand,
+      last4: account.cardLast4,
+      status: account.cardStatus,
+      number: `•••• •••• •••• ${account.cardLast4}`,
+    },
+    wallet: getWallet(userId),
+    payments: listBankPayments(userId),
+    atms: ATM_LOCATIONS,
+    limits: { minAmount: 1, maxAmount: 100000, dailyLimit: 250000 },
+  };
+}
+
+function paymentRecord(userId, { kind, method, amount, merchant, ref, atmId, idempotencyKey }) {
+  const id = newId('pay');
+  const at = now();
+  db.prepare(
+    `INSERT INTO bank_payments
+       (id, user_id, kind, method, amount, currency, merchant, ref, atm_id, idempotency_key, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, userId, kind, method, amount, CUBITS, merchant ?? null, ref ?? null, atmId ?? null, idempotencyKey, at);
+  return {
+    id,
+    kind,
+    method,
+    amount,
+    currency: CUBITS,
+    merchant: merchant ?? null,
+    ref: ref ?? null,
+    atmId: atmId ?? null,
+    createdAt: at,
+  };
+}
+
+function existingPayment(userId, idempotencyKey) {
+  const prior = db
+    .prepare('SELECT * FROM bank_payments WHERE idempotency_key = ?')
+    .get(idempotencyKey);
+  if (!prior) return null;
+  if (prior.user_id !== userId) throw conflict('That idempotency key has already been used');
+  return prior;
+}
+
+/** Server-validated wallet <-> bank transfers, plus cash at an ATM. */
+export function bankTransfer(userId, body = {}) {
+  const kind = body.kind === 'withdrawal' ? 'withdrawal' : 'deposit';
+  const amount = Number(body.amount);
+  if (!Number.isInteger(amount) || amount < 1 || amount > 100000) {
+    throw badRequest('Amount must be an integer between 1 and 100000');
+  }
+  const method = kind === 'deposit' ? body.source : body.target;
+  if (method !== 'wallet' && method !== 'cash') {
+    throw badRequest('Use wallet or cash for a bank transfer');
+  }
+  if (method === 'cash' && !ATM_IDS.includes(String(body.atmId ?? ''))) {
+    throw badRequest('Cash deposits and withdrawals require a valid TG-Bank ATM');
+  }
+  const idempotencyKey = String(body.idempotencyKey ?? '');
+  if (idempotencyKey.length < 8 || idempotencyKey.length > 160) {
+    throw badRequest('A valid idempotencyKey is required');
+  }
+
+  return tx(() => {
+    const prior = existingPayment(userId, idempotencyKey);
+    if (prior) {
+      return {
+        duplicate: true,
+        receipt: {
+          id: prior.id,
+          kind: prior.kind,
+          method: prior.method,
+          amount: prior.amount,
+          currency: prior.currency,
+          merchant: prior.merchant,
+          ref: prior.ref,
+          atmId: prior.atm_id,
+          createdAt: prior.created_at,
+        },
+        ...getBankOverview(userId),
+      };
+    }
+    const account = ensureBankAccount(userId);
+    const cash = method === 'cash';
+    const walletCurrency = cash ? CASH : CUBITS;
+    if (kind === 'deposit') {
+      applyLedger({
+        userId,
+        currency: walletCurrency,
+        delta: -amount,
+        reason: cash ? 'cash_deposit' : 'wallet_to_bank',
+        ref: body.atmId ?? 'tg-banking',
+        idempotencyKey: `${idempotencyKey}:wallet`,
+      });
+      applyBankLedger({
+        userId,
+        delta: amount,
+        reason: cash ? 'cash_deposit' : 'wallet_to_bank',
+        ref: body.atmId ?? 'tg-banking',
+        idempotencyKey: `${idempotencyKey}:bank`,
+      });
+    } else {
+      applyBankLedger({
+        userId,
+        delta: -amount,
+        reason: cash ? 'cash_withdrawal' : 'bank_to_wallet',
+        ref: body.atmId ?? 'tg-banking',
+        idempotencyKey: `${idempotencyKey}:bank`,
+      });
+      applyLedger({
+        userId,
+        currency: walletCurrency,
+        delta: amount,
+        reason: cash ? 'cash_withdrawal' : 'bank_to_wallet',
+        ref: body.atmId ?? 'tg-banking',
+        idempotencyKey: `${idempotencyKey}:wallet`,
+      });
+    }
+    const receipt = paymentRecord(userId, {
+      kind,
+      method,
+      amount,
+      merchant: 'tg_banking',
+      ref: cash ? body.atmId : 'online',
+      atmId: body.atmId ?? null,
+      idempotencyKey,
+    });
+    audit(userId, `bank.${kind}`, `${amount} ${cash ? 'cash' : CUBITS} · ${body.atmId ?? 'online'}`);
+    return { duplicate: false, receipt, ...getBankOverview(userId) };
+  });
 }
 
 export function transactionHistory(userId, limit = 50) {
   return db
     .prepare(
-      `SELECT id, currency, delta, balance_after, reason, ref, created_at
+      `SELECT id, currency, account, delta, balance_after, reason, ref, created_at
        FROM ledger WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`
     )
     .all(userId, Math.min(200, Math.max(1, Number(limit) || 50)))
     .map((row) => ({
       id: row.id,
       currency: row.currency,
+      account: row.account ?? 'wallet',
       delta: row.delta,
       balanceAfter: row.balance_after,
       reason: row.reason,
@@ -203,24 +478,96 @@ export function ownsItem(userId, kind, catalogId) {
   return Boolean(row && row.qty > 0);
 }
 
+function purchaseGeneral(userId, item, { paymentMethod, idempotencyKey }) {
+  if (!isPaymentMethod(paymentMethod)) {
+    throw badRequest('Use wallet, card or cash at the TG Market');
+  }
+  return tx(() => {
+    const prior = existingPayment(userId, idempotencyKey);
+    if (prior) {
+      return {
+        item,
+        duplicate: true,
+        receipt: {
+          id: prior.id,
+          kind: prior.kind,
+          method: prior.method,
+          amount: prior.amount,
+          currency: prior.currency,
+          merchant: prior.merchant,
+          ref: prior.ref,
+          atmId: prior.atm_id,
+          createdAt: prior.created_at,
+        },
+        wallet: getWallet(userId),
+        bank: ensureBankAccount(userId),
+        inventory: listInventory(userId),
+      };
+    }
+    if (paymentMethod === 'card') {
+      applyBankLedger({
+        userId,
+        delta: -item.price,
+        reason: 'general_purchase',
+        ref: item.id,
+        idempotencyKey: `${idempotencyKey}:bank`,
+      });
+    } else {
+      applyLedger({
+        userId,
+        currency: paymentMethod === 'cash' ? CASH : CUBITS,
+        delta: -item.price,
+        reason: 'general_purchase',
+        ref: item.id,
+        idempotencyKey: `${idempotencyKey}:${paymentMethod}`,
+      });
+    }
+    const receipt = paymentRecord(userId, {
+      kind: 'payment',
+      method: paymentMethod,
+      amount: item.price,
+      merchant: item.merchant,
+      ref: item.id,
+      idempotencyKey,
+    });
+    audit(userId, 'economy.general_purchase', `${item.id} · ${paymentMethod}`);
+    return {
+      item,
+      duplicate: false,
+      receipt,
+      wallet: getWallet(userId),
+      bank: ensureBankAccount(userId),
+      inventory: listInventory(userId),
+    };
+  });
+}
+
 /**
  * Buy a catalog item. Price and currency come from the server-side shop table,
- * never from the request body.
+ * never from the request body. General-store payments additionally choose a
+ * server-validated wallet/card/cash method.
  */
-export function purchase(userId, { catalogId, idempotencyKey }) {
+export function purchase(userId, { catalogId, idempotencyKey, paymentMethod = 'wallet' }) {
   const item = getShopItem(String(catalogId ?? ''));
   if (!item) throw notFound('Unknown shop item');
   if (!idempotencyKey || typeof idempotencyKey !== 'string' || idempotencyKey.length < 8) {
     throw badRequest('An idempotencyKey is required for purchases');
+  }
+  if (item.kind === 'general') {
+    return purchaseGeneral(userId, item, { paymentMethod, idempotencyKey });
+  }
+  if (paymentMethod !== 'wallet') {
+    throw badRequest('This merchant accepts the listed currency only');
   }
 
   return tx(() => {
     // A replayed request returns the original outcome instead of charging twice
     // or failing on the ownership check below.
     const prior = db
-      .prepare('SELECT id FROM ledger WHERE idempotency_key = ?')
+      .prepare('SELECT id, user_id FROM ledger WHERE idempotency_key = ?')
       .get(idempotencyKey);
     if (prior) {
+      if (prior.user_id !== userId) throw conflict('That idempotency key has already been used');
       return {
         item: { id: item.id, kind: item.kind, price: item.price, currency: item.currency },
         duplicate: true,
@@ -271,8 +618,8 @@ export function purchase(userId, { catalogId, idempotencyKey }) {
 const DAILY_COOLDOWN_MS = 20 * 60 * 60 * 1000;
 
 /**
- * Daily activity reward: the only Tongbao source for now, so the secondary
- * currency is earnable rather than decorative. One claim per rolling 20h.
+ * Daily activity reward. YUANZI/TONGBAO remain claimable, and CUBITS is added
+ * as the shared primary currency. One claim per rolling 20h.
  */
 export function claimDaily(userId) {
   return tx(() => {
@@ -287,20 +634,17 @@ export function claimDaily(userId) {
         availableAt: last.created_at + DAILY_COOLDOWN_MS,
       });
     }
-    applyLedger({
-      userId,
-      currency: 'yuanzi',
-      delta: 50,
-      reason: 'daily_reward',
-      idempotencyKey: `daily:yuanzi:${userId}:${Math.floor(now() / DAILY_COOLDOWN_MS)}`,
-    });
-    applyLedger({
-      userId,
-      currency: 'tongbao',
-      delta: 5,
-      reason: 'daily_reward',
-      idempotencyKey: `daily:tongbao:${userId}:${Math.floor(now() / DAILY_COOLDOWN_MS)}`,
-    });
+    for (const [currency, amount] of Object.entries(DAILY_REWARD)) {
+      applyLedger({
+        userId,
+        currency,
+        delta: amount,
+        reason: 'daily_reward',
+        idempotencyKey: `daily:${currency}:${userId}:${Math.floor(now() / DAILY_COOLDOWN_MS)}`,
+      });
+    }
     return { wallet: getWallet(userId), nextClaimAt: now() + DAILY_COOLDOWN_MS };
   });
 }
+
+export { WELCOME_BALANCES, ATM_LOCATIONS, CUBITS, CASH };

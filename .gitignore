@@ -13,3 +13,6 @@ data/
 .dev.vars
 .wrangler/
 
+
+# Build/runtime scratch (preview bundling, caches)
+.cache/

@@ -156,6 +156,10 @@ test('new account gets a wallet, welcome grant, suite and default wardrobe', asy
   assert.equal(me.status, 200);
   assert.equal(me.json.wallet.yuanzi, 500);
   assert.equal(me.json.wallet.tongbao, 25);
+  assert.equal(me.json.wallet.cubits, 250);
+  assert.equal(me.json.wallet.cash, 100);
+  assert.equal(me.json.bank.account.balance, 0);
+  assert.match(me.json.bank.account.accountNumber, /^TG-/);
   // Every account is allocated its own suite from the 65-room hotel; the old
   // behaviour handed every account Suite 402, which made doorbells ambiguous.
   assert.match(me.json.suite.number, /^[2-7](0[1-9]|1[01])$/);
@@ -167,7 +171,7 @@ test('new account gets a wallet, welcome grant, suite and default wardrobe', asy
   assert.equal(me.json.profile.avatar.topStyle, 'tee');
 
   const history = await api('GET', '/api/economy/history', { token: account.token });
-  assert.equal(history.json.length, 2);
+  assert.equal(history.json.length, 4);
   assert.ok(history.json.every((entry) => entry.reason === 'welcome_grant'));
 });
 

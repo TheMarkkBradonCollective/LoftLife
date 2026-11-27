@@ -676,6 +676,23 @@ function buildMarketInterior(b: VenueMeshBuilder, v: CityVenue, seats: VenueSeat
   for (let i = 0; i < 3; i += 1) {
     b.box('accent', 0.4, 0.24, 0.3, midU - 1.4 + i * 0.5, 0.3, counterZ - 0.9);
   }
+  // TG-Bank ATM beside the entrance. Cash deposits and withdrawals only work
+  // at a machine, so every shopping district needs at least one.
+  const atmU = iu1 - 1.2;
+  const atmZ = iz0 + 1.4;
+  b.box('metal', 0.9, 1.9, 0.55, atmU, 0.95, atmZ);
+  b.box('emissive', 0.55, 0.42, 0.04, atmU, 1.35, atmZ - 0.3);
+  b.box('trim', 0.7, 0.12, 0.28, atmU, 1.02, atmZ - 0.42);
+  obstacles.push({ type: 'box', ...venueToWorld(atmU, atmZ), hw: 0.55, hd: 0.4 });
+  interactions.push({
+    id: 'market_atm',
+    venueId: 'market',
+    ...venueToWorld(atmU, atmZ - 1.2),
+    radius: 2.2,
+    label: 'Use TG-Bank ATM',
+    kind: 'atm',
+    atmId: 'market_hall',
+  });
   b.blob('leaf', 0.42, iu0 + 0.9, 0.9, iz0 + 0.9, 1.1);
 }
 

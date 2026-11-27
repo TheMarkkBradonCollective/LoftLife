@@ -24,7 +24,11 @@ import {
 import {
   CLOTHING_SHOP,
   FURNITURE_SHOP,
+  GENERAL_STORE_SHOP,
+  bankTransfer,
   claimDaily,
+  ensureBankAccount,
+  getBankOverview,
   getWallet,
   listInventory,
   purchase,
@@ -193,6 +197,7 @@ export function createApp() {
         user: publicUser(req.user),
         profile: readProfile(req.user.id),
         wallet: getWallet(req.user.id),
+        bank: getBankOverview(req.user.id),
         inventory: listInventory(req.user.id),
         outfits: listOutfits(req.user.id),
         suite: getSuite(req.user.id),
@@ -289,7 +294,7 @@ export function createApp() {
   /* -------------------------------- shop -------------------------------- */
 
   app.get('/api/shop', (_req, res) => {
-    res.json({ furniture: FURNITURE_SHOP, clothing: CLOTHING_SHOP });
+    res.json({ furniture: FURNITURE_SHOP, clothing: CLOTHING_SHOP, general: GENERAL_STORE_SHOP });
   });
 
   app.get(
@@ -315,9 +320,43 @@ export function createApp() {
     requireAuth,
     writeLimiter,
     handler((req, res) => {
-      const { catalogId, idempotencyKey } = req.body ?? {};
-      res.json(purchase(req.user.id, { catalogId, idempotencyKey }));
+      const { catalogId, idempotencyKey, paymentMethod } = req.body ?? {};
+      res.json(purchase(req.user.id, { catalogId, idempotencyKey, paymentMethod }));
     })
+  );
+
+  app.get(
+    '/api/bank',
+    requireAuth,
+    handler((req, res) => res.json(getBankOverview(req.user.id)))
+  );
+
+  app.post(
+    '/api/bank/deposit',
+    requireAuth,
+    writeLimiter,
+    handler((req, res) => res.json(bankTransfer(req.user.id, { ...(req.body ?? {}), kind: 'deposit' })))
+  );
+
+  app.post(
+    '/api/bank/withdraw',
+    requireAuth,
+    writeLimiter,
+    handler((req, res) =>
+      res.json(bankTransfer(req.user.id, { ...(req.body ?? {}), kind: 'withdrawal' }))
+    )
+  );
+
+  app.post(
+    '/api/bank/account',
+    requireAuth,
+    handler((req, res) => res.json(ensureBankAccount(req.user.id)))
+  );
+
+  app.get(
+    '/api/bank/history',
+    requireAuth,
+    handler((req, res) => res.json(getBankOverview(req.user.id).payments))
   );
 
   app.post(

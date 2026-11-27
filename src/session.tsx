@@ -23,6 +23,7 @@ import {
   api,
   getToken,
   setToken,
+  type BankOverview,
   type InventoryEntry,
   type MakeoverResult,
   type MicrophoneMode,
@@ -125,6 +126,7 @@ interface SessionValue {
   user: SessionUser | null;
   profile: Profile | null;
   wallet: Wallet;
+  bank: BankOverview | null;
   inventory: InventoryEntry[];
   outfits: SavedOutfit[];
   suite: SuiteState | null;
@@ -171,7 +173,9 @@ interface SessionValue {
   clearJustRegistered: () => void;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
-  buy: (catalogId: string) => Promise<void>;
+  buy: (catalogId: string, paymentMethod?: 'wallet' | 'card' | 'cash') => Promise<void>;
+  depositBank: (amount: number, source: 'wallet' | 'cash', atmId?: string) => Promise<void>;
+  withdrawBank: (amount: number, target: 'wallet' | 'cash', atmId?: string) => Promise<void>;
   makeover: (avatar: AvatarConfig) => Promise<MakeoverResult>;
   saveOutfit: (name: string, config: OutfitConfig) => Promise<SavedOutfit>;
   deleteOutfit: (id: string) => Promise<void>;
@@ -225,7 +229,7 @@ interface SessionValue {
   toggleChat: () => void;
 }
 
-const EMPTY_WALLET: Wallet = { yuanzi: 0, tongbao: 0 };
+const EMPTY_WALLET: Wallet = { yuanzi: 0, tongbao: 0, cubits: 0, cash: 0 };
 // Voice preferences live on the device offline and mirror to the account online.
 const VOICE_PREFS_KEY = 'loftlife_voice_prefs_v1';
 const GUEST_TOKEN_KEY = 'loftlife_guest_session_v1';
@@ -266,6 +270,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [wallet, setWallet] = useState<Wallet>(EMPTY_WALLET);
+  const [bank, setBank] = useState<BankOverview | null>(null);
   const [inventory, setInventory] = useState<InventoryEntry[]>([]);
   const [outfits, setOutfits] = useState<SavedOutfit[]>([]);
   const [suite, setSuite] = useState<SuiteState | null>(null);
@@ -414,6 +419,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setUser(payload.user);
     setProfile(payload.profile);
     setWallet(payload.wallet);
+    try {
+      setBank(payload.bank ?? (await api.bank()));
+    } catch {
+      setBank(null);
+    }
     setInventory(payload.inventory);
     setOutfits(payload.outfits ?? []);
     setSuite(payload.suite);
@@ -821,6 +831,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setProfile(null);
     setWallet(EMPTY_WALLET);
+    setBank(null);
     setInventory([]);
     setOutfits([]);
     setSuite(null);
@@ -849,12 +860,36 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, [loadSession]);
 
-  const buy = useCallback(async (catalogId: string) => {
-    const key = `buy_${catalogId}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
-    const result = await api.purchase(catalogId, key);
-    setWallet(result.wallet);
-    setInventory(result.inventory);
-  }, []);
+  const buy = useCallback(
+    async (catalogId: string, paymentMethod: 'wallet' | 'card' | 'cash' = 'wallet') => {
+      const key = `buy_${catalogId}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+      const result = await api.purchase(catalogId, key, paymentMethod);
+      setWallet(result.wallet);
+      setInventory(result.inventory);
+      if (paymentMethod !== 'wallet') setBank(await api.bank());
+    },
+    []
+  );
+
+  const depositBank = useCallback(
+    async (amount: number, source: 'wallet' | 'cash', atmId?: string) => {
+      const key = `deposit_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      const result = await api.bankDeposit({ amount, source, atmId, idempotencyKey: key });
+      setWallet(result.wallet);
+      setBank(result);
+    },
+    []
+  );
+
+  const withdrawBank = useCallback(
+    async (amount: number, target: 'wallet' | 'cash', atmId?: string) => {
+      const key = `withdraw_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      const result = await api.bankWithdraw({ amount, target, atmId, idempotencyKey: key });
+      setWallet(result.wallet);
+      setBank(result);
+    },
+    []
+  );
 
   const makeover = useCallback(async (avatar: AvatarConfig) => {
     const key = `makeover_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
@@ -1173,6 +1208,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       user,
       profile,
       wallet,
+      bank,
       inventory,
       outfits,
       suite,
@@ -1207,6 +1243,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       logout,
       refresh,
       buy,
+      depositBank,
+      withdrawBank,
       makeover,
       saveOutfit,
       deleteOutfit,
@@ -1256,6 +1294,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       user,
       profile,
       wallet,
+      bank,
       inventory,
       outfits,
       suite,
@@ -1290,6 +1329,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       logout,
       refresh,
       buy,
+      depositBank,
+      withdrawBank,
       makeover,
       saveOutfit,
       deleteOutfit,
