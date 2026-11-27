@@ -27,6 +27,17 @@ export interface LivePlayerPresence {
   lastSeen: number;
 }
 
+export type LoftStaffRole = 'founder' | 'director' | 'management' | 'administrator' | 'moderator' | 'support';
+export interface AdminConsoleData {
+  actor: { userId: string; handle: string; role: LoftStaffRole; departments: string[] };
+  stats: { accounts: number; staff: number; openReports: number };
+  staff: { userId: string; handle: string; displayName: string; role: LoftStaffRole; departments: string[]; appointedAt: number }[];
+  reports: { id: string; reason: string; details: string; status: string; createdAt: number; reporter: string; target: string; targetId: string }[];
+  players: { id: string; handle: string; displayName: string; createdAt: number; suspendedUntil: number; staffRole: string }[];
+  audit: { id: string; action: string; detail: Record<string, unknown>; createdAt: number; actor: string; target: string | null }[];
+  founderSetup: { configured: boolean; count: number };
+}
+
 export interface LiveGameMonitoring {
   online: number;
   updatedAt: number;
@@ -737,6 +748,16 @@ export const api = {
 
   report: (body: { handle: string; reason: string; details?: string }) =>
     request<{ id: string; status: string }>('/reports', { method: 'POST', body }),
+
+  adminConsole: (q = '') => request<AdminConsoleData>(`/admin/console${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  assignStaff: (body: { handle: string; role: Exclude<LoftStaffRole, 'founder'>; departments: string[] }) =>
+    request<{ ok: boolean }>('/admin/console/staff', { method: 'POST', body }),
+  removeStaff: (userId: string) =>
+    request<{ ok: boolean }>(`/admin/console/staff/${encodeURIComponent(userId)}`, { method: 'DELETE' }),
+  updateAdminReport: (id: string, status: 'reviewed' | 'actioned') =>
+    request<{ ok: boolean }>(`/admin/console/reports/${encodeURIComponent(id)}`, { method: 'POST', body: { status } }),
+  setPlayerSuspension: (userId: string, hours: number) =>
+    request<{ ok: boolean; suspendedUntil: number }>(`/admin/console/players/${encodeURIComponent(userId)}/suspension`, { method: 'POST', body: { hours } }),
 
   monitoring: () => request<LiveGameMonitoring>('/admin/monitoring'),
   presence: () =>
