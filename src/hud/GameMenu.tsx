@@ -1039,7 +1039,7 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                     />
                     <Toggle
                       label="Follow character"
-                      detail="Isometric camera stays on your avatar. Play View always follows."
+                      detail="Isometric lets you orbit and follow the avatar. Third-Person follows and uses mouse-look."
                       checked={followCharacter}
                       onChange={() => props.onToggleFollow()}
                     />
