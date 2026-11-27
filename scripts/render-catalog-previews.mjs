@@ -195,6 +195,9 @@ async function main() {
 
   const catalog = mod.FURNITURE_CATALOG;
   const targets = catalog.filter((item) => {
+    // Imported GLB items are rendered by scripts/render-kenney-previews.mjs
+    // from their actual assets, including curated replacements.
+    if (item.asset) return false;
     if (categoryFilter && item.category !== categoryFilter) return false;
     if (idPrefix && !item.id.startsWith(idPrefix)) return false;
     return true;

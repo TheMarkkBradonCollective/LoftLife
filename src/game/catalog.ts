@@ -7,6 +7,7 @@ import type {
 } from './types';
 import { EXTRA_FURNITURE } from './furnitureCatalogExtra';
 import { EXPANSION_CATALOG } from './catalogExpansion';
+import { KENNEY_CATALOG, applyKenneyReplacements } from './kenneyCatalog';
 
 export const GRID_SIZE = 14; // 14 x 14m Grand Hotel Penthouse Suite
 export const PLAYER_SUITE_NUMBER = '402';
@@ -380,6 +381,13 @@ FURNITURE_CATALOG.push(...EXTRA_FURNITURE);
 // come from shared/catalog/expansion.mjs so the server prices and validates
 // exactly the items the client can place.
 FURNITURE_CATALOG.push(...EXPANSION_CATALOG);
+
+// The full imported Kenney 3D library (see shared/catalog/kenney-library.mjs).
+// Curated replacements below swap existing procedural visuals for a named
+// Kenney model while keeping every id, price and behaviour intact, and the
+// matching library record is withheld so nothing is listed twice.
+FURNITURE_CATALOG.push(...KENNEY_CATALOG);
+applyKenneyReplacements(FURNITURE_CATALOG);
 
 export const FLOOR_STYLES: { id: FloorStyleId; label: string; color: string }[] = [
   { id: 'oak_parquet', label: 'Warm Oak', color: '#c89b67' },

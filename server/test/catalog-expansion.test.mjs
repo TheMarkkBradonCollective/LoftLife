@@ -44,6 +44,8 @@ function readPngHeader(buffer) {
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 const catalog = await import('../../shared/catalog/expansion.mjs');
 const economy = await import('../economy.mjs');
+const { KENNEY_BY_ID } = await import('../../shared/catalog/kenney-library.mjs');
+const { KENNEY_REPLACEMENTS } = await import('../../shared/catalog/kenney-replacements.mjs');
 
 test('catalog records are internally valid and ids are unique', () => {
   assert.deepEqual(catalog.validateCatalogEntries(), []);
@@ -152,7 +154,17 @@ test('server prices and shop mirror the shared catalog exactly', () => {
     const shop = economy.FURNITURE_SHOP.find((entry) => entry.id === item.id);
     assert.ok(shop, `${item.id} missing from the shop`);
     assert.equal(shop.currency, item.currency);
-    assert.equal(shop.preview, `/${item.previewBase}.png`);
+    // A curated replacement keeps the existing record but shows the preview
+    // rendered from its imported GLB; every other item keeps its own render.
+    const replacement = KENNEY_REPLACEMENTS[item.id];
+    const expectedPreview = replacement
+      ? KENNEY_BY_ID[replacement].asset.preview
+      : `/${item.previewBase}.png`;
+    assert.equal(shop.preview, expectedPreview);
+    assert.ok(
+      fs.existsSync(path.join(root, 'public', shop.preview.replace(/^\//, ''))),
+      `${item.id} shop preview is missing`
+    );
     assert.equal(shop.label, item.name);
   }
 });

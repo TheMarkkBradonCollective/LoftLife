@@ -1,0 +1,451 @@
+{
+  "generatedAt": "2026-11-27T11:43:39.719Z",
+  "source": "https://github.com/shorepine/kenney",
+  "license": "CC0-1.0",
+  "kitsProcessed": 21,
+  "kitsInspected": 49,
+  "sourceModels": 1681,
+  "importedModels": 1676,
+  "excludedModels": 5,
+  "excludedKits": [
+    {
+      "kit": "weapon",
+      "models": 37,
+      "reason": "Weapons — excluded by product policy."
+    },
+    {
+      "kit": "blaster",
+      "models": 40,
+      "reason": "Weapons — excluded by product policy."
+    },
+    {
+      "kit": "mini-arena",
+      "models": 22,
+      "reason": "Weapons and fantasy arena pieces; incompatible with the contemporary world."
+    },
+    {
+      "kit": "toy-car",
+      "models": 157,
+      "reason": "Toy racing track, not a city vehicle or furniture asset."
+    },
+    {
+      "kit": "road",
+      "models": 294,
+      "reason": "Generic tile000–tile293 road atlas with no semantic identity; city-roads covers roads."
+    },
+    {
+      "kit": "castle",
+      "models": 76,
+      "reason": "Medieval fantasy architecture; incompatible."
+    },
+    {
+      "kit": "fantasy-town",
+      "models": 167,
+      "reason": "Medieval fantasy architecture; incompatible."
+    },
+    {
+      "kit": "retro-fantasy",
+      "models": 105,
+      "reason": "Medieval pixel-art architecture; incompatible."
+    },
+    {
+      "kit": "pirate",
+      "models": 72,
+      "reason": "Pirate fantasy props; incompatible."
+    },
+    {
+      "kit": "modular-dungeon",
+      "models": 39,
+      "reason": "Dungeon fantasy modules; incompatible."
+    },
+    {
+      "kit": "modular-cave",
+      "models": 40,
+      "reason": "Cave fantasy modules; incompatible."
+    },
+    {
+      "kit": "mini-dungeon",
+      "models": 25,
+      "reason": "Dungeon fantasy modules; incompatible."
+    },
+    {
+      "kit": "graveyard",
+      "models": 91,
+      "reason": "Graveyard/horror props; incompatible."
+    },
+    {
+      "kit": "space",
+      "models": 153,
+      "reason": "Science-fiction space kit; incompatible."
+    },
+    {
+      "kit": "space-station",
+      "models": 97,
+      "reason": "Science-fiction space kit; incompatible."
+    },
+    {
+      "kit": "modular-space",
+      "models": 40,
+      "reason": "Science-fiction space kit; incompatible."
+    },
+    {
+      "kit": "platformer",
+      "models": 153,
+      "reason": "Abstract platformer blocks; no place in a believable world."
+    },
+    {
+      "kit": "hexagon",
+      "models": 72,
+      "reason": "Abstract hex board tiles; incompatible."
+    },
+    {
+      "kit": "marble",
+      "models": 162,
+      "reason": "Tabletop marble-run game; incompatible."
+    },
+    {
+      "kit": "coaster",
+      "models": 183,
+      "reason": "Roller-coaster toy track; incompatible."
+    },
+    {
+      "kit": "minigolf",
+      "models": 126,
+      "reason": "Mini-golf toy course; activity-specific, not a world asset."
+    },
+    {
+      "kit": "racing",
+      "models": 112,
+      "reason": "Race-track toy kit; incompatible with the city scale."
+    },
+    {
+      "kit": "tower-defense",
+      "models": 160,
+      "reason": "Fantasy tower-defence kit; incompatible."
+    },
+    {
+      "kit": "tower-defense-classic",
+      "models": 119,
+      "reason": "Fantasy tower-defence kit; incompatible."
+    },
+    {
+      "kit": "prototype",
+      "models": 145,
+      "reason": "Untextured grey-box prototyping kit; not a finished asset."
+    },
+    {
+      "kit": "brick",
+      "models": 296,
+      "reason": "Toy brick construction system; wrong scale and visual language for the world."
+    },
+    {
+      "kit": "cube-pets",
+      "models": 24,
+      "reason": "Stylised cube pets; incompatible with the character direction."
+    },
+    {
+      "kit": "retro-urban",
+      "models": 124,
+      "reason": "Pixel-art urban kit; incompatible with the contemporary visual identity."
+    }
+  ],
+  "excludedModelDetails": [
+    {
+      "kit": "city-roads",
+      "name": "road-crossroad-barrier",
+      "reason": "no renderable geometry for a catalog preview"
+    },
+    {
+      "kit": "mini-forest",
+      "name": "weapon-arrow",
+      "reason": "weapon or gambling content"
+    },
+    {
+      "kit": "mini-forest",
+      "name": "weapon-bow",
+      "reason": "weapon or gambling content"
+    },
+    {
+      "kit": "mini-arcade",
+      "name": "gambling-machine",
+      "reason": "weapon or gambling content"
+    },
+    {
+      "kit": "mini-arcade",
+      "name": "prize-wheel",
+      "reason": "weapon or gambling content"
+    }
+  ],
+  "byCategory": {
+    "characters": 51,
+    "structure": 243,
+    "vehicles": 134,
+    "roads": 134,
+    "buildings": 116,
+    "outdoor": 282,
+    "commercial": 361,
+    "bathroom": 10,
+    "decor": 43,
+    "bedroom": 10,
+    "seating": 22,
+    "living": 20,
+    "lighting": 7,
+    "tables": 16,
+    "kitchen": 24,
+    "wall": 1,
+    "plants_rugs": 170,
+    "events": 22,
+    "nightlife": 10
+  },
+  "byStyleGroup": {
+    "loftlife-characters": 44,
+    "loftlife-city": 563,
+    "loftlife-hospitality": 560,
+    "loftlife-home": 140,
+    "loftlife-nature": 369
+  },
+  "kitSummary": [
+    {
+      "kit": "furniture",
+      "label": "Furniture",
+      "copied": 140,
+      "imported": 140,
+      "skipped": 0,
+      "categories": {
+        "bathroom": 10,
+        "decor": 4,
+        "bedroom": 10,
+        "seating": 20,
+        "living": 20,
+        "lighting": 7,
+        "tables": 16,
+        "structure": 19,
+        "kitchen": 24,
+        "wall": 1,
+        "plants_rugs": 9
+      }
+    },
+    {
+      "kit": "building",
+      "label": "Building",
+      "copied": 79,
+      "imported": 79,
+      "skipped": 0,
+      "categories": {
+        "structure": 79
+      }
+    },
+    {
+      "kit": "modular-buildings",
+      "label": "Modular Buildings",
+      "copied": 108,
+      "imported": 108,
+      "skipped": 0,
+      "categories": {
+        "structure": 101,
+        "buildings": 7
+      }
+    },
+    {
+      "kit": "city-commercial",
+      "label": "City Commercial",
+      "copied": 41,
+      "imported": 41,
+      "skipped": 0,
+      "categories": {
+        "buildings": 35,
+        "roads": 6
+      }
+    },
+    {
+      "kit": "city-suburban",
+      "label": "City Suburban",
+      "copied": 40,
+      "imported": 40,
+      "skipped": 0,
+      "categories": {
+        "buildings": 21,
+        "outdoor": 19
+      }
+    },
+    {
+      "kit": "city-industrial",
+      "label": "City Industrial",
+      "copied": 25,
+      "imported": 25,
+      "skipped": 0,
+      "categories": {
+        "buildings": 20,
+        "structure": 5
+      }
+    },
+    {
+      "kit": "city-roads",
+      "label": "City Roads",
+      "copied": 72,
+      "imported": 71,
+      "skipped": 1,
+      "categories": {
+        "roads": 71
+      }
+    },
+    {
+      "kit": "car",
+      "label": "Cars",
+      "copied": 50,
+      "imported": 50,
+      "skipped": 0,
+      "categories": {
+        "vehicles": 47,
+        "roads": 3
+      }
+    },
+    {
+      "kit": "train",
+      "label": "Rail",
+      "copied": 103,
+      "imported": 103,
+      "skipped": 0,
+      "categories": {
+        "roads": 54,
+        "vehicles": 49
+      }
+    },
+    {
+      "kit": "watercraft",
+      "label": "Watercraft",
+      "copied": 46,
+      "imported": 46,
+      "skipped": 0,
+      "categories": {
+        "outdoor": 8,
+        "vehicles": 38
+      }
+    },
+    {
+      "kit": "nature",
+      "label": "Nature",
+      "copied": 329,
+      "imported": 329,
+      "skipped": 0,
+      "categories": {
+        "outdoor": 177,
+        "plants_rugs": 152
+      }
+    },
+    {
+      "kit": "mini-forest",
+      "label": "Forest",
+      "copied": 22,
+      "imported": 20,
+      "skipped": 2,
+      "categories": {
+        "outdoor": 10,
+        "characters": 1,
+        "plants_rugs": 9
+      }
+    },
+    {
+      "kit": "mini-skate",
+      "label": "Skate Park",
+      "copied": 20,
+      "imported": 20,
+      "skipped": 0,
+      "categories": {
+        "outdoor": 17,
+        "characters": 3
+      }
+    },
+    {
+      "kit": "food",
+      "label": "Food",
+      "copied": 200,
+      "imported": 200,
+      "skipped": 0,
+      "categories": {
+        "commercial": 200
+      }
+    },
+    {
+      "kit": "mini-market",
+      "label": "Market",
+      "copied": 20,
+      "imported": 20,
+      "skipped": 0,
+      "categories": {
+        "commercial": 11,
+        "characters": 1,
+        "structure": 8
+      }
+    },
+    {
+      "kit": "mini-arcade",
+      "label": "Arcade",
+      "copied": 20,
+      "imported": 18,
+      "skipped": 2,
+      "categories": {
+        "nightlife": 10,
+        "characters": 2,
+        "structure": 6
+      }
+    },
+    {
+      "kit": "holiday",
+      "label": "Holiday",
+      "copied": 99,
+      "imported": 99,
+      "skipped": 0,
+      "categories": {
+        "seating": 2,
+        "buildings": 33,
+        "events": 22,
+        "decor": 39,
+        "structure": 3
+      }
+    },
+    {
+      "kit": "factory",
+      "label": "Factory",
+      "copied": 143,
+      "imported": 143,
+      "skipped": 0,
+      "categories": {
+        "commercial": 130,
+        "structure": 13
+      }
+    },
+    {
+      "kit": "survival",
+      "label": "Rustic",
+      "copied": 80,
+      "imported": 80,
+      "skipped": 0,
+      "categories": {
+        "commercial": 20,
+        "outdoor": 51,
+        "structure": 9
+      }
+    },
+    {
+      "kit": "blocky-characters",
+      "label": "Blocky Characters",
+      "copied": 18,
+      "imported": 18,
+      "skipped": 0,
+      "categories": {
+        "characters": 18
+      }
+    },
+    {
+      "kit": "mini-characters",
+      "label": "Mini Characters",
+      "copied": 26,
+      "imported": 26,
+      "skipped": 0,
+      "categories": {
+        "characters": 26
+      }
+    }
+  ]
+}

@@ -33,7 +33,10 @@ export type FurnitureCategory =
   | 'nightlife'
   | 'specialty'
   | 'events'
-  | 'vehicles';
+  | 'vehicles'
+  | 'buildings'
+  | 'roads'
+  | 'characters';
 
 export type PlacementLayer = 'floor' | 'rug' | 'wall';
 
@@ -71,6 +74,33 @@ export interface FurnitureCatalogItem {
   currency?: 'yuanzi' | 'tongbao';
   /** Exact 3D model kind + parameters, resolved through src/game/models. */
   model?: { kind: string; params?: Record<string, unknown> };
+  /** Imported GLB visual (Kenney). Replaces the procedural model when set. */
+  asset?: {
+    path: string;
+    r2Key?: string;
+    preview: string;
+    previewR2Key?: string;
+    kit: string;
+    kitLabel?: string;
+    styleGroup: string;
+    styleLabel?: string;
+    originalName?: string;
+    scale: number;
+    bounds: [number, number, number];
+    rawBounds?: [number, number, number];
+    triangles: number;
+    materials?: string[];
+    textures: string[];
+    tintRoles: string[];
+    license: string;
+    source: string;
+    sourceUrl?: string;
+    licenseUrl?: string;
+  };
+  /** True when the asset replaces an existing item and should fit its footprint. */
+  assetFit?: boolean;
+  /** Search keywords (imported library records). */
+  tags?: string[];
   /** Preview image base path; variant images append `-<colourIndex>`. */
   previewBase?: string;
   availability?: 'available' | 'incomplete' | 'retired';

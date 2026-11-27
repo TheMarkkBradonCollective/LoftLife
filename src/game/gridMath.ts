@@ -9,7 +9,10 @@ import {
 } from '../../shared/room-walls.mjs';
 import type { WallSide } from './types';
 
-export const SNAP_STEP = 0.5;
+// The persistence contract stores integer cell coordinates (0..GRID_SIZE - size).
+// Snapping must therefore match those cells: half steps round-tripped locally but
+// were rejected by the server on save.
+export const SNAP_STEP = 1;
 
 export function snapGrid(val: number): number {
   return Math.round(val / SNAP_STEP) * SNAP_STEP;

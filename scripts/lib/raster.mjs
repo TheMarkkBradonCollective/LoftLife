@@ -37,6 +37,9 @@ function readMaterial(material) {
   const emissiveIntensity = typeof first.emissiveIntensity === 'number' ? first.emissiveIntensity : 1;
   const opacity = typeof first.opacity === 'number' ? first.opacity : 1;
   const transparent = Boolean(first.transparent) || opacity < 1;
+  // Imported GLB previews attach decoded texture pixels here. Procedural
+  // models leave it unset, so their previews are unchanged.
+  const texture = first.map && first.map.__kenneyTexture ? first.map.__kenneyTexture : null;
   return {
     color,
     emissive,
@@ -45,6 +48,8 @@ function readMaterial(material) {
     metalness: typeof first.metalness === 'number' ? first.metalness : 0,
     opacity,
     transparent,
+    texture,
+    doubleSided: first.side === THREE.DoubleSide,
   };
 }
 
@@ -54,6 +59,7 @@ function collectTriangles(mesh, state, out) {
   if (!geometry || !geometry.attributes || !geometry.attributes.position) return;
   const position = geometry.attributes.position;
   const normal = geometry.attributes.normal;
+  const uv = geometry.attributes.uv;
   const index = geometry.index;
   const matrix = mesh.matrixWorld;
   const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrix);
@@ -76,7 +82,9 @@ function collectTriangles(mesh, state, out) {
       ny = n.y;
       nz = n.z;
     }
-    return { px, py, pz, nx, ny, nz };
+    const u = uv ? uv.getX(i) : 0;
+    const vv = uv ? uv.getY(i) : 0;
+    return { px, py, pz, nx, ny, nz, u, v: vv };
   };
 
   for (let t = 0; t < count; t += 3) {
@@ -245,7 +253,7 @@ export function renderObjectToRgba(object, options = {}) {
     const area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
     const twoSided = Array.isArray(tri.material)
       ? true
-      : Boolean(tri.material && tri.material.transparent);
+      : Boolean(tri.material && (tri.material.transparent || tri.material.doubleSided));
     if (Math.abs(area) < 1e-7) continue;
     if (area > 0 && !twoSided) continue;
 
@@ -285,7 +293,21 @@ export function renderObjectToRgba(object, options = {}) {
           w0 * tri.a.py + w1 * tri.b.py + w2 * tri.c.py,
           w0 * tri.a.pz + w1 * tri.b.pz + w2 * tri.c.pz
         );
-        const [r, g, b] = shade(worldPoint, normal, material);
+        let [r, g, b] = shade(worldPoint, normal, material);
+        if (material.texture) {
+          const u = w0 * tri.a.u + w1 * tri.b.u + w2 * tri.c.u;
+          const v = w0 * tri.a.v + w1 * tri.b.v + w2 * tri.c.v;
+          const tex = material.texture;
+          const tx = Math.min(tex.width - 1, Math.max(0, Math.floor((u % 1 + 1) % 1 * tex.width)));
+          const ty = Math.min(tex.height - 1, Math.max(0, Math.floor((v % 1 + 1) % 1 * tex.height)));
+          const ti = (ty * tex.width + tx) * 4;
+          const tr = tex.rgba[ti] / 255;
+          const tg = tex.rgba[ti + 1] / 255;
+          const tb = tex.rgba[ti + 2] / 255;
+          r *= tr;
+          g *= tg;
+          b *= tb;
+        }
         const alpha = material.opacity;
 
         if (material.transparent && alphaBuffer[idx] > 0) {

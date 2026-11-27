@@ -29,10 +29,15 @@ import {
   Undo2,
   X,
   Check,
+  Building2,
+  Route,
+  Users,
 } from 'lucide-react';
 import { CATALOG_CATEGORIES, COLLECTIONS } from '../../shared/catalog/expansion.mjs';
+import { KENNEY_STYLE_GROUPS } from '../../shared/catalog/kenney-library.mjs';
 import { FLOOR_STYLES, FURNITURE_CATALOG, WALL_STYLES } from '../game/catalog';
 import { catalogPreviewUrl } from '../game/catalogExpansion';
+import { preloadKenneyAsset } from '../game/assets/kenneyRuntime';
 import type { FurnitureCategory } from '../game/types';
 import type { BuildController, HudPresentation } from './types';
 import { cx } from './primitives';
@@ -80,6 +85,12 @@ function catalogIcon(category: FurnitureCategory) {
     case 'events':
     case 'specialty':
       return <Sparkles className="w-4 h-4" />;
+    case 'buildings':
+      return <Building2 className="w-4 h-4" />;
+    case 'roads':
+      return <Route className="w-4 h-4" />;
+    case 'characters':
+      return <Users className="w-4 h-4" />;
     default:
       return <Armchair className="w-4 h-4" />;
   }
@@ -99,18 +110,30 @@ interface BuildPanelProps {
 export const BuildPanel: React.FC<BuildPanelProps> = ({ build, presentation, touch }) => {
   const [query, setQuery] = useState('');
   const [collection, setCollection] = useState('all');
+  const [styleGroup, setStyleGroup] = useState('all');
+  const [visibleCount, setVisibleCount] = useState(72);
 
   const filtered = useMemo(() => {
     const search = query.trim().toLowerCase();
     return FURNITURE_CATALOG.filter((item) => {
       if (build.categoryFilter !== 'all' && item.category !== build.categoryFilter) return false;
       if (collection !== 'all' && !(item.themes ?? []).includes(collection)) return false;
+      if (styleGroup === 'signature' && item.asset) return false;
+      if (styleGroup !== 'all' && styleGroup !== 'signature' && item.asset?.styleGroup !== styleGroup) {
+        return false;
+      }
       if (!search) return true;
-      return `${item.name} ${item.description ?? ''} ${(item.styleTags ?? []).join(' ')}`
+      return `${item.name} ${item.description ?? ''} ${(item.styleTags ?? []).join(' ')} ${(item.tags ?? []).join(' ')}`
         .toLowerCase()
         .includes(search);
     });
-  }, [build.categoryFilter, collection, query]);
+  }, [build.categoryFilter, collection, query, styleGroup]);
+
+  // Filters reset the page window; a 2,000-item catalog must never mount every
+  // preview image at once on a phone.
+  React.useEffect(() => {
+    setVisibleCount(72);
+  }, [build.categoryFilter, collection, query, styleGroup]);
 
   const portraitPhone = presentation === 'mobile-portrait';
 
@@ -381,7 +404,7 @@ export const BuildPanel: React.FC<BuildPanelProps> = ({ build, presentation, tou
                     <input
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
-                      placeholder="Search 344 models — sofas, DJ booths, brick walls, cars…"
+                      placeholder={`Search ${FURNITURE_CATALOG.length} models — sofas, buildings, roads, trees…`}
                       aria-label="Search the build catalog"
                       className="w-full bg-transparent text-[11px] text-white outline-none placeholder:text-white/35"
                     />
@@ -399,11 +422,25 @@ export const BuildPanel: React.FC<BuildPanelProps> = ({ build, presentation, tou
                       </option>
                     ))}
                   </select>
+                  <select
+                    value={styleGroup}
+                    onChange={(event) => setStyleGroup(event.target.value)}
+                    aria-label="Filter by art style"
+                    className="rounded-lg border border-white/12 bg-black/40 px-2 py-1 text-[11px] text-white/85"
+                  >
+                    <option value="all">All art styles</option>
+                    <option value="signature">LoftLife Signature</option>
+                    {KENNEY_STYLE_GROUPS.map((entry) => (
+                      <option key={entry.id} value={entry.id}>
+                        {entry.label}
+                      </option>
+                    ))}
+                  </select>
                   <span className="font-mono-tabular text-[10px] text-white/40">{filtered.length} shown</span>
                 </div>
 
                 <div className="flex items-stretch gap-2 overflow-x-auto no-scrollbar pb-1">
-                  {filtered.map((item) => {
+                  {filtered.slice(0, visibleCount).map((item) => {
                     const active = build.placing?.id === item.id;
                     const preview = catalogPreviewUrl(item, item.defaultColor);
                     return (
@@ -412,6 +449,8 @@ export const BuildPanel: React.FC<BuildPanelProps> = ({ build, presentation, tou
                         type="button"
                         aria-pressed={active}
                         onClick={() => build.onPickCatalog(item.id)}
+                        onMouseEnter={() => { if (item.asset) void preloadKenneyAsset(item); }}
+                        onFocus={() => { if (item.asset) void preloadKenneyAsset(item); }}
                         className={cx(
                           'll-focus flex w-[122px] shrink-0 flex-col gap-1 rounded-xl border p-2 text-left transition-colors',
                           active
@@ -471,6 +510,16 @@ export const BuildPanel: React.FC<BuildPanelProps> = ({ build, presentation, tou
                     <p className="px-2 py-3 text-[11px] text-white/45">
                       No catalogue items match that search and filter.
                     </p>
+                  )}
+                  {filtered.length > visibleCount && (
+                    <button
+                      type="button"
+                      onClick={() => setVisibleCount((count) => count + 96)}
+                      className="ll-focus flex w-[122px] shrink-0 flex-col items-center justify-center gap-1 rounded-xl border border-white/20 bg-white/[0.08] p-2 text-[11px] font-semibold text-white hover:bg-white/15"
+                    >
+                      <Plus className="h-4 w-4" aria-hidden="true" />
+                      Show {Math.min(96, filtered.length - visibleCount)} more
+                    </button>
                   )}
                 </div>
               </>

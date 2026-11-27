@@ -8,13 +8,14 @@ and what is still missing. It is written to be accurate about the last part.
 
 | | Count |
 | --- | --- |
-| Catalog items in game | **344** (73 pre-existing + 271 new) |
-| New parametric model kinds | **95** |
-| Unique preview PNGs | **1,434** (one per item, plus one per colour variant) |
+| Catalog items in game | **1,971** (73 pre-existing + 271 authored + 1,627 imported net-new; 49 existing pieces re-skinned) |
+| New authored parametric model kinds | **95** |
+| Imported GLB models | **1,676** across 21 CC0 Kenney kits |
+| Unique preview PNGs | **3,110** (1,434 procedural incl. colour variants + 1,676 imported) |
 | Preview resolution / format | 512×512, 8-bit RGBA PNG, transparent |
 | Themed collections | 18 (Modern Home → Garden & Patio) |
-| Categories | 20 (structure, living, seating, tables, bedroom, kitchen, bath, commercial, nightlife, specialty, events, outdoor, vehicles, decor, lighting, plants, wall, office, gaming, laundry) |
-| Server-priced shop entries | 344 world assets + 6 wardrobe pieces |
+| Categories | 23 (structure, living, seating, tables, bedroom, kitchen, bath, commercial, nightlife, specialty, events, outdoor, vehicles, decor, lighting, plants, wall, office, gaming, laundry, buildings, roads, characters) |
+| Server-priced shop entries | 1,971 world assets + 6 wardrobe pieces |
 
 Every item has: unique id, display name, category, subcategory, description, model kind + params,
 layer (`floor` / `rug` / `wall`), footprint in metres, price + currency, colour variants, themes,
@@ -29,6 +30,13 @@ bar, retail, salon, gym, office, hotel and gallery fixtures. Nightlife covers DJ
 mixers, subs, truss, moving heads, LED walls, VIP booths and bottle service. Specialty covers the
 hookah and cannabis lounge collections, events cover banquet/wedding/photo-backdrop pieces,
 outdoor covers landscaping, street furniture and pools, vehicles add ten road vehicles.
+
+The **imported Kenney library** adds 1,676 GLB models in 21 classified kits: residential furniture
+and appliances, modular buildings and storefronts, roads and street furniture, cars/trains/boats,
+nature and landscaping, food and restaurant props, retail and market shelving, arcade cabinets,
+seasonal decor, industrial fittings, and static character/accessibility props. Weapon, gambling and
+incompatible art-direction kits are excluded and recorded. Full classification, counts,
+replacement mapping, loader behaviour and R2 layout: [KENNEY-ASSET-LIBRARY.md](KENNEY-ASSET-LIBRARY.md).
 
 ## The model is the source of truth
 
@@ -69,14 +77,16 @@ Changing a model kind's params therefore regenerates exactly the affected previe
 ## UI
 
 **Build panel → Catalogue** (`src/hud/BuildPanel.tsx`): category tabs for all 20 categories, text
-search across name/description/style tags, a themed-collection filter, a live "N shown" count, and
-a card per item with its transparent render, price, footprint and sit/use hint. Cards lazy-load
-(`loading="lazy"`, `decoding="async"`) so a 344-item list costs only the visible images.
+search across name/description/style tags/kit name, a themed-collection filter, an art-style filter,
+a live "N shown" count, and a card per item with its transparent render, price, footprint and
+sit/use hint. Cards lazy-load (`loading="lazy"`, `decoding="async"`) and render in pages of 72 with
+**Show more**, so a 1,971-item list never mounts more than the visible images.
 
 **Market** (`src/components/ShopModal.tsx`): search, category chips, preview thumbnails, owned
 counts, affordability state, and a detail panel that mounts `ModelInspector` — a real WebGL view of
 the same model, drag to rotate, wheel to zoom, auto-spin at rest — plus colour swatches that swap
-the inspector *and* the transparent variant render. Wardrobe items intentionally show no image:
+the inspector *and* the transparent variant render. Imported items show the preview rendered from
+their GLB and are paged (60 + 60) rather than mounting every card. Wardrobe items intentionally show no image:
 the clothing system is unchanged and a garment render would misrepresent it.
 
 ## Server and database
@@ -93,10 +103,12 @@ the clothing system is unchanged and a garment render would misrepresent it.
 
 ## Performance
 
-- Geometry is procedural and shared: 95 builders generate ~1–2 k triangles per item rather than
-  shipping binary assets, and only the items placed in a room are built at runtime.
-- Preview PNGs sit in `public/` (20 MB total, ~14 kB average) and are served as static files with
-  browser caching; they are never imported into the JS bundle.
+- The 95 authored builders generate ~1–2 k triangles per item; imported models average ~27 kB per
+  GLB (largest 920 kB) and are loaded only for items actually placed or inspected in a room, through
+  one cached GLTFLoader with in-flight dedupe and a 240-model LRU.
+- Preview PNGs sit in `public/` (procedural 20 MB; imported 40 MB) and are served as static files
+  with browser caching; they are never imported into the JS bundle. The library metadata (~2.4 MB
+  raw, part of the main gzip chunk) loads once with the catalog, not per room.
 - `ModelInspector` is only mounted when an item is selected, and disposes geometry, materials and
   the WebGL context on unmount or item change.
 - Catalog filtering is memoised and runs over a plain array; no per-render allocations of models.
@@ -106,8 +118,9 @@ the clothing system is unchanged and a garment render would misrepresent it.
 - `npm run db:seed` applies `migrations/0009_catalog_expansion.sql` and the generated seed
   (`migrations/catalog-seed.generated.sql`) row by row, using upserts keyed on `id`. Re-running is
   idempotent and never touches wallets, inventory or purchases.
-- `npm run assets:upload` uploads every preview plus the manifest to
-  `r2://<bucket>/catalog/v1/<category>/<file>.png` with immutable cache headers.
+- `npm run assets:upload` uploads every preview (procedural and imported), every Kenney GLB and
+texture, and both manifests to the unified `r2://<bucket>/catalog/v1/...` layout with immutable
+cache headers (see [KENNEY-ASSET-LIBRARY.md](KENNEY-ASSET-LIBRARY.md#7-cloudflare-r2-storage)).
 - Both scripts refuse to run without their credentials and print the exact blocker; neither has
   been applied in this environment (`DATABASE_URL`, `CATALOG_R2_BUCKET` and
   `CLOUDFLARE_API_TOKEN` are unset), so production storage remains outstanding.
@@ -130,9 +143,14 @@ untrue:
 8. Every required category has ≥6 pieces and every one of the 18 collections has ≥2.
 9. No item relies on a missing or invented preview.
 
-Also run: `npx tsc --noEmit` (clean), `npm run build` (clean), `npm test` (**157 passing** including
-the 9 above and all pre-existing API/multiplayer/permissions checks), `npm run assets:check`
-(344/344 items validated).
+Also run: `npm run lint` (clean), `npm run build` (clean), `npm test` (all passing, including this
+file and the 9 imported-library checks), `npm run assets:check` (3,110/3,110 previews validated).
+
+A live editor pass also confirmed an imported item places, saves (`PUT /api/suite` 200) and survives
+a full reload. That pass exposed and fixed two persistence defects: the autosave gate never opened
+when the game mounted into an already-online session, and half-grid snapping could emit a
+non-integer cell that the server rejected. See
+[KENNEY-ASSET-LIBRARY.md](KENNEY-ASSET-LIBRARY.md#9-verification).
 
 ## Known limitations
 
@@ -153,9 +171,13 @@ the 9 above and all pre-existing API/multiplayer/permissions checks), `npm run a
 - **Legacy texture maps are not sampled by the preview renderer.** It renders base colours and
   material parameters; where a legacy item used a canvas texture, the preview shows its base
   colour. New catalog items are built from flat PBR colours, so their previews are exact.
-- **R2 upload was not executed.** The preview set is small enough to ship as static assets
-  (`public/`), which is what the build does. `catalog_items.preview_r2_key` and
+- **R2 upload was not executed.** All 3,110 previews and 1,676 GLBs ship as static assets from
+  `public/`, which is what the build does. `catalog_items.preview_r2_key` and
   `catalog_seed.generated.sql` are ready for an R2/Neon mirror, but no bucket credentials were
   available in this environment, so no deployment was performed and the migration was not applied.
+- **Imported catalog metadata is not in the Neon seed.** The 1,676 Kenney rows are generated into
+  `shared/catalog/kenney-library.mjs` and served by the Node API and Worker from that shared module;
+  `scripts/export-catalog-sql.mjs` still exports only the authored 344. The game does not read
+  catalog rows from Postgres, so this affects reporting/admin mirrors, not play.
 - **Live in-game screenshots were captured from the running dev build** (see the PR), not from a
   production deployment.

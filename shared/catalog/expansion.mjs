@@ -24,6 +24,8 @@ export const CATALOG_CATEGORIES = [
       { id: 'doors', label: 'Doors & Windows' },
       { id: 'roofs', label: 'Roofs & Exterior' },
       { id: 'grounds', label: 'Grounds & Street' },
+      { id: 'exterior', label: 'Exterior Modules' },
+      { id: 'industrial', label: 'Industrial Modules' },
     ],
   },
   {
@@ -86,6 +88,9 @@ export const CATALOG_CATEGORIES = [
       { id: 'library', label: 'Library & Gallery' },
       { id: 'medical', label: 'Medical' },
       { id: 'warehouse', label: 'Warehouse' },
+      { id: 'food', label: 'Food & Table Props' },
+      { id: 'industrial', label: 'Industrial' },
+      { id: 'retail', label: 'Retail' },
     ],
   },
   {
@@ -97,6 +102,7 @@ export const CATALOG_CATEGORIES = [
       { id: 'stage', label: 'Stage & Screens' },
       { id: 'club_seating', label: 'Club Seating' },
       { id: 'entry', label: 'Entry & Service' },
+      { id: 'arcade', label: 'Arcade & Games' },
     ],
   },
   {
@@ -114,6 +120,7 @@ export const CATALOG_CATEGORIES = [
       { id: 'wedding', label: 'Wedding' },
       { id: 'banquet', label: 'Banquet & Conference' },
       { id: 'ticketing', label: 'Ticketing & Entrance' },
+      { id: 'holiday', label: 'Holiday & Seasonal' },
     ],
   },
   {
@@ -124,6 +131,9 @@ export const CATALOG_CATEGORIES = [
       { id: 'water', label: 'Pools & Water' },
       { id: 'structures', label: 'Outdoor Structures' },
       { id: 'street', label: 'Street & Public Space' },
+      { id: 'water', label: 'Waterfront' },
+      { id: 'props', label: 'Outdoor Props' },
+      { id: 'skatepark', label: 'Skate Park' },
     ],
   },
   {
@@ -133,6 +143,9 @@ export const CATALOG_CATEGORIES = [
       { id: 'cars', label: 'Cars' },
       { id: 'two_wheelers', label: 'Motorcycles & Bikes' },
       { id: 'commercial_vehicles', label: 'Vans & Buses' },
+      { id: 'water', label: 'Boats & Watercraft' },
+      { id: 'rail', label: 'Rail' },
+      { id: 'parts', label: 'Parts & Debris' },
     ],
   },
   {
@@ -168,6 +181,38 @@ export const CATALOG_CATEGORIES = [
       { id: 'art', label: 'Art & Mirrors' },
       { id: 'lighting', label: 'Neon & Lighting' },
       { id: 'electronics', label: 'Electronics' },
+    ],
+  },
+  {
+    id: 'buildings',
+    label: 'Buildings',
+    subcategories: [
+      { id: 'residential', label: 'Homes & Apartments' },
+      { id: 'commercial', label: 'Shops & Storefronts' },
+      { id: 'industrial', label: 'Industrial' },
+      { id: 'skyscrapers', label: 'Towers' },
+      { id: 'storefronts', label: 'Storefronts' },
+    ],
+  },
+  {
+    id: 'roads',
+    label: 'Roads & Streets',
+    subcategories: [
+      { id: 'roads', label: 'Road Tiles' },
+      { id: 'street_furniture', label: 'Street Furniture' },
+      { id: 'lighting', label: 'Street Lighting' },
+      { id: 'bridges', label: 'Bridges' },
+      { id: 'construction', label: 'Construction' },
+      { id: 'rail', label: 'Rail & Transit' },
+      { id: 'sidewalks', label: 'Sidewalks' },
+    ],
+  },
+  {
+    id: 'characters',
+    label: 'Characters',
+    subcategories: [
+      { id: 'static_characters', label: 'Static Character Props' },
+      { id: 'accessibility', label: 'Accessibility Props' },
     ],
   },
 ];

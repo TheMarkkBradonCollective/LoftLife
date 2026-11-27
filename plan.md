@@ -262,7 +262,12 @@ names missing external access; **Next** is unstarted. Deeper detail lives in
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| 344-item catalog (271 new items, 95 model kinds) | Done | `shared/catalog/expansion.mjs`, `server/test/catalog-expansion.test.mjs` |
+| Authored catalog (344 items, 95 model kinds) | Done | `shared/catalog/expansion.mjs`, `server/test/catalog-expansion.test.mjs` |
+| Imported Kenney library (1,676 models / 21 kits; 1,627 net-new catalog rows; 49 re-skins) | Done | `shared/catalog/kenney-library.mjs`, `server/test/kenney-library.test.mjs`, `docs/KENNEY-ASSET-LIBRARY.md` |
+| Real previews + searchable gallery for imported models | Done | `npm run assets:kenney`, `npm run assets:gallery`, `public/asset-gallery.html` |
+| Runtime GLB loading (lazy, deduped, LRU, pending rebuild, R2-ready URLs) | Done | `src/game/assets/kenneyRuntime.ts`, `RoomViewport.tsx`, `BuildPanel.tsx` |
+| Weapon/gambling exclusion + full 49-kit classification | Done | `KENNEY_SUMMARY`, `docs/KENNEY-ASSET-LIBRARY.md` |
+| Placement persistence (online-mount autosave gate, integer cell snapping) | Done | `src/App.tsx`, `src/game/gridMath.ts`; verified by live place → PUT 200 → reload |
 | 1,434 transparent previews rendered from the actual models | Done | `npm run assets:check` |
 | Preview ↔ model provenance (signature + image hash) | Done | `shared/catalog/preview-manifest.json` + manifest tests |
 | Catalog search, filters, collections, live 3D inspector | Done | `src/hud/BuildPanel.tsx`, `src/components/ShopModal.tsx`, `ModelInspector.tsx` |
@@ -272,13 +277,20 @@ names missing external access; **Next** is unstarted. Deeper detail lives in
 | Multi-storey persistence incl. Worker parity | Done | `server/validate.mjs`, `server/test/multifloor.test.mjs`, API round-trip test |
 | Wall-run joining for structural pieces | Partial | bounding-box alignment only; no mitred curves |
 | Catalog schema + generated seed | Done, not applied | `migrations/0009_catalog_expansion.sql`, `scripts/export-catalog-sql.mjs` |
-| R2 preview upload | Blocked | `npm run assets:upload` needs `CATALOG_R2_BUCKET` + `CLOUDFLARE_API_TOKEN` |
+| R2 upload (previews + GLBs + textures + manifests) | Blocked | `npm run assets:upload` needs `CATALOG_R2_BUCKET` + `CLOUDFLARE_API_TOKEN`; script is dry-run verified |
 | Neon migration + seed | Blocked | `npm run db:seed` needs `DATABASE_URL` |
 | Cloudflare deployment | Blocked | no token here; `wrangler deploy --dry-run` passes |
 
 ### Next
 
-1. Expand the clothing catalog with new garment rig geometry (shoes, swimwear, outerwear) plus
+1. Apply the R2 upload and point `VITE_ASSET_BASE_URL` at the bucket/CDN root, then repeat the
+   production asset check on the deployed origin. The importer, previews and uploader are ready; only
+   credentials are missing here.
+2. Split the 1.7 MB imported catalog metadata into a lazily fetched JSON module to trim the initial
+   client chunk on low-end phones.
+3. Commission or author rigged, animated character models; Kenney's character kits are static props
+   and are intentionally not used for player avatars.
+4. Expand the clothing catalog with new garment rig geometry (shoes, swimwear, outerwear) plus
    character-rendered previews; wire records through `shared/character.mjs`.
 2. Mitred geometry for curved/angled wall corners.
 3. Per-storey room outlines, atriums, animated stair traversal.

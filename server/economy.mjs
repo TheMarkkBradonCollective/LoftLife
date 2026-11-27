@@ -10,6 +10,8 @@
 import { db, newId, now, tx, audit } from './db.mjs';
 import { ApiError, badRequest, conflict, notFound } from './errors.mjs';
 import { EXPANSION_BY_ID, EXPANSION_PRICES } from '../shared/catalog/expansion.mjs';
+import { KENNEY_BY_ID, KENNEY_PRICES } from '../shared/catalog/kenney-library.mjs';
+import { KENNEY_REPLACEMENTS } from '../shared/catalog/kenney-replacements.mjs';
 import { CLOTHING_CATALOG, CLOTHING_SHOP, STARTER_CLOTHING } from '../shared/character.mjs';
 import {
   ATM_IDS,
@@ -109,13 +111,18 @@ export const FURNITURE_PRICES = {
   ...Object.fromEntries(
     Object.entries(EXPANSION_PRICES).map(([id, entry]) => [id, entry.price])
   ),
+  // Imported Kenney library (replaced source ids are excluded from the table so
+  // a model used as another item's visual cannot also be bought separately).
+  ...Object.fromEntries(Object.entries(KENNEY_PRICES).map(([id, entry]) => [id, entry.price])),
 };
 
 /** Free starting wardrobe so a new character is never locked out of dressing. */
 export const DEFAULT_OWNED_CLOTHING = STARTER_CLOTHING;
 
 export const FURNITURE_SHOP = Object.entries(FURNITURE_PRICES).map(([id, price]) => {
-  const entry = EXPANSION_BY_ID[id];
+  const entry = EXPANSION_BY_ID[id] ?? KENNEY_BY_ID[id];
+  const replacementAsset = KENNEY_BY_ID[KENNEY_REPLACEMENTS[id]]?.asset;
+  const asset = entry?.asset ?? replacementAsset;
   return {
     id,
     kind: 'furniture',
@@ -126,8 +133,9 @@ export const FURNITURE_SHOP = Object.entries(FURNITURE_PRICES).map(([id, price])
     subcategory: entry?.subcategory,
     description: entry?.description,
     // Every catalog item ships a preview rendered from its own model; legacy
-    // pieces use the same naming convention.
-    preview: `/${entry?.previewBase ?? `catalog-previews/${id}`}.png`,
+    // pieces use the same naming convention and imported records carry the
+    // exact preview path rendered from their GLB.
+    preview: asset?.preview ?? `/${entry?.previewBase ?? `catalog-previews/${id}`}.png`,
   };
 });
 
