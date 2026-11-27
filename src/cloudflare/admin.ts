@@ -1,10 +1,8 @@
 type Sql = { query(query: string, params?: unknown[]): Promise<unknown[]> };
-type Account = { id: string; handle: string; display_name: string; created_at: number; suspended_until?: number; role?: string };
 type User = { id: string; handle: string; role: string };
 type Row = Record<string, unknown>;
 type StaffRole = 'founder' | 'director' | 'management' | 'administrator' | 'moderator' | 'support';
 const ROLES: StaffRole[] = ['founder','director','management','administrator','moderator','support'];
-const ROLE_RANK: Record<StaffRole, number> = { founder: 6, director: 5, management: 4, administrator: 3, moderator: 2, support: 1 };
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
@@ -92,7 +90,9 @@ export async function handleAdminRoute(request: Request, sql: Sql, user: User | 
         FROM ll_admin_audit l LEFT JOIN ll_accounts a ON a.id=l.actor_id
         LEFT JOIN ll_accounts t ON t.id=l.target_id ORDER BY l.created_at DESC LIMIT 80`) as Promise<Array<Row>>,
     ]);
-    const scopedReports = canModerate(actor.role) ? reportRows : [];\n    const scopedAudit = ['founder','director','management','administrator'].includes(actor.role) ? auditRows : [];\n    const staff = staffRows.map((row) => ({
+    const scopedReports = canModerate(actor.role) ? reportRows : [];
+    const scopedAudit = ['founder','director','management','administrator'].includes(actor.role) ? auditRows : [];
+    const staff = staffRows.map((row) => ({
       userId: String(row.id), handle: String(row.handle), displayName: String(row.display_name ?? row.handle),
       role: String(row.role), departments: (() => { try { return parseList(JSON.parse(String(row.departments_json ?? '[]'))); } catch { return []; } })(),
       appointedAt: Number(row.appointed_at),
