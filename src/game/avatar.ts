@@ -1,6 +1,15 @@
 import * as THREE from 'three';
 import { createContactShadowTexture } from './textures';
 import type { AvatarConfig, EmoteType } from './types';
+import { stridePhaseStep, turnLeanFor } from '../../shared/animation.mjs';
+
+/** Optional locomotion context for the animator. */
+export interface AvatarMotion {
+  /** Ground speed in m/s; drives stride length and cadence. */
+  speed?: number;
+  /** Yaw rate in rad/s; produces a subtle lean into turns. */
+  turn?: number;
+}
 
 export interface AvatarRig {
   root: THREE.Group;
@@ -21,7 +30,8 @@ export interface AvatarRig {
     isMoving: boolean,
     elapsed: number,
     delta: number,
-    jumpOffset: number
+    jumpOffset: number,
+    motion?: AvatarMotion
   ) => void;
 }
 
@@ -1101,15 +1111,19 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
 
   let nextBlink = 2.4;
   let blinkTimer = 0;
+  let stridePhase = 0;
 
   function updateAnimation(
     emote: EmoteType,
     isMoving: boolean,
     elapsed: number,
     delta: number,
-    jumpOffset: number
+    jumpOffset: number,
+    motion: AvatarMotion = {}
   ) {
     const k = 1 - Math.exp(-12 * delta);
+    const speed = Math.max(0, motion.speed ?? (isMoving ? 3.1 : 0));
+    const turnLean = turnLeanFor(motion.turn ?? 0);
 
     nextBlink -= delta;
     if (nextBlink <= 0) {
@@ -1141,16 +1155,34 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
     let targetRLegX = 0;
 
     if (isMoving) {
-      const t = elapsed * 10.0;
-      const stride = Math.sin(t);
-      targetPelvisY = PELVIS_BASE_Y + Math.abs(Math.cos(t)) * 0.036;
-      targetTorsoX = 0.07;
-      targetTorsoZ = stride * 0.03;
-      targetLArmX = stride * 0.58;
-      targetRArmX = -stride * 0.58;
-      targetLLegX = -stride * 0.62;
-      targetRLegX = stride * 0.62;
-      targetHeadX = -0.04;
+      // Distance-driven stride: the feet advance with the ground instead of
+      // cycling at a fixed rate, which is what removes foot sliding at both
+      // walking and sprinting speeds.
+      stridePhase += stridePhaseStep(speed, delta);
+      const running = emote === 'run' || speed > 4.6;
+      const stride = Math.sin(stridePhase);
+      const travel = Math.min(1.15, Math.max(0.62, speed / 3.2));
+      if (running) {
+        targetPelvisY = PELVIS_BASE_Y + Math.abs(Math.cos(stridePhase)) * 0.055;
+        targetTorsoX = 0.2;
+        targetTorsoZ = stride * 0.045;
+        targetLArmX = stride * 0.86;
+        targetRArmX = -stride * 0.86;
+        targetLArmZ = 0.16;
+        targetRArmZ = -0.16;
+        targetLLegX = -stride * 0.95;
+        targetRLegX = stride * 0.95;
+        targetHeadX = -0.06;
+      } else {
+        targetPelvisY = PELVIS_BASE_Y + Math.abs(Math.cos(stridePhase)) * (0.03 + travel * 0.012);
+        targetTorsoX = 0.065 + travel * 0.02;
+        targetTorsoZ = stride * 0.028;
+        targetLArmX = stride * (0.45 + travel * 0.16);
+        targetRArmX = -stride * (0.45 + travel * 0.16);
+        targetLLegX = -stride * (0.46 + travel * 0.2);
+        targetRLegX = stride * (0.46 + travel * 0.2);
+        targetHeadX = -0.035;
+      }
     } else if (emote === 'sit') {
       targetPelvisY = 0.56;
       targetTorsoX = -0.05;
@@ -1186,12 +1218,49 @@ export function createAvatarRig(initialConfig: AvatarConfig): AvatarRig {
       targetLArmZ = 2.55 + Math.sin(c) * 0.16;
       targetRArmZ = -2.55 - Math.sin(c) * 0.16;
       targetHeadX = -0.1;
+    } else if (emote === 'talk') {
+      const talk = Math.sin(elapsed * 3.4);
+      targetTorsoX = 0.035;
+      targetHeadX = -0.02 + talk * 0.035;
+      targetHeadY = Math.sin(elapsed * 1.7) * 0.16;
+      targetRArmX = -0.5 + talk * 0.18;
+      targetRArmZ = -0.42 - Math.abs(talk) * 0.16;
+      targetLArmX = -0.18;
+      targetLArmZ = 0.14;
+      targetPelvisY = PELVIS_BASE_Y + Math.sin(elapsed * 2.1) * 0.008;
+    } else if (emote === 'gesture') {
+      const point = Math.sin(elapsed * 2.2);
+      targetTorsoY = 0.16;
+      targetHeadY = -0.12 + point * 0.08;
+      targetRArmX = -1.15 - point * 0.12;
+      targetRArmZ = -0.55;
+      targetLArmX = -0.12;
+      targetLArmZ = 0.12;
+      targetPelvisY = PELVIS_BASE_Y + Math.sin(elapsed * 2.1) * 0.008;
+    } else if (emote === 'enter_vehicle' || emote === 'exit_vehicle') {
+      const entering = emote === 'enter_vehicle';
+      targetPelvisY = PELVIS_BASE_Y - (entering ? 0.24 : 0.12);
+      targetTorsoX = entering ? 0.24 : -0.08;
+      targetHeadX = entering ? -0.1 : 0.02;
+      targetLArmX = entering ? -0.62 : -0.2;
+      targetRArmX = entering ? -0.62 : -0.2;
+      targetLLegX = entering ? -0.55 : -0.24;
+      targetRLegX = entering ? -0.35 : -0.12;
+      targetLArmZ = 0.16;
+      targetRArmZ = -0.16;
+    } else if (emote === 'stand') {
+      targetPelvisY = PELVIS_BASE_Y + Math.sin(elapsed * 2.4) * 0.012;
+      targetTorsoX = -0.02;
+      targetLArmZ = 0.1;
+      targetRArmZ = -0.1;
     } else {
       targetPelvisY = PELVIS_BASE_Y + Math.sin(elapsed * 2.1) * 0.01;
       targetLArmZ = 0.08 + Math.sin(elapsed * 2.1) * 0.015;
       targetRArmZ = -0.08 - Math.sin(elapsed * 2.1) * 0.015;
       targetHeadY = Math.sin(elapsed * 0.65) * 0.1;
     }
+
+    if (!isMoving) targetTorsoZ += turnLean;
 
     bodyPivot.position.y = THREE.MathUtils.lerp(bodyPivot.position.y, targetBodyY, k);
     pelvis.position.y = THREE.MathUtils.lerp(pelvis.position.y, targetPelvisY, k);

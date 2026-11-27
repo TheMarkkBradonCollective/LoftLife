@@ -13,7 +13,20 @@ export type GameMode = 'walk' | 'edit';
 
 export type LightingMood = 'morning' | 'golden' | 'night';
 
-export type EmoteType = 'idle' | 'walk' | 'sit' | 'wave' | 'dance' | 'cheer' | 'jump';
+export type EmoteType =
+  | 'idle'
+  | 'walk'
+  | 'run'
+  | 'stand'
+  | 'sit'
+  | 'wave'
+  | 'dance'
+  | 'cheer'
+  | 'talk'
+  | 'gesture'
+  | 'jump'
+  | 'enter_vehicle'
+  | 'exit_vehicle';
 
 export type FurnitureCategory =
   | 'seating'
@@ -101,6 +114,11 @@ export interface FurnitureCatalogItem {
   assetFit?: boolean;
   /** Search keywords (imported library records). */
   tags?: string[];
+  /** Vehicle classification from shared/catalog/vehicle-library.mjs. */
+  vehicleGroup?: string;
+  vehicleGroupLabel?: string;
+  /** True for styles appropriate to everyday city traffic. */
+  trafficEligible?: boolean;
   /** Preview image base path; variant images append `-<colourIndex>`. */
   previewBase?: string;
   availability?: 'available' | 'incomplete' | 'retired';

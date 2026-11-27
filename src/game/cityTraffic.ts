@@ -479,7 +479,7 @@ export function createCityTraffic(maxAnisotropy: number): TrafficSystemHandles {
   };
 
   const destTex = createDestinationTexture('LOFTLINE · M ST', maxAnisotropy);
-  const { uLines, zLines, uIsMajor, zIsMajor, bounds, busStops, metroLineZ } = CITY_LAYOUT;
+  const { uLines, zLines, uIsMajor, zIsMajor, zHalfWidths, bounds, busStops, metroLineZ } = CITY_LAYOUT;
 
   const vehicles: RoadVehicle[] = [];
   const carColors = [0xd9e0e8, 0x1f2937, 0x2f5a8a, 0x8f2d2d, 0x3b6b58, 0x6b7280, 0xb88635];
@@ -578,6 +578,26 @@ export function createCityTraffic(maxAnisotropy: number): TrafficSystemHandles {
       stopTimer: 0,
       lastStopIdx: -1,
     });
+  }
+
+  // 2b. Parked cars along the kerb. These are deliberately static: they show
+  // that the city has private vehicles without pretending every one is driven.
+  const parkedSpecs: { row: number; u: number; side: 1 | -1; kind: VehicleKind; color: number }[] = [
+    { row: 14, u: uLines[12] - 16, side: 1, kind: 'sedan', color: 0xd9e0e8 },
+    { row: 14, u: uLines[12] - 8, side: 1, kind: 'suv', color: 0x2f5a8a },
+    { row: 14, u: uLines[12] + 8, side: 1, kind: 'coupe', color: 0x8f2d2d },
+    { row: 14, u: uLines[12] + 16, side: 1, kind: 'sedan', color: 0x3b6b58 },
+    { row: 17, u: uLines[12] - 10, side: -1, kind: 'suv', color: 0x6b7280 },
+    { row: 17, u: uLines[12] + 10, side: -1, kind: 'sedan', color: 0xb88635 },
+  ];
+  for (const spot of parkedSpecs) {
+    const built = buildCarMesh(spot.kind, spot.color, shared);
+    const z = zLines[spot.row] + spot.side * (zHalfWidths[spot.row] - 1.35);
+    built.group.position.set(uzToWorldX(spot.u, z), 0.02, z);
+    built.group.rotation.y = spot.side === 1 ? Math.PI / 2 : -Math.PI / 2;
+    built.brakeMat.emissiveIntensity = 0.08;
+    built.headMat.emissiveIntensity = 0.06;
+    trafficGroup.add(built.group);
   }
 
   // 3. Elevated Metro Trains (2 x 3-Car Articulated Trains along 16th St Viaduct y = 6.55m)

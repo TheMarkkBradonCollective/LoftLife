@@ -11,6 +11,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { KENNEY_ITEMS, KENNEY_SOURCE, KENNEY_STYLE_GROUPS } from '../shared/catalog/kenney-library.mjs';
 import { KENNEY_REPLACEMENTS } from '../shared/catalog/kenney-replacements.mjs';
+import { CHARACTER_LIBRARY } from '../shared/catalog/character-library.mjs';
+import { VEHICLE_LIBRARY } from '../shared/catalog/vehicle-library.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -21,22 +23,48 @@ for (const [catalogId, sourceId] of Object.entries(KENNEY_REPLACEMENTS)) {
   usedFor.set(sourceId, catalogId);
 }
 
-const tiles = KENNEY_ITEMS.map((item) => ({
-  id: item.id,
-  name: item.name,
-  category: item.category,
-  subcategory: item.subcategory,
-  kit: item.asset.kit,
-  styleGroup: item.asset.styleGroup,
-  preview: `catalog-previews/${item.id}.png`,
-  triangles: item.asset.triangles,
-  size: item.size,
-  usedFor: usedFor.get(item.id) ?? null,
-  source: item.asset.sourceUrl,
-}));
+const charactersById = new Map(CHARACTER_LIBRARY.items.map((item) => [item.id, item]));
+const vehiclesById = new Map(VEHICLE_LIBRARY.items.map((item) => [item.id, item]));
+
+const tiles = KENNEY_ITEMS.map((item) => {
+  const character = charactersById.get(item.id);
+  const vehicle = vehiclesById.get(item.id);
+  return {
+    id: item.id,
+    name: item.name,
+    category: item.category,
+    subcategory: item.subcategory,
+    kit: item.asset.kit,
+    styleGroup: item.asset.styleGroup,
+    preview: `catalog-previews/${item.id}.png`,
+    triangles: item.asset.triangles,
+    size: item.size,
+    usedFor: usedFor.get(item.id) ?? null,
+    source: item.asset.sourceUrl,
+    characterRole: character?.role ?? null,
+    characterRoleLabel: character?.roleLabel ?? null,
+    characterUse: character?.use ?? null,
+    vehicleGroup: vehicle?.group ?? null,
+    vehicleGroupLabel: vehicle?.groupLabel ?? null,
+    trafficEligible: vehicle?.trafficEligible ?? false,
+    groupKey: character ? `character:${character.role}` : vehicle ? `vehicle:${vehicle.group}` : '',
+  };
+});
 
 const kits = [...new Set(tiles.map((tile) => tile.kit))].sort();
 const categories = [...new Set(tiles.map((tile) => tile.category))].sort();
+
+const groupLabels = {
+  ...Object.fromEntries(Object.entries(CHARACTER_LIBRARY.roleLabels).map(([role, label]) => [`character:${role}`, label])),
+  ...Object.fromEntries(Object.entries(VEHICLE_LIBRARY.groupLabels).map(([group, label]) => [`vehicle:${group}`, label])),
+};
+const groups = [...new Set(tiles.map((tile) => tile.groupKey).filter(Boolean))]
+  .map((key) => ({
+    key,
+    label: groupLabels[key] ?? key,
+    count: tiles.filter((tile) => tile.groupKey === key).length,
+  }))
+  .sort((a, b) => a.key.localeCompare(b.key));
 
 const escape = (value) =>
   String(value)
@@ -72,6 +100,12 @@ const html = `<!doctype html>
   .meta{color:var(--muted);font-size:10px;display:flex;flex-wrap:wrap;gap:4px 8px;font-variant-numeric:tabular-nums}
   .tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:1px 7px;font-size:9.5px;color:#b9c2cd}
   .used{border-color:var(--brass);color:#e7c98f}
+  .legend{margin-top:12px;border:1px solid var(--line);border-radius:11px;padding:8px 12px;background:#12151a}
+  .legend summary{cursor:pointer;color:#c3ccd8;font-size:12px;font-weight:600}
+  .legend-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-top:10px;font-size:11px;color:var(--muted)}
+  .legend-grid b{color:var(--ink);font-size:11.5px}
+  .legend-grid ul{margin:6px 0;padding-left:16px}
+  .legend-grid p{margin:6px 0 0}
   footer{padding:0 clamp(16px,4vw,40px) 40px;color:var(--muted);font-size:11px}
   a{color:#bcd3c1}
 </style>
@@ -85,14 +119,25 @@ const html = `<!doctype html>
     <span><b>${kits.length}</b> kits</span>
     <span><b>${categories.length}</b> categories</span>
     <span><b>${KENNEY_STYLE_GROUPS.length}</b> style groups</span>
+    <span><b>${CHARACTER_LIBRARY.count}</b> characters · <b>${CHARACTER_LIBRARY.counts.pedestrian ?? 0}</b> pedestrian</span>
+    <span><b>${VEHICLE_LIBRARY.count}</b> vehicle assets · <b>${VEHICLE_LIBRARY.counts.passenger_cars ?? 0}</b> cars</span>
     <span><b>${Object.keys(KENNEY_REPLACEMENTS).length}</b> replace existing items</span>
   </div>
   <div class="controls">
     <input id="q" type="search" placeholder="Search names, kits, tags…" aria-label="Search assets">
     <select id="kit" aria-label="Filter by kit"><option value="">All kits</option>${kits.map((kit) => `<option>${escape(kit)}</option>`).join('')}</select>
     <select id="category" aria-label="Filter by category"><option value="">All categories</option>${categories.map((category) => `<option>${escape(category)}</option>`).join('')}</select>
+    <select id="group" aria-label="Filter by character or vehicle group"><option value="">All people & vehicles</option>${groups.map((group) => `<option value="${escape(group.key)}">${escape(group.label)} (${group.count})</option>`).join('')}</select>
     <select id="style" aria-label="Filter by style group"><option value="">All art styles</option>${KENNEY_STYLE_GROUPS.map((group) => `<option value="${escape(group.id)}">${escape(group.label)}</option>`).join('')}</select>
   </div>
+  <details class="legend">
+    <summary>Character roles, vehicle groups and the avatar animation sets</summary>
+    <div class="legend-grid">
+      <div><b>Character resources</b><ul>${Object.entries(CHARACTER_LIBRARY.counts).map(([role, count]) => `<li>${escape(CHARACTER_LIBRARY.roleLabels[role] ?? role)}: ${count}</li>`).join('')}</ul><p>${escape(CHARACTER_LIBRARY.animationNote)}</p></div>
+      <div><b>Animation sets (LoftLife rig)</b><ul>${CHARACTER_LIBRARY.animationSets.map((set) => `<li><b>${escape(set.label)}</b> — ${escape(set.use)}</li>`).join('')}</ul></div>
+      <div><b>In-world fleet</b><ul>${VEHICLE_LIBRARY.inWorldFleet.map((vehicle) => `<li><b>${escape(vehicle.label)}</b> — ${escape(vehicle.note)}</li>`).join('')}</ul><p>Every imported tile is a real preview rendered from its GLB. The in-world fleet is a runtime mesh and appears in the city screenshots in <code>docs/CHARACTERS-NPCS-VEHICLES.md</code>.</p></div>
+    </div>
+  </details>
 </header>
 <main>
   <p class="count" id="count"></p>
@@ -106,6 +151,7 @@ const count = document.getElementById('count');
 const q = document.getElementById('q');
 const kit = document.getElementById('kit');
 const category = document.getElementById('category');
+const group = document.getElementById('group');
 const style = document.getElementById('style');
 const esc = (value) => String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 let shown = 0;
@@ -114,6 +160,7 @@ function render(){
   const list = ASSETS.filter((asset) =>
     (!kit.value || asset.kit === kit.value) &&
     (!category.value || asset.category === category.value) &&
+    (!group.value || asset.groupKey === group.value) &&
     (!style.value || asset.styleGroup === style.value) &&
     (!term || (asset.name + ' ' + asset.kit + ' ' + asset.category + ' ' + asset.subcategory + ' ' + asset.id).toLowerCase().includes(term))
   );
@@ -122,10 +169,10 @@ function render(){
     <img src="\${esc(asset.preview)}" alt="\${esc(asset.name)}" loading="lazy" decoding="async" width="512" height="512">
     <figcaption>\${esc(asset.name)}</figcaption>
     <div class="meta"><span>\${esc(asset.kit)}</span><span>\${asset.size[0]}×\${asset.size[1]} m</span><span>\${asset.triangles} tris</span></div>
-    <div class="meta"><span class="tag">\${esc(asset.category)}</span>\${asset.usedFor ? \`<span class="tag used">replaces \${esc(asset.usedFor)}</span>\` : ''}</div>
+    <div class="meta"><span class="tag">\${esc(asset.category)}</span>\${asset.characterRoleLabel ? \`<span class="tag\">\${esc(asset.characterRoleLabel)}</span>\` : ''}\${asset.vehicleGroupLabel ? \`<span class="tag\${asset.trafficEligible ? ' used' : ''}\">\${esc(asset.vehicleGroupLabel)}</span>\` : ''}\${asset.usedFor ? \`<span class="tag used">replaces \${esc(asset.usedFor)}</span>\` : ''}</div>
   </figure>\`).join('');
 }
-for (const control of [q,kit,category,style]) control.addEventListener('input', render);
+for (const control of [q,kit,category,group,style]) control.addEventListener('input', render);
 render();
 </script>
 </body>

@@ -32,9 +32,9 @@ Other scripts:
 | `npm run assets:kenney` | Render the imported models' previews from their shipped GLBs (`--force`, `--kit=`, `--limit=`) |
 | `npm run assets:check` | Re-validate every procedural and imported preview against the model that produced it |
 | `npm run assets:gallery` | Rebuild the searchable `public/asset-gallery.html` preview gallery |
-| `npm run assets:upload` | Upload previews, GLBs, textures and manifests to R2 under `catalog/v1/` (needs `CATALOG_R2_BUCKET` + `CLOUDFLARE_API_TOKEN`) |
+| `npm run assets:upload` | Upload previews, GLBs, textures and manifests to R2 under `catalog/v1/` (needs `CATALOG_R2_BUCKET` + `CLOUDFLARE_API_TOKEN`; `-- --dry-run` lists what it would send) |
 | `npm run db:seed` | Apply the catalog migration + generated seed to Neon (`--apply`, needs `DATABASE_URL`) |
-| `npm test` | 180 integration/acceptance checks: HTTP API, permissions, CUBITS/TG-Banking/cash, economy, parties, voice signalling, transit seats, Cloudflare-issued identity, two-client city movement, 64-player capacity, the shipping Worker/Durable Object path, the catalog/preview pipeline, and multi-storey build persistence |
+| `npm test` | 208 integration/acceptance checks: HTTP API, permissions, CUBITS/TG-Banking/cash, economy, parties, voice signalling, transit seats, character animation, city crowd, vehicle/character libraries, Cloudflare-issued identity, two-client city movement, 64-player capacity, the shipping Worker/Durable Object path, the catalog/preview pipeline, and multi-storey build persistence |
 | `npm run lint` | `tsc --noEmit` |
 
 Catalog assets are generated, not hand-drawn: `shared/catalog/expansion.mjs` records the authored
@@ -57,10 +57,41 @@ All optional; sensible defaults are used.
 | `LOFTLIFE_SESSION_SECRET` | unset | Optional. HMAC key (≥ 32 chars) for tokens minted by the Cloudflare edge; must match the Worker's secret |
 | `DATABASE_URL` | unset | Optional. Neon pooled connection string — read by the Cloudflare Worker, never by the game server |
 | `GAME_ORIGIN` | `http://127.0.0.1:8787` | Optional. Where the Worker proxies `/api/*` and `/ws` |
-| `VITE_ASSET_BASE_URL` | unset | Optional. R2/CDN root ending in `/catalog/v1`; unset serves models and previews from `public/` |
+| `VITE_ASSET_BASE_URL` | unset | Optional. Absolute R2/CDN root ending in `/catalog/v1`. Set for a production build to serve models and previews from R2 and keep them out of `dist/`; unset serves them from `public/` in dev and bundles them in `dist/` |
 
 **No secrets or API keys are required for local play.** Passwords are hashed with scrypt, session
 tokens are stored only as SHA-256 digests, and nothing sensitive belongs in source control.
+
+### Production asset hosting (R2)
+
+Development is unchanged: `public/catalog-previews/` and `public/models/kenney/` are served by Vite
+as-is. A production build with `VITE_ASSET_BASE_URL` set does **not** copy those trees (about 112 MB)
+into `dist/`; the client resolves every preview and GLB against the bucket instead. Without the
+variable the build still works, but warns that it is bundling the binary assets.
+
+```bash
+# 1. Upload once, then again after any re-import (`npm run assets:import` + `assets:kenney`).
+#    Credentials come from the environment only; nothing is committed.
+export CATALOG_R2_BUCKET="loftlife-assets"
+export CLOUDFLARE_API_TOKEN="<token with R2 write access>"
+export CLOUDFLARE_ACCOUNT_ID="<account id, when the token spans accounts>"
+npm run assets:upload -- --dry-run     # lists the objects and exits
+npm run assets:upload                  # writes catalog/v1/models/..., catalog/v1/catalog-previews/..., catalog/v1/manifest/...
+
+# 2. Point the build at the public bucket/CDN root. It must end in /catalog/v1.
+VITE_ASSET_BASE_URL="https://assets.example.com/catalog/v1" npm run build
+```
+
+The bucket needs public read access (R2 → Settings → Public access, either the `r2.dev` URL or a
+custom domain) and a CORS policy allowing `GET`/`HEAD` from the site origin, because the browser
+loads GLBs and PNG textures from it:
+
+```json
+[{"AllowedOrigins":["https://app.example.com"],"AllowedMethods":["GET","HEAD"],"AllowedHeaders":["*"],"MaxAgeSeconds":86400}]
+```
+
+Exact object keys, the uploader's validation and the current status are in
+[docs/KENNEY-ASSET-LIBRARY.md](docs/KENNEY-ASSET-LIBRARY.md#7-cloudflare-r2-storage).
 
 ### Optional: Cloudflare edge + Neon identity
 
@@ -130,7 +161,11 @@ known gaps, priorities and long-term roadmap. The more implementation-specific s
   boulevard, avenue/street/residential hierarchy, civic plaza, Central Park, entertainment and
   retail promenades, luxury waterfront, industrial yards and a three-block airport campus.
   Eleven walk-up destinations with interiors, live traffic and signals, a district-aware city map
-  and walkable streets. See [docs/CITY-MASTERPLAN.md](docs/CITY-MASTERPLAN.md).
+  and walkable streets. A deterministic sidewalk population (50 agents on high quality) walks block
+  rings, crosses at corners, visits venues and sits on real seats, using animated LoftLife rigs nearby
+  and static imported pedestrians in the middle distance. Parked cars, ambient taxis, buses and the
+  elevated metro share the road grid. See [docs/CITY-MASTERPLAN.md](docs/CITY-MASTERPLAN.md) and
+  [docs/CHARACTERS-NPCS-VEHICLES.md](docs/CHARACTERS-NPCS-VEHICLES.md).
 
 **Online (added in this build)**
 - Accounts, sessions, rate limiting; first account on a fresh database becomes admin.
@@ -174,7 +209,11 @@ known gaps, priorities and long-term roadmap. The more implementation-specific s
   architecture, roads, vehicles, nature, food, retail, arcade, seasonal, industrial and static
   character props), stored as GLB + textures and loaded on demand through one cached GLTFLoader.
   1,676 previews are rendered from those exact GLBs, and the catalogue is searchable and filterable
-  in the real build panel. See [docs/KENNEY-ASSET-LIBRARY.md](docs/KENNEY-ASSET-LIBRARY.md).
+  in the real build panel. The character library classifies 51 pedestrian/service/accessibility
+  records, and the vehicle library groups 134 models (passenger, SUV/van, commercial, taxi, bus/rail,
+  watercraft, karts and parts) with group filters and real previews. See
+  [docs/KENNEY-ASSET-LIBRARY.md](docs/KENNEY-ASSET-LIBRARY.md) and
+  [docs/CHARACTERS-NPCS-VEHICLES.md](docs/CHARACTERS-NPCS-VEHICLES.md).
 - **Asset pipeline**: 1,434 procedural plus 1,676 imported transparent 512×512 PNG previews rendered
   offline from the same object the game places, with manifests tying item id → model signature →
   image hash.
@@ -222,7 +261,7 @@ shared/            pure rules shared by server and client (device detection, HUD
 shared/catalog/    expansion.mjs (authored catalog), kenney-library.mjs (generated import),
                    kenney-replacements.mjs, preview manifests
 shared/kenney/     GLB reader and full PNG decoder used by the import/preview pipeline
-public/models/     kenney/<kit>/ GLB models + Textures (served locally, mirrored to R2)
+public/models/     kenney/<kit>/ GLB models + Textures (dev-served; uploaded to R2, excluded from production dist)
 scripts/           render-catalog-previews.mjs, import-kenney-library.mjs,
                    render-kenney-previews.mjs, export-catalog-sql.mjs, lib/ (PNG codec, CPU
                    renderer, headless DOM shim)
@@ -249,6 +288,9 @@ docs/              AUDIT.md, ARCHITECTURE.md, CATALOG-EXPANSION.md, ROADMAP.md, 
 - [docs/KENNEY-ASSET-LIBRARY.md](docs/KENNEY-ASSET-LIBRARY.md) — the imported 1,676-model Kenney
   library: kit classification and exclusions, catalog metadata, preview provenance, runtime loader,
   replacements, R2 layout, character/animation audit, verification and limitations.
+- [docs/CHARACTERS-NPCS-VEHICLES.md](docs/CHARACTERS-NPCS-VEHICLES.md) — character/avatar separation,
+  the 13-state animation foundation, city crowd behaviour and LOD, vehicle groups, in-world traffic
+  and transit, performance and verification.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased plan with current status.
 - [docs/MULTIPLAYER-VALIDATION.md](docs/MULTIPLAYER-VALIDATION.md) — multiplayer and
   production validation: what the automated checks prove, what still needs a deployed run.

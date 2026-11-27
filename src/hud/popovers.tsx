@@ -6,6 +6,7 @@ import {
   Gamepad2,
   Hand,
   Maximize2,
+  MessageCircle,
   Minimize2,
   Music,
   Sparkles,
@@ -40,6 +41,8 @@ const position = (
 
 export const EMOTES: { id: EmoteType; label: string; icon: React.ReactNode }[] = [
   { id: 'wave', label: 'Wave', icon: <Hand className="w-4 h-4" /> },
+  { id: 'talk', label: 'Talk', icon: <MessageCircle className="w-4 h-4" /> },
+  { id: 'gesture', label: 'Gesture', icon: <Hand className="w-4 h-4" /> },
   { id: 'dance', label: 'Dance', icon: <Music className="w-4 h-4" /> },
   { id: 'cheer', label: 'Cheer', icon: <Sparkles className="w-4 h-4" /> },
   { id: 'jump', label: 'Hop', icon: <ArrowUp className="w-4 h-4" /> },
