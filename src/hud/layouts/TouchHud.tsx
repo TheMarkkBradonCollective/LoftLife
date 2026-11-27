@@ -31,10 +31,11 @@ interface TouchHudProps {
 /**
  * Touch gameplay HUD.
  *
- * Movement lives in one thumb's corner, camera gestures stay on the world
- * itself, and the contextual actions sit in the opposite corner. Tablets get
- * wider spacing, labels and a small social rail; phones stay icon-first.
- * Handedness mirrors the whole arrangement.
+ * Third-person movement lives in one thumb's corner. Isometric movement is
+ * tap-to-walk directly on the world, leaving the play surface unobstructed.
+ * Camera gestures stay on the world itself, and contextual actions sit in the
+ * opposite corner. Tablets get wider spacing, labels and a small social rail;
+ * phones stay icon-first. Handedness mirrors the third-person arrangement.
  */
 export const TouchHud: React.FC<TouchHudProps> = ({
   presentation,
@@ -70,7 +71,8 @@ export const TouchHud: React.FC<TouchHudProps> = ({
     <>
       <TopHud {...top} compact={!tablet} dense={landscapePhone} />
 
-      {hudShowsMovement(state) && (
+      {/* Isometric uses tap-to-walk; never cover the world with a movement stick. */}
+      {viewMode !== 'isometric' && hudShowsMovement(state) && (
         <Joystick
           side={stickSide}
           scale={scale}
