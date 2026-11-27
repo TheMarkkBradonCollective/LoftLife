@@ -363,7 +363,7 @@ export class LoftLifeRealtime {
         connectedAt: Date.now(), lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
       };
       const active = this.players(instanceId);
-      if (active.length >= MAX_PLAYERS) {
+      if (active.length >= MAX_PLAYERS && !active.some((entry) => entry.userId === player.userId)) {
         error(ws, 'instance_full', 'TheCity is full');
         ws.close(1013, 'instance_full');
         return;
@@ -445,7 +445,7 @@ export class LoftLifeRealtime {
     }
 
     const active = this.players(instanceId);
-    if (active.length >= capacity) {
+    if (active.length >= capacity && !active.some((entry) => entry.userId === account.id)) {
       error(ws, 'instance_full', 'This instance is full');
       ws.close(1013, 'instance_full');
       return;
