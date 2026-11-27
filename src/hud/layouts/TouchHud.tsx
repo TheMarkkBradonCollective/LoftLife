@@ -12,9 +12,11 @@ import type {
   HudState,
 } from '../types';
 import type { TouchLayoutPreferences } from '../../net/api';
+import type { ViewMode } from '../../game/types';
 
 interface TouchHudProps {
   presentation: HudPresentation;
+  viewMode: ViewMode;
   state: HudState;
   layout: TouchLayoutPreferences;
   top: TopHudProps;
@@ -36,6 +38,7 @@ interface TouchHudProps {
  */
 export const TouchHud: React.FC<TouchHudProps> = ({
   presentation,
+  viewMode,
   state,
   layout,
   top,
@@ -78,6 +81,7 @@ export const TouchHud: React.FC<TouchHudProps> = ({
 
       <ActionLayer
         state={state}
+        viewMode={viewMode}
         riding={state === 'vehicle'}
         primary={primary}
         side={actionSide}
