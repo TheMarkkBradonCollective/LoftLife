@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { buildPreviewModel } from '../game/modelPreview';
+import { preloadImportedFurniture } from '../game/importedFurniture';
 
 interface ModelInspectorProps {
   catalogId: string;
@@ -27,6 +28,17 @@ export const ModelInspector: React.FC<ModelInspectorProps> = ({
 }) => {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [failed, setFailed] = useState(false);
+  const [importedFurnitureRevision, setImportedFurnitureRevision] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    void preloadImportedFurniture().then((revision) => {
+      if (!cancelled) setImportedFurnitureRevision(revision);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -158,7 +170,7 @@ export const ModelInspector: React.FC<ModelInspectorProps> = ({
       renderer.dispose();
       if (renderer.domElement.parentNode === host) host.removeChild(renderer.domElement);
     };
-  }, [catalogId, colour, active]);
+  }, [catalogId, colour, active, importedFurnitureRevision]);
 
   if (failed && fallbackSrc) {
     return (
