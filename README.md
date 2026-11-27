@@ -27,7 +27,7 @@ Other scripts:
 | `npm run dev` | Vite only (no backend — the app falls back to offline mode) |
 | `npm run server` | API + realtime gateway on `:8787`; also serves `dist/` if built |
 | `npm run build` | Production build to `dist/` |
-| `npm test` | 24 integration tests: HTTP API, permissions, economy, parties, voice signalling, transit seats, Cloudflare-issued identity, and real WebSocket clients |
+| `npm test` | 124 integration/acceptance checks: HTTP API, permissions, economy, parties, voice signalling, transit seats, Cloudflare-issued identity, two-client city movement, 64-player capacity, and the shipping Worker/Durable Object path |
 | `npm run lint` | `tsc --noEmit` |
 
 ### Environment variables
@@ -160,3 +160,5 @@ docs/              AUDIT.md, ARCHITECTURE.md, ROADMAP.md
 - [docs/DEVICE-COMPATIBILITY.md](docs/DEVICE-COMPATIBILITY.md) — runtime/input matrix, HUD rules,
   mobile renderer budget and the device test report.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased plan with current status.
+- [docs/MULTIPLAYER-VALIDATION.md](docs/MULTIPLAYER-VALIDATION.md) — multiplayer and
+  production validation: what the automated checks prove, what still needs a deployed run.

@@ -40,8 +40,15 @@ import {
 
 const TICK_MS = 100;
 const DEFAULT_CITY_CAPACITY = 64;
-const MAX_CITY_COORD = 500;
-const MAX_STEP_PER_TICK = 40; // metres; sprint is far slower than this
+// The walkable city reaches x≈632 / z≈447 at the airport, so the sanity box has
+// to cover the whole layout, not just the hotel plaza.
+const MAX_CITY_COORD = 1500;
+const MIN_STEP_ALLOWANCE = 2.5; // metres of slack for one pose message
+const MAX_SPEED = 12; // m/s; sprint is 10.5, the rest is lag slack
+// The client's scene reports its spawn a moment after the socket joins; until
+// then it may still be sending the placeholder origin. Placement is accepted
+// without the speed check for this window, then movement is validated.
+const SPAWN_GRACE_MS = 5_000;
 const MAX_POSE_PER_SECOND = 30;
 const MAX_CHAT_PER_10S = 8;
 const IDLE_TIMEOUT_MS = 60_000;
@@ -183,6 +190,15 @@ function joinInstance(player, instance) {
     return false;
   }
   player.instanceId = instance.id;
+  // Every instance has its own coordinate space (city blocks vs. room grid),
+  // so the next pose re-establishes the position instead of being measured
+  // against the old instance.
+  player.positioned = false;
+  player.joinedAt = now();
+  player.lastPoseAt = now();
+  player.x = 0;
+  player.y = 0;
+  player.z = 0;
   instance.members.set(player.connId, player);
   send(player.ws, {
     t: 'ready',
@@ -370,17 +386,28 @@ function handlePose(player, msg) {
   if (player.riding) return;
   const nextX = clamp(Number(msg.x), MAX_CITY_COORD);
   const nextZ = clamp(Number(msg.z), MAX_CITY_COORD);
-  const jump = Math.hypot(nextX - player.x, nextZ - player.z);
-  if (jump > MAX_STEP_PER_TICK) {
-    player.teleportStrikes += 1;
-    // Repeated impossible movement gets the connection dropped.
-    if (player.teleportStrikes > 12) {
-      fail(player.ws, 'kicked', 'Movement rejected by the server');
-      player.ws.close(4002, 'movement');
+  if (!player.positioned || now() - player.joinedAt < SPAWN_GRACE_MS) {
+    // The client owns its spawn point (TheCity arrival is at the airport, far
+    // from the origin), so placement only has to be inside the map.
+    player.positioned = true;
+    player.lastPoseAt = now();
+  } else {
+    const elapsed = Math.max(1, Math.min(2_000, now() - player.lastPoseAt));
+    const allowed = Math.max(MIN_STEP_ALLOWANCE, (MAX_SPEED * elapsed) / 1_000 + 0.75);
+    const jump = Math.hypot(nextX - player.x, nextZ - player.z);
+    if (jump > allowed) {
+      player.teleportStrikes += 1;
+      player.lastPoseAt = now();
+      // Repeated impossible movement gets the connection dropped.
+      if (player.teleportStrikes > 12) {
+        fail(player.ws, 'kicked', 'Movement rejected by the server');
+        player.ws.close(4002, 'movement');
+      }
+      return;
     }
-    return;
   }
   player.teleportStrikes = Math.max(0, player.teleportStrikes - 1);
+  player.lastPoseAt = now();
   player.x = nextX;
   player.z = nextZ;
   player.y = clamp(Number(msg.y), 3);
@@ -568,6 +595,9 @@ export function attachRealtime(httpServer) {
       emote: 'idle',
       location: 'world',
       lastSeen: now(),
+      lastPoseAt: now(),
+      joinedAt: now(),
+      positioned: false,
       lastChatAt: 0,
       chatBudget: [],
       poseCount: 0,
