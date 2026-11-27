@@ -857,3 +857,4 @@ export class LoftLifeRealtime {
   async webSocketError(ws: HibernatableWebSocket) {
     await this.disconnectPlayer(ws);
 }
+}
