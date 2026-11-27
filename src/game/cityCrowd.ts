@@ -112,10 +112,9 @@ function createCrowdLodAvatar(avatar: AvatarConfig): THREE.Group {
  *
  *  - Near agents are full LoftLife avatar rigs, so they animate, sit, talk and
  *    wave with the same rig as players.
- *  - Distant agents are static Kenney pedestrian models on a contact shadow;
- *    they cost one draw call and keep the sidewalk busy at a fraction of the
- *    cost.
- *  - The nearest rigs are capped by graphics quality. Everything else is hidden.
+ *  - Distant agents use a lightweight avatar-colored LOD with matching skin,
+ *    hair, clothing and facing direction, avoiding an identity/model swap.
+ *  - Both render tiers stay within the existing graphics-quality budgets.
  *
  * The simulation itself lives in `shared/city-crowd.mjs` and is unit-tested
  * without a browser or Three.js.
