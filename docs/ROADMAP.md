@@ -16,7 +16,7 @@ Status legend: **Done** (implemented and verified) · **Partial** (real function
 | 7 | Main City, transportation, vehicles, interactive locations | **Done** — city, ambient traffic, two rideable LoftLine routes with server-assigned seats |
 | 8 | Economy: Yuanzi, Tongbao, wallets, transactions, shops | **Partial** — wallets, ledger, purchases, daily reward. No earned income loop from activities, no player trading |
 | 9 | Cross-platform (browser / Windows / Android, Unity 6) | **Partial** — the web client is responsive with dedicated touch controls; the protocol is documented for a Unity client, which is not started |
-| 10 | Testing and launch preparation | **Partial** — 24 integration tests, code splitting, Cloudflare Worker + Neon identity path; no CI, no load testing, live-Neon sign-in not yet verified |
+| 10 | Testing and launch preparation | **Partial** — 112 tests, CI checks and Cloudflare deployment workflow are active; commit `262e285` is deployed. Live two-client guest validation against Neon/Durable Objects, migration verification and load testing remain open |
 
 ## Deliberately not done, because it needs a decision
 
@@ -34,33 +34,31 @@ These affect money or player trust, so they are proposed rather than implemented
 
 ## Recommended next sequence
 
-Ordered by player-visible value per unit of risk.
+Ordered by launch risk first, then player-visible value.
 
-1. **Server-side collision** (Phase 7/10). Move walkability to the server using the existing
-   `cityLayout` data exported as a shared manifest, then reject blocked moves. This is the honest
-   fix for movement cheating, and it also enables anti-cheat for vehicles.
-2. **Earned income loop** (Phase 8). Shifts at city businesses, deliveries, or activity rewards —
-   designed with the economy owner before implementation, because it sets the pace of the game.
-3. **Suite guest visits through the hotel door** (Phase 4). Owned suites are account-scoped; the
+1. **Live production acceptance test** (Phase 10). Verify guest session create/revoke, two separate
+   clients joining the same `city:main`, mutual presence, city/nearby chat, private-world and
+   account-feature rejection, and the 65th join receiving `instance_full`. Verify guest expiry and
+   reconnect behavior against the deployed Worker, real Neon database and Durable Object.
+2. **Choose the full-city experience** (Phase 2/10). The current limit is 64 in one shared city.
+   Recommended direction: a waiting lobby/queue that admits players when a slot opens, rather than
+   silently splitting TheCity into numbered shards. This is a product/architecture decision; no
+   queue is implemented yet.
+3. **Guest identity presentation** (HUD). The server identity is `Guest User - [display name]`.
+   The HUD was intentionally left untouched during the parity slice; align its remaining guest
+   display in a separate UI change after reviewing the visible locations.
+4. **Server-side collision** (Phase 7/10). Move walkability to the server using the existing
+   `cityLayout` data exported as a shared manifest, then reject blocked moves. This also enables
+   anti-cheat for vehicles.
+5. **Suite guest visits through the hotel door** (Phase 4). Owned suites are account-scoped; the
    door should open the owner's suite for a visitor instead of routing through the worlds system.
-4. **TURN relay for voice** (Phase 5). The mesh currently relies on a public STUN server; symmetric
-   NATs need a TURN service, which costs money and needs an ops decision.
-5. **Unity 6 client spike** (Phase 9). Prove the existing REST + WS protocol from a Unity scene with
-   one avatar, one chat channel, one party and one tram ride before building content. Do not fork the
-   data model.
-6. **CI + load testing** (Phase 10). `npm test` + `tsc` + build on every PR; a k6/artillery scenario
-   for 200 concurrent sockets to find the real instance ceiling.
-7. **Custom assets** (Phase 6). Only after the validation/moderation/storage design above.
+6. **Earned income loop** (Phase 8). Shifts at city businesses, deliveries, or activity rewards —
+   design the earning rates and rewards before implementation.
+7. **TURN relay for voice** (Phase 5). The mesh currently relies on a public STUN server; symmetric
+   NATs need a TURN service, which requires an operating-cost decision.
+8. **Unity 6 client spike** (Phase 9). Prove the existing REST + realtime protocol from a Unity
+   scene with one avatar, one chat channel, one party and one tram ride before building content.
+9. **Load testing** (Phase 10). Add a repeatable 200-client socket scenario after the live
+   two-client acceptance test; measure the real Durable Object ceiling and tune capacity from data.
+10. **Custom assets** (Phase 6). Only after validation, moderation and storage-cost design is agreed.
 
-## Definition of done for the final acceptance goal
-
-The fifteen-step acceptance list in the project directive requires all of: accounts, character,
-persistent city, hotel, owned room, meeting players, messaging **and voice**, exploration, transit,
-shopping, two currencies, world creation, invitations and collaboration, visiting others' worlds, and
-cross-platform progress. Today the build satisfies accounts, character persistence, city and hotel
-exploration, owned and decorated suites, meeting other players in real time, messaging, proximity
-voice, rideable transit, shopping, both currencies, world creation/permissions/visiting,
-collaboration, party chat and mobile controls.
-
-Still genuinely open: **cross-platform Unity clients**, **custom uploaded assets**, **server-side
-collision** and **an earned-income economy loop**. None of those are claimed as working.
