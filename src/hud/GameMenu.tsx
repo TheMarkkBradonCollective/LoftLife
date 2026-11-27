@@ -92,6 +92,7 @@ export interface GameMenuProps {
   mode: GameMode;
   canEditRoom: boolean;
   viewMode: ViewMode;
+  canChangeView: boolean;
   closeZoom: boolean;
   followCharacter: boolean;
   mood: LightingMood;
@@ -1027,16 +1028,23 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                   </MenuCard>
 
                   <MenuCard className="space-y-2">
-                    <SectionHeading hint={viewMode === 'play' ? 'Play view' : 'Isometric'}>Camera</SectionHeading>
-                    <Segmented
-                      label="Camera view"
-                      value={viewMode}
-                      onChange={(id) => props.onSetView(id as ViewMode)}
-                      options={[
-                        { id: 'isometric', label: 'Isometric', icon: <Eye className="w-3.5 h-3.5" /> },
-                        { id: 'play', label: 'Play view', icon: <Gamepad2 className="w-3.5 h-3.5" /> },
-                      ]}
-                    />
+                    <SectionHeading hint={viewMode === 'play' ? 'Third-Person' : 'Isometric'}>Camera</SectionHeading>
+                    {canChangeView ? (
+                      <Segmented
+                        label="Camera view"
+                        value={viewMode}
+                        onChange={(id) => props.onSetView(id as ViewMode)}
+                        options={[
+                          { id: 'isometric', label: 'Isometric', icon: <Eye className="w-3.5 h-3.5" /> },
+                          { id: 'play', label: 'Third-Person', icon: <Gamepad2 className="w-3.5 h-3.5" /> },
+                        ]}
+                      />
+                    ) : (
+                      <p className="rounded-lg bg-slate-100 px-3 py-2 text-[11px] text-slate-600">
+                        Camera follows phone orientation: portrait is Isometric, landscape is Third-Person.
+                        Lock a mode in Settings → Mobile.
+                      </p>
+                    )}
                     <Toggle
                       label="Follow character"
                       detail="Isometric lets you orbit and follow the avatar. Third-Person follows and uses mouse-look."
