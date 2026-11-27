@@ -22,6 +22,7 @@ interface VoiceControlProps {
   onRangeChange: (range: VoiceSnapshot['range']) => void;
   onMicPress: () => void;
   onMicRelease: () => void;
+  onMicModeChange: (mode: VoiceSnapshot['micMode']) => void;
   onOpenSettings: () => void;
   /** Labels stay on desktop; phones use the icon with an accessible name. */
   showLabel: boolean;
@@ -40,6 +41,7 @@ export const VoiceControl: React.FC<VoiceControlProps> = ({
   onRangeChange,
   onMicPress,
   onMicRelease,
+  onMicModeChange,
   onOpenSettings,
   showLabel,
 }) => {
@@ -129,6 +131,17 @@ export const VoiceControl: React.FC<VoiceControlProps> = ({
           </div>
 
           <div>
+            <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.14em] text-white/50">Microphone activation</span>
+            <div className="grid grid-cols-3 gap-1 rounded-xl border border-white/12 bg-black/25 p-1" role="group" aria-label="Microphone activation mode">
+              {(['open-mic', 'push-to-talk', 'toggle-to-talk'] as const).map((mode) => (
+                <button key={mode} type="button" aria-pressed={voice.micMode === mode} onClick={() => { onMicRelease(); onMicModeChange(mode); }} className={cx('ll-focus rounded-lg px-1 py-2 text-[9px] font-semibold transition-colors', voice.micMode === mode ? 'bg-white text-[#15181b]' : 'text-white/65 hover:text-white')}>
+                  {MIC_MODE_INFO[mode].label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
             <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.14em] text-white/50">
               Voice range
             </span>
@@ -164,6 +177,13 @@ export const VoiceControl: React.FC<VoiceControlProps> = ({
             </button>
           </div>
 
+          {voice.micMode === 'open-mic' ? (
+            <div className="rounded-xl border border-white/15 bg-white/8 px-3 py-3 text-center text-[11px] text-white/70">Open Mic · microphone transmits whenever Voice Range is enabled and the mic is unmuted.</div>
+          ) : voice.micMode === 'toggle-to-talk' ? (
+            <button type="button" aria-pressed={voice.transmitting} onClick={() => { onMicPress(); }} className={cx('ll-focus flex min-h-[52px] items-center justify-center gap-2 rounded-xl border text-[12px] font-bold', voice.transmitting ? 'bg-white text-[#15181b] border-white' : 'bg-white/10 text-white border-white/20')}>
+              <Mic className="w-4 h-4" /> {voice.transmitting ? 'Tap to stop talking' : 'Tap to talk'}
+            </button>
+          ) : (
           <button
             type="button"
             aria-label={`${micMode.label}. Hold to transmit.`}
@@ -200,6 +220,7 @@ export const VoiceControl: React.FC<VoiceControlProps> = ({
             {blocked ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
             {blocked ? 'Microphone unavailable' : 'Hold to talk'}
           </button>
+          )}
 
           <HudButton
             variant="quiet"

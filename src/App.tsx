@@ -2210,6 +2210,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
           void session.pressMicrophone();
         }}
         onMicRelease={session.releaseMicrophone}
+        onMicModeChange={session.setMicMode}
         onOpenVoiceSettings={() => {
           sfx.playClick();
           setRoomSettingsOpen(true);
@@ -2222,6 +2223,10 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         }}
         fullscreen={fullscreen}
         onToggleFullscreen={toggleFullscreen}
+        currentStreet={cityStreet}
+        locationLabel={locationTitle}
+        playerPoseRef={playerPoseRef}
+        onOpenCityMap={() => setCityMapOpen(true)}
       />
 
       {/* One consistent game menu: map, world, inventory, character, social,
