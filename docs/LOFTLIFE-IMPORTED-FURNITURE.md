@@ -28,7 +28,8 @@ We intentionally do not mix unrelated low-poly packs into this collection. Every
 - Original PBR textures and material maps are preserved. LoftLife finish swatches apply a restrained tint, while metal details are protected from broad recoloring.
 - Existing placement, seat anchors, item IDs, pricing, inventory and room persistence remain unchanged.
 - If the remote manifest or a model is unavailable, the existing procedural LoftLife builder remains the fallback.
-- The first successful preload rebuilds current furniture and the placement ghost so imported models appear without a page refresh.
+- The first successful preload rebuilds current furniture, the placement ghost and the live 3D inspector so imported models appear without a page refresh.
+- Existing static catalog PNGs are intentionally not overwritten by this first integration; their thumbnails still use the established renderer until a dedicated GLB thumbnail pass is added.
 
 ## Source and licensing
 
