@@ -204,7 +204,6 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
         ) : (
           <DesktopHud
             presentation={presentation as 'desktop-browser' | 'desktop-app'}
-            state={state}
             top={top}
             fullscreen={fullscreen}
             onToggleFullscreen={onToggleFullscreen}
