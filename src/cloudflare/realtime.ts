@@ -15,6 +15,7 @@ type Player = {
   instanceId: string; x: number; y: number; z: number; yaw: number;
   emote: string; location: string; lastSeen: number; lastChatAt: number; lastPoseAt?: number;
   voice?: boolean; voiceMode?: 'whisper' | 'say' | 'shout'; voiceBudget?: number[];
+  connectedAt?: number; departed?: boolean;
   riding?: string | null; transitLineId?: string | null; transitSeat?: number | null;
   transitStartStop?: number; transitStartedAt?: number;
 };
@@ -50,7 +51,7 @@ interface HibernatableWebSocket extends WebSocket {
 interface DurableObjectStateLike {
   acceptWebSocket(socket: HibernatableWebSocket): void;
   getWebSockets(): HibernatableWebSocket[];
-  storage: { get<T>(key: string): Promise<T | undefined>; put(key: string, value: unknown): Promise<void> };
+  storage: { get<T>(key: string): Promise<T | undefined>; put(key: string, value: unknown): Promise<void>; setAlarm(scheduledTime: number | Date): Promise<void> };
 }
 declare class WebSocketPair {
   0: WebSocket;
@@ -61,6 +62,9 @@ export class LoftLifeRealtime {
   private sql: Sql | null = null;
   constructor(private ctx: DurableObjectStateLike, private env: Env) {}
   private lastSnapshotAt = 0;
+  private static readonly PRESENCE_SWEEP_MS = 15_000;
+  private static readonly STALE_CONNECTION_MS = 90_000;
+  private static readonly PENDING_CONNECTION_MS = 15_000;
 
   private database(): Sql {
     if (!this.env.DATABASE_URL) throw new Error('DATABASE_URL is not configured');
@@ -186,7 +190,8 @@ export class LoftLifeRealtime {
     const client = pair[0];
     const server = pair[1] as HibernatableWebSocket;
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ instanceId, pending: true });
+    server.serializeAttachment({ instanceId, pending: true, pendingSince: Date.now() });
+    await this.schedulePresenceSweep();
     return new Response(null, { status: 101, webSocket: client } as ResponseInit & { webSocket: WebSocket });
   }
 
@@ -214,7 +219,8 @@ export class LoftLifeRealtime {
       return;
     }
 
-    const player = current as Player;
+    const player = { ...current, lastSeen: Date.now() } as Player;
+    ws.serializeAttachment(player);
     switch (message.t) {
       case 'pose': {
         const now = Date.now();
@@ -317,7 +323,7 @@ export class LoftLifeRealtime {
         connId: crypto.randomUUID(), userId: guest.guest_id, handle: 'guest',
         name: guest.display_name, avatar: null, isGuest: true, instanceId,
         x: 0, y: 0, z: 0, yaw: 0, emote: 'idle', location: 'world', voice: false, voiceMode: 'say',
-        lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
+        connectedAt: Date.now(), lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
       };
       const active = this.players(instanceId);
       if (active.length >= MAX_PLAYERS) {
@@ -326,6 +332,7 @@ export class LoftLifeRealtime {
         return;
       }
       ws.serializeAttachment(player);
+      await this.replaceDuplicateConnections(ws, player);
       send(ws, { t: 'ready', instance: { id: instanceId, kind: 'city', worldId: null, capacity: MAX_PLAYERS, count: active.length + 1 }, you: publicPlayer(player), players: active.map(publicPlayer) });
       this.broadcast(instanceId, { t: 'join', player: publicPlayer(player) }, ws);
       this.broadcastSnapshot(instanceId, true);
@@ -416,6 +423,7 @@ export class LoftLifeRealtime {
       lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
     };
     ws.serializeAttachment(player);
+    await this.replaceDuplicateConnections(ws, player);
     await this.updatePartyPresence(account.id, instanceId);
     const players = this.players(instanceId);
     const existingPlayers = players.filter((entry) => entry.connId !== player.connId);
