@@ -1,10 +1,8 @@
 import React from 'react';
 import { TopHud, type TopHudProps } from '../TopHud';
-import type { HudState } from '../types';
 
 interface DesktopHudProps {
   presentation: 'desktop-browser' | 'desktop-app';
-  state: HudState;
   top: TopHudProps;
   fullscreen: boolean;
   onToggleFullscreen: () => void;
@@ -18,13 +16,11 @@ interface DesktopHudProps {
  */
 export const DesktopHud: React.FC<DesktopHudProps> = ({
   presentation,
-  state,
   top,
   fullscreen,
   onToggleFullscreen,
 }) => (
-  <>
-    <TopHud
+  <TopHud
       {...top}
       compact={false}
       dense={false}
@@ -33,5 +29,4 @@ export const DesktopHud: React.FC<DesktopHudProps> = ({
       fullscreen={fullscreen}
       onToggleFullscreen={onToggleFullscreen}
     />
-  </>
 );
