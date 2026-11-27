@@ -263,10 +263,12 @@ test('worker: two guests share TheCity, see movement and city chat', async () =>
   assert.equal(readyA.instance.id, 'city:main');
   assert.equal(readyA.you.isGuest, true);
   assert.equal(readyA.you.name, 'Guest User - Sky Visitor');
+  assert.equal(readyA.you.voice, false, 'guest visitors never advertise private voice');
 
   const readyB = firstMessage(guestB.pair, 'ready');
   assert.equal(readyB.instance.id, 'city:main');
   assert.ok(readyB.players.some((player) => player.userId === guestA.session.guest.id));
+  assert.equal(readyB.players.find((player) => player.userId === guestA.session.guest.id).voice, false);
 
   await new Promise((resolve) => setImmediate(resolve));
   const join = firstMessage(guestA.pair, 'join');
@@ -310,11 +312,18 @@ test('worker: two guests share TheCity, see movement and city chat', async () =>
 
   await durable.webSocketMessage(
     guestB.pair.server,
+    JSON.stringify({ t: 'voice', to: readyA.you.connId, kind: 'offer', data: {} })
+  );
+  assert.ok(guestB.pair.client.messages.some((message) => message.t === 'error' && message.code === 'forbidden'),
+    'guest visitors cannot use voice signalling');
+
+  await durable.webSocketMessage(
+    guestB.pair.server,
     JSON.stringify({ t: 'party', action: 'create' })
   );
   assert.equal(
     guestB.pair.client.messages.filter((message) => message.t === 'error' && message.code === 'forbidden').length,
-    2
+    3
   );
 
   const worldUpgrade = await worker.fetch(websocketRequest('world:test-world'), env);

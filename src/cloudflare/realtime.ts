@@ -15,6 +15,7 @@ type Player = {
   instanceId: string; x: number; y: number; z: number; yaw: number;
   emote: string; location: string; lastSeen: number; lastChatAt: number; lastPoseAt?: number;
   positioned?: boolean; teleportStrikes?: number; sessionExpiresAt?: number; joinedAt?: number;
+  voice?: boolean; voiceMode?: 'whisper' | 'say' | 'shout'; voiceBudget?: number[];
   riding?: string | null; transitLineId?: string | null; transitSeat?: number | null;
   transitStartStop?: number; transitStartedAt?: number;
 };
@@ -45,6 +46,7 @@ function publicPlayer(p: Player) {
     name: p.isGuest ? `Guest User - ${p.name}` : p.name, displayName: p.name, isGuest: Boolean(p.isGuest),
     avatar: p.avatar, x: p.x, y: p.y, z: p.z, yaw: p.yaw,
     emote: p.emote, location: p.location, riding: p.riding ?? null,
+    voice: Boolean(p.voice), voiceMode: p.voiceMode ?? 'say',
   };
 }
 function error(ws: WebSocket, code: string, message: string) {
@@ -267,6 +269,10 @@ export class LoftLifeRealtime {
           emote: String(message.emote ?? 'idle').slice(0, 24),
           location: String(message.location ?? 'world').slice(0, 24),
           lastSeen: now, lastPoseAt: now,
+          voice: !player.isGuest && message.voice === true,
+          voiceMode: message.voiceMode === 'whisper' || message.voiceMode === 'shout' || message.voiceMode === 'say'
+            ? message.voiceMode
+            : (player.voiceMode ?? 'say'),
         };
         if (!player.positioned || now - Number(player.joinedAt ?? 0) < SPAWN_GRACE_MS) {
           // The client owns its spawn point (TheCity arrival is at the airport,
@@ -319,12 +325,22 @@ export class LoftLifeRealtime {
         return;
       case 'voice': {
         if (player.isGuest) { error(ws, 'forbidden', 'Guest visitors cannot use private voice signalling'); return; }
+        if (!player.voice) return;
+        const kind = String(message.kind ?? '');
+        if (!['offer', 'answer', 'ice'].includes(kind)) { error(ws, 'bad_request', 'Unknown voice signal'); return; }
+        const now = Date.now();
+        const budget = (player.voiceBudget ?? []).filter((at) => now - at < 10_000);
+        if (budget.length >= 250) { error(ws, 'rate_limited', 'Voice signalling rate limited'); return; }
+        budget.push(now);
         const target = String(message.to ?? '');
         const peer = this.ctx.getWebSockets().find((candidate) => {
           const state = candidate.deserializeAttachment() as Player | undefined;
-          return state?.connId === target && state.instanceId === player.instanceId;
+          return state?.connId === target && state.instanceId === player.instanceId &&
+            state.userId !== player.userId && state.voice === true && !state.isGuest;
         });
-        if (peer) send(peer, { t: 'voice', from: { connId: player.connId, userId: player.userId, handle: player.handle, name: player.name }, kind: message.kind, data: message.data });
+        if (!peer) return;
+        ws.serializeAttachment({ ...player, voiceBudget: budget });
+        send(peer, { t: 'voice', from: { connId: player.connId, userId: player.userId, handle: player.handle, name: player.name }, kind, data: message.data ?? null });
         return;
       }
       default:
@@ -365,7 +381,7 @@ export class LoftLifeRealtime {
       const player: Player = {
         connId: crypto.randomUUID(), userId: guest.guest_id, handle: 'guest',
         name: guest.display_name, avatar: null, isGuest: true, instanceId,
-        x: 0, y: 0, z: 0, yaw: 0, emote: 'idle', location: 'world',
+        x: 0, y: 0, z: 0, yaw: 0, emote: 'idle', location: 'world', voice: false, voiceMode: 'say',
         lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
         positioned: false, teleportStrikes: 0, sessionExpiresAt: Number(payload.exp) * 1000,
         joinedAt: Date.now(),
@@ -464,7 +480,7 @@ export class LoftLifeRealtime {
     const player: Player = {
       connId: crypto.randomUUID(), userId: account.id, handle: account.handle,
       name: account.display_name || account.handle, avatar, instanceId,
-      x: 0, y: 0, z: 0, yaw: 0, emote: 'idle', location: 'world',
+      x: 0, y: 0, z: 0, yaw: 0, emote: 'idle', location: 'world', voice: false, voiceMode: 'say',
       lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
       positioned: false, teleportStrikes: 0, sessionExpiresAt: Number(payload.exp) * 1000,
       joinedAt: Date.now(),
