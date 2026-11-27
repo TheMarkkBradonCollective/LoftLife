@@ -1,8 +1,8 @@
 /**
  * Player keybindings, shared by the browser, the server and the tests.
  *
- * Movement is context-specific: `isometric` bindings pan the camera, `play`
- * bindings move the avatar. The same physical key (WASD) is therefore a
+ * Movement is context-specific: `isometric` and `play` bindings both move the
+ * avatar relative to their camera. The same physical key (WASD) is therefore a
  * legitimate default in both contexts and is not reported as a conflict.
  * Every other action is global.
  */
