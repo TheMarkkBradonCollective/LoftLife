@@ -73,7 +73,8 @@ export type GameMenuSection =
   | 'messages'
   | 'emotes'
   | 'settings'
-  | 'leave';
+  | 'leave'
+  | 'admin';
 
 export interface GameMenuProps {
   open: boolean;
@@ -121,6 +122,7 @@ export interface GameMenuProps {
   onOpenAuth: () => void;
   onOpenControls: () => void;
   onOpenWorldManage: () => void;
+  onOpenAdmin: () => void;
   onOpenSocial: (intent: SocialIntent) => void;
   onEmote: (emote: EmoteType) => void;
   onExitPlatform?: () => void;
@@ -145,6 +147,7 @@ const SECTIONS: {
   { id: 'emotes', label: 'Emotes', hint: 'Expressions', icon: <Sparkles className="w-4 h-4" />, group: 'You' },
   { id: 'settings', label: 'Settings', hint: 'Camera, audio, controls', icon: <Settings2 className="w-4 h-4" />, group: 'System' },
   { id: 'leave', label: 'Leave world', hint: 'Travel & account', icon: <LogOut className="w-4 h-4" />, group: 'System' },
+  { id: 'admin', label: 'Administration', hint: 'LoftLife staff console', icon: <Shield className="w-4 h-4" />, group: 'System' },
 ];
 
 function itemLabel(catalogId: string): string {
@@ -203,6 +206,7 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
+  const [adminAvailable, setAdminAvailable] = useState(false);
 
   const locationTitle = world
     ? world.name
@@ -238,6 +242,20 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open || !online || guest) {
+      setAdminAvailable(false);
+      return;
+    }
+    let cancelled = false;
+    api.adminConsole().then(() => {
+      if (!cancelled) setAdminAvailable(true);
+    }).catch(() => {
+      if (!cancelled) setAdminAvailable(false);
+    });
+    return () => { cancelled = true; };
+  }, [open, online, guest]);
 
   useEffect(() => {
     if (!open || section !== 'friends' || !online) return;
@@ -290,7 +308,7 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
   const socialChat = (intent: SocialIntent) => closeThen(() => props.onOpenSocial(intent));
 
   // Guests have no account, friends list or direct messages to manage.
-  const sections = SECTIONS.filter((entry) => hudSectionAvailable(entry.id, { guest }));
+  const sections = SECTIONS.filter((entry) => hudSectionAvailable(entry.id, { guest }) && (entry.id !== 'admin' || adminAvailable));
   const groups: { id: string; label: string; entries: typeof SECTIONS }[] = [
     { id: 'Explore', label: 'Explore', entries: sections.filter((entry) => entry.group === 'Explore') },
     { id: 'Social', label: 'Social', entries: sections.filter((entry) => entry.group === 'Social') },
@@ -1293,6 +1311,16 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                     )}
                   </MenuCard>
                 </>
+              )}
+
+              {section === 'admin' && (
+                <MenuCard className="space-y-3">
+                  <SectionHeading>LoftLife Administration</SectionHeading>
+                  <p className="text-sm text-black/60">Open the secure staff dashboard for platform leadership, staff appointments, player accounts, moderation and audit history.</p>
+                  <HudButton theme="light" variant="primary" icon={<Shield className="w-4 h-4" />} onClick={() => closeThen(props.onOpenAdmin)}>
+                    Open Admin Dashboard
+                  </HudButton>
+                </MenuCard>
               )}
 
               {section === 'leave' && (

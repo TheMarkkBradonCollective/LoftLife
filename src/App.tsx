@@ -17,6 +17,7 @@ import { WorldsModal } from './components/WorldsModal';
 import { WorldStudio } from './components/WorldStudio';
 import { GameInterface } from './hud/GameInterface';
 import { GameMenu } from './hud/GameMenu';
+import { AdminDashboard } from './components/AdminDashboard';
 import { SocialPanel } from './hud/SocialPanel';
 import type { BuildController, SocialIntent } from './hud/types';
 import { PlatformNotice } from './components/PlatformNotice';
@@ -335,6 +336,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(initial.avatar);
   const [activeWorld, setActiveWorld] = useState<WorldSummary | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
   // The world/controls sheet is a detail view opened from the central menu.
   const [worldMenuOpen, setWorldMenuOpen] = useState(false);
   const [worldMenuTab, setWorldMenuTab] = useState<'map' | 'world' | 'manage' | 'controls'>('map');
@@ -2289,6 +2291,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onOpenAuth={() => setAuthOpen(true)}
         onOpenControls={openWorldControls}
         onOpenWorldManage={openWorldManage}
+        onOpenAdmin={() => setAdminOpen(true)}
         onOpenSocial={openSocial}
         onEmote={triggerEmote}
         onExitPlatform={
@@ -2305,6 +2308,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onRequestFullscreen={toggleFullscreen}
         onRetrySync={retryOnlineSave}
       />
+      {adminOpen && <AdminDashboard onClose={() => setAdminOpen(false)} />}
+
 
       {/* Social sheet: chat, people, friends, party, shop and worlds. */}
       <SocialPanel
