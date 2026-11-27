@@ -2,9 +2,8 @@ import * as THREE from 'three';
 import { buildExtraFurniture } from './furnitureExtra';
 import { getExpansionCatalogItem } from './catalogExpansion';
 import { buildCatalogModel } from './models';
+import { buildImportedFurnitureGroup } from './importedFurniture';
 import { createArtTexture, createRugTexture, createVinylTexture } from './textures';
-import { getCatalogItem } from './catalog';
-import { getKenneyAssetModel } from './assets/kenneyRuntime';
 import type { PlacedItem } from './types';
 
 // Shared helper to create rounded/beveled box via ExtrudeGeometry
@@ -50,32 +49,16 @@ export function buildFurnitureGroup(
   placed: PlacedItem,
   opts: FurnitureBuildOptions
 ): THREE.Group {
+  // Imported GLBs override only the curated catalog ids. Until the remote
+  // CC0 model has loaded (or if it is unavailable), the original builder below
+  // remains the exact fallback.
+  const imported = buildImportedFurnitureGroup(placed, opts);
+  if (imported) return imported;
+
   const group = new THREE.Group();
   group.userData.uid = placed.uid;
   group.userData.catalogId = placed.catalogId;
   group.userData.active = Boolean(placed.active);
-
-  // Imported GLB visual. The asset replaces the procedural model entirely; if
-  // it has not finished downloading the group stays empty and is marked
-  // pending, so the room viewport rebuilds it when the asset lands. No old
-  // placeholder is drawn in the meantime.
-  const catalogItem = getCatalogItem(placed.catalogId);
-  if (catalogItem?.asset) {
-    const model = getKenneyAssetModel(catalogItem, {
-      color: placed.color,
-      isGhost: opts.isGhost,
-      active: placed.active,
-    });
-    if (model) {
-      group.add(model);
-      group.userData.importedAsset = catalogItem.asset.path;
-      group.userData.assetSource = catalogItem.asset.source;
-      group.userData.assetLicense = catalogItem.asset.license;
-    } else {
-      group.userData.assetPending = true;
-    }
-    return group;
-  }
 
   const primaryColor = new THREE.Color(placed.color);
   const fabricMat = new THREE.MeshPhysicalMaterial({
