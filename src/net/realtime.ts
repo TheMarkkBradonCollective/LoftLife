@@ -224,6 +224,11 @@ export class RealtimeClient {
         case 'leave':
           this.options.onLeave?.(String(msg.connId ?? ''));
           break;
+        case 'replaced':
+          this.closedByUser = true;
+          socket.close(4003, 'replaced');
+          this.options.onStatus?.('offline');
+          break;
         case 'chat':
           this.options.onChat?.(msg as unknown as ChatEvent);
           break;
