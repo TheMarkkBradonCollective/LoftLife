@@ -7,8 +7,8 @@ LoftLife platform staff are separate from player-created city staff. Platform ro
 1. **Founders** — Markk and Alijah. Both founder seats are protected from staff-role changes and removals through the dashboard.
 2. **Directors** — executive department oversight and appointment of Management, Administrators, Moderators, and Support within their assigned departments.
 3. **Management** — daily operations and appointment/removal of Moderators and Support within assigned departments.
-4. **Administrators** — platform account administration, assigned operational controls, and moderation queue access.
-5. **Moderators** — reports, warnings/discipline workflow, and temporary account suspensions.
+4. **Administrators** — player account lookup and moderation queue access.
+5. **Moderators** — report review and temporary account suspensions.
 6. **Support** — player assistance and account lookup; no staff appointments or moderation actions.
 
 Departments currently supported: Development, Community, Operations, Marketing, Finance, Player Support, and Executive. Department scope is stored with each staff appointment.
