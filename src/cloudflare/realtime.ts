@@ -484,7 +484,7 @@ export class LoftLifeRealtime {
         return;
       }
       const player: Player = {
-        connId: crypto.randomUUID(), userId: guest.guest_id, handle: 'guest',
+        connId: crypto.randomUUID(), userId: guest.guest_id, handle: 'guest', instanceId,
         name: guest.display_name, avatar: guestAvatarFromMessage(guestAvatar, guest.display_name), isGuest: true,
         x: 0, y: 0, z: 0, yaw: 0, emote: 'idle', location: 'world', voice: false, voiceMode: 'say',
         connectedAt: Date.now(), lastSeen: Date.now(), lastChatAt: 0, lastPoseAt: 0,
