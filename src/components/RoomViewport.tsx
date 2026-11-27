@@ -40,8 +40,6 @@ import {
   closeDistanceFor,
   cutawayForCamera,
   followCamera,
-  panBoundsFor,
-  panCamera,
   playViewDistance,
 } from '../../shared/camera-modes.mjs';
 import { WALL_ROT_STEPS, wallAxis } from '../../shared/room-walls.mjs';
@@ -2342,8 +2340,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         av.z = safe.z;
       }
 
-      // 1. Input. In Isometric Mode WASD/stick pan the camera and the avatar
-      // only walks click paths; Play View moves the avatar with the same keys.
+      // 1. Input. Both views use camera-relative WASD movement; Isometric
+      // additionally keeps click-to-walk available.
       let moveX = 0;
       let moveZ = 0;
       if (currentView === 'play') {
@@ -2355,7 +2353,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         moveZ += touchInput.moveZ;
       } else {
         // Custom bindings are authoritative; arrows no longer silently bypass a
-        // remap. The editor's own arrow-nudge lives outside this loop.
+        // remap. In Isometric Mode, WASD moves the avatar instead of dragging
+        // the entire camera across the map.
         if (held('isoForward')) moveZ -= 1;
         if (held('isoBack')) moveZ += 1;
         if (held('isoLeft')) moveX -= 1;
@@ -2366,35 +2365,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         }
       }
 
-      const isoPanActive =
-        currentView === 'isometric' &&
-        !propsRef.current.modalOpen &&
+      if (
+        canWalk &&
         !ride &&
-        (moveX !== 0 || moveZ !== 0);
-      if (isoPanActive) {
-        // Translate target and camera together: the orbit angle, the zoom
-        // distance and the Follow Character state are all preserved.
-        handles.cameraAnim.active = false;
-        camera.getWorldDirection(_vec3);
-        _vec3.y = 0;
-        if (_vec3.lengthSq() < 1e-6) _vec3.set(0, 0, -1);
-        _vec3.normalize();
-        _vec3B.set(-_vec3.z, 0, _vec3.x);
-        const pan = panCamera({
-          camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
-          target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
-          forward: { x: _vec3.x, z: _vec3.z },
-          right: { x: _vec3B.x, z: _vec3B.z },
-          moveX,
-          moveZ,
-          delta,
-          bounds: panBoundsFor(currentLoc),
-        });
-        camera.position.set(pan.camera.x, pan.camera.y, pan.camera.z);
-        controls.target.set(pan.target.x, pan.target.y, pan.target.z);
-      }
-
-      if (canWalk && !ride && currentView === 'play' && (moveX !== 0 || moveZ !== 0)) {
+        (currentView === 'play' || currentView === 'isometric') &&
+        (moveX !== 0 || moveZ !== 0)
+      ) {
         {
           av.path = [];
           av.pendingSeat = null;
@@ -2405,12 +2381,33 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             standUpFromSeat();
           }
 
-          // Play View movement is camera-relative, using the direction the
-          // player is looking rather than the avatar's facing.
-          const fwdX = -Math.sin(handles.playCam.yaw);
-          const fwdZ = -Math.cos(handles.playCam.yaw);
-          const rightX = Math.cos(handles.playCam.yaw);
-          const rightZ = -Math.sin(handles.playCam.yaw);
+          // Both gameplay views move relative to the current camera. In
+          // Isometric Mode this gives WASD the familiar game feel while the
+          // mouse remains responsible for orbiting the view.
+          let fwdX: number;
+          let fwdZ: number;
+          let rightX: number;
+          let rightZ: number;
+          if (currentView === 'play') {
+            fwdX = -Math.sin(handles.playCam.yaw);
+            fwdZ = -Math.cos(handles.playCam.yaw);
+            rightX = Math.cos(handles.playCam.yaw);
+            rightZ = -Math.sin(handles.playCam.yaw);
+          } else {
+            camera.getWorldDirection(_vec3);
+            _vec3.y = 0;
+            if (_vec3.lengthSq() < 1e-6) _vec3.set(0, 0, -1);
+            _vec3.normalize();
+            fwdX = _vec3.x;
+            fwdZ = _vec3.z;
+            rightX = -_vec3.z;
+            rightZ = _vec3.x;
+            av.path = [];
+            av.pendingSeat = null;
+            av.pendingPortal = null;
+            av.pendingHallDoor = null;
+            av.pendingNpcId = null;
+          }
           const dirX = rightX * moveX - fwdX * moveZ;
           const dirZ = rightZ * moveX - fwdZ * moveZ;
 
@@ -2435,10 +2432,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           av.yaw += shortestAngleDiff(av.yaw, targetYaw) * (1 - Math.exp(-15 * delta));
           isMoving = true;
 
-          // Auto-follow camera behind player facing when walking in Play View
-          // GTA-style recentre: after the player has stopped looking around,
-          // ease behind the avatar. The manual look direction is where the
-          // transition starts, never snapped away, and zoom is untouched.
+          // Auto-recentre only the Play View chase camera. Isometric follow
+          // is handled by the orbit target below, preserving the user's angle.
           if (
             currentView === 'play' &&
             moveZ <= 0 &&
@@ -2452,7 +2447,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         }
       }
 
-      // Isometric point-and-click walking runs independently of camera pans.
+      // Isometric point-and-click walking remains available alongside direct movement.
       if (canWalk && !ride && currentView === 'isometric' && av.path.length > 0) {
         {
           const target = av.path[0];
@@ -2871,9 +2866,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           }
         }
         // Follow Character: translate the target and camera onto the avatar
-        // while preserving the player's orbit angle and zoom distance. WASD
-        // pans are temporary; following resumes when those keys are released.
-        if (propsRef.current.followCharacter && !isoPanActive && !handles.cameraAnim.active) {
+        // while preserving the player's orbit angle and zoom distance.
+        if (propsRef.current.followCharacter && !handles.cameraAnim.active) {
           const follow = followCamera({
             camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
             target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },

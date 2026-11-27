@@ -803,6 +803,7 @@ test('platform settings persist and privacy rules are enforced', async () => {
   assert.equal(defaults.status, 200);
   assert.equal(defaults.json.settings.privacy.messages, 'everyone');
   assert.equal(defaults.json.settings.graphics.quality, 'high');
+  assert.equal(defaults.json.settings.camera.mobileMode, 'auto');
 
   const saved = await api('PUT', '/api/settings', {
     token: owner.token,
@@ -810,6 +811,7 @@ test('platform settings persist and privacy rules are enforced', async () => {
       settings: {
         privacy: { profileVisibility: 'private', friendRequests: 'nobody' },
         graphics: { quality: 'low' },
+        camera: { mobileMode: 'third-person' },
         accessibility: { largeText: true },
         controls: { isometric: { forward: 'KeyI' } },
         unknownSection: { nope: true },
@@ -820,6 +822,7 @@ test('platform settings persist and privacy rules are enforced', async () => {
   assert.equal(saved.json.settings.privacy.profileVisibility, 'private');
   assert.equal(saved.json.settings.privacy.friendRequests, 'nobody');
   assert.equal(saved.json.settings.graphics.quality, 'low');
+  assert.equal(saved.json.settings.camera.mobileMode, 'third-person');
   assert.equal(saved.json.settings.accessibility.largeText, true);
   assert.equal(saved.json.settings.controls, undefined, 'controls live in their own account store');
   assert.equal(saved.json.settings.unknownSection, undefined, 'unknown keys are dropped');
@@ -827,6 +830,7 @@ test('platform settings persist and privacy rules are enforced', async () => {
   const reloaded = await api('GET', '/api/settings', { token: owner.token });
   assert.equal(reloaded.json.settings.privacy.profileVisibility, 'private');
   assert.equal(reloaded.json.settings.graphics.quality, 'low');
+  assert.equal(reloaded.json.settings.camera.mobileMode, 'third-person');
   assert.equal(reloaded.json.settings.accessibility.largeText, true);
 
   const request = await api('POST', '/api/friends/request', {

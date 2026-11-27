@@ -30,11 +30,12 @@ export interface PlatformSettings {
   };
   audio: { muted: boolean };
   graphics: { quality: 'low' | 'medium' | 'high' };
+  camera: { mobileMode: 'auto' | 'isometric' | 'third-person' };
   accessibility: { largeText: boolean; highContrast: boolean; reduceMotion: boolean };
 }
 
 /** Platform-owned sections. Controls, touch and voice use their existing systems. */
-export type SettingsSection = 'privacy' | 'notifications' | 'audio' | 'graphics' | 'accessibility';
+export type SettingsSection = 'privacy' | 'notifications' | 'audio' | 'graphics' | 'camera' | 'accessibility';
 
 export type SettingsSync = 'local' | 'saving' | 'synced' | 'error';
 
@@ -56,6 +57,7 @@ export const DEFAULT_SETTINGS: PlatformSettings = {
   },
   audio: { muted: false },
   graphics: { quality: 'high' },
+  camera: { mobileMode: 'auto' },
   accessibility: { largeText: false, highContrast: false, reduceMotion: false },
 };
 
@@ -78,6 +80,7 @@ export function normalizeSettings(input: unknown): PlatformSettings {
   const notifications = asObject(raw.notifications);
   const audio = asObject(raw.audio);
   const graphics = asObject(raw.graphics);
+  const camera = asObject(raw.camera);
   const accessibility = asObject(raw.accessibility);
   return {
     version: 1,
@@ -97,6 +100,7 @@ export function normalizeSettings(input: unknown): PlatformSettings {
     },
     audio: { muted: bool(audio.muted, false) },
     graphics: { quality: pick(graphics.quality, ['low', 'medium', 'high'], 'high') },
+    camera: { mobileMode: pick(camera.mobileMode, ['auto', 'isometric', 'third-person'], 'auto') },
     accessibility: {
       largeText: bool(accessibility.largeText, false),
       highContrast: bool(accessibility.highContrast, false),

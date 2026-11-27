@@ -22,6 +22,7 @@ import {
 } from '../../shared/hud-presentation.mjs';
 import type { DeviceEnvironment } from '../game/platform';
 import type { VoiceSnapshot } from '../session';
+import type { ViewMode } from '../game/types';
 import type { TouchLayoutPreferences } from '../net/api';
 import type {
   BuildController,
@@ -57,6 +58,7 @@ function contextIcon(kind: string) {
 export interface GameInterfaceProps {
   device: DeviceEnvironment;
   portrait: boolean;
+  viewMode: ViewMode;
   menuOpen: boolean;
   chatOpen: boolean;
   editing: boolean;
@@ -106,6 +108,7 @@ export interface GameInterfaceProps {
 export const GameInterface: React.FC<GameInterfaceProps> = ({
   device,
   portrait,
+  viewMode,
   menuOpen,
   chatOpen,
   editing,
@@ -191,6 +194,7 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
         (touch ? (
           <TouchHud
             presentation={presentation}
+            viewMode={viewMode}
             state={state}
             layout={layout}
             top={top}
@@ -204,12 +208,7 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
         ) : (
           <DesktopHud
             presentation={presentation as 'desktop-browser' | 'desktop-app'}
-            state={state}
             top={top}
-            camera={camera}
-            emote={emote}
-            primary={primary}
-            onJump={onJump}
             fullscreen={fullscreen}
             onToggleFullscreen={onToggleFullscreen}
           />

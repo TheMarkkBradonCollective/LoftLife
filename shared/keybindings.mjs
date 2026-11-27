@@ -1,8 +1,8 @@
 /**
  * Player keybindings, shared by the browser, the server and the tests.
  *
- * Movement is context-specific: `isometric` bindings pan the camera, `play`
- * bindings move the avatar. The same physical key (WASD) is therefore a
+ * Movement is context-specific: `isometric` and `play` bindings both move the
+ * avatar relative to their camera. The same physical key (WASD) is therefore a
  * legitimate default in both contexts and is not reported as a conflict.
  * Every other action is global.
  */
@@ -22,21 +22,21 @@ export const BINDING_SCOPES = /** @type {const} */ (['isometric', 'play', 'globa
 
 /** @type {BindingAction[]} */
 export const BINDING_ACTIONS = [
-  { id: 'isoForward', label: 'Pan forward', category: 'Isometric camera', scope: 'isometric', detail: 'WASD pans the camera, never the avatar.' },
-  { id: 'isoBack', label: 'Pan backward', category: 'Isometric camera', scope: 'isometric', detail: 'WASD pans the camera, never the avatar.' },
-  { id: 'isoLeft', label: 'Pan left', category: 'Isometric camera', scope: 'isometric', detail: 'WASD pans the camera, never the avatar.' },
-  { id: 'isoRight', label: 'Pan right', category: 'Isometric camera', scope: 'isometric', detail: 'WASD pans the camera, never the avatar.' },
-  { id: 'follow', label: 'Follow character', category: 'Isometric camera', scope: 'isometric', detail: 'Toggles camera follow; WASD still pans temporarily.' },
+  { id: 'isoForward', label: 'Move forward', category: 'Isometric movement', scope: 'isometric', detail: 'Moves the avatar relative to the isometric camera.' },
+  { id: 'isoBack', label: 'Move backward', category: 'Isometric movement', scope: 'isometric', detail: 'Moves the avatar relative to the isometric camera.' },
+  { id: 'isoLeft', label: 'Move left', category: 'Isometric movement', scope: 'isometric', detail: 'Moves the avatar relative to the isometric camera.' },
+  { id: 'isoRight', label: 'Move right', category: 'Isometric movement', scope: 'isometric', detail: 'Moves the avatar relative to the isometric camera.' },
+  { id: 'follow', label: 'Follow character', category: 'Isometric camera', scope: 'isometric', detail: 'Toggles the isometric camera following your character.' },
 
-  { id: 'playForward', label: 'Walk forward', category: 'Play View movement', scope: 'play', detail: 'Moves the avatar relative to the camera.' },
-  { id: 'playBack', label: 'Walk backward', category: 'Play View movement', scope: 'play', detail: 'Moves the avatar relative to the camera.' },
-  { id: 'playLeft', label: 'Strafe left', category: 'Play View movement', scope: 'play', detail: 'Moves the avatar relative to the camera.' },
-  { id: 'playRight', label: 'Strafe right', category: 'Play View movement', scope: 'play', detail: 'Moves the avatar relative to the camera.' },
-  { id: 'sprint', label: 'Sprint', category: 'Play View movement', scope: 'play', detail: 'Hold to run.' },
-  { id: 'jump', label: 'Jump / stand up', category: 'Play View movement', scope: 'play', detail: 'Jumps, or stands from a seat.' },
+  { id: 'playForward', label: 'Walk forward', category: 'Third-Person movement', scope: 'play', detail: 'Moves the avatar relative to the Third-Person camera.' },
+  { id: 'playBack', label: 'Walk backward', category: 'Third-Person movement', scope: 'play', detail: 'Moves the avatar relative to the camera.' },
+  { id: 'playLeft', label: 'Strafe left', category: 'Third-Person movement', scope: 'play', detail: 'Moves the avatar relative to the camera.' },
+  { id: 'playRight', label: 'Strafe right', category: 'Third-Person movement', scope: 'play', detail: 'Moves the avatar relative to the camera.' },
+  { id: 'sprint', label: 'Sprint', category: 'Third-Person movement', scope: 'play', detail: 'Hold to run.' },
+  { id: 'jump', label: 'Jump / stand up', category: 'Third-Person movement', scope: 'play', detail: 'Jumps, or stands from a seat.' },
 
   { id: 'zoom', label: 'Close / wide zoom', category: 'Camera', scope: 'global', detail: 'Changes distance only; follow state is untouched.' },
-  { id: 'playToggle', label: 'Switch camera mode', category: 'Camera', scope: 'global', detail: 'Isometric ↔ Play View.' },
+  { id: 'playToggle', label: 'Switch camera mode', category: 'Camera', scope: 'global', detail: 'Isometric ↔ Third-Person (V by default).' },
   { id: 'menu', label: 'Map & World Menu', category: 'Map & World', scope: 'global', detail: 'Opens the central map, world and controls menu.' },
   { id: 'interact', label: 'Interact', category: 'Interaction', scope: 'global', detail: 'Doors, lifts, seats, NPCs and transit stops.' },
   { id: 'voice', label: 'Microphone (push to talk)', category: 'Voice & Microphone', scope: 'global', detail: 'Hold in push-to-talk, tap in other modes.' },

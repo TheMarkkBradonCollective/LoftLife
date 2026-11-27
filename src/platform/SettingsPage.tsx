@@ -503,7 +503,7 @@ export function SettingsPage({ onNavigate }: { onNavigate: (page: PlatformPage) 
                 }
               />
               <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
-                Isometric and Play View keep separate movement contexts; global controls apply in both.
+                Isometric and Third-Person keep separate movement contexts; global controls apply in both.
                 These are the same bindings used by the in-game M menu, so changes made here are live
                 when you enter a world.
               </p>
@@ -530,7 +530,7 @@ export function SettingsPage({ onNavigate }: { onNavigate: (page: PlatformPage) 
                 {(['isometric', 'play'] as const).map((scope) => (
                   <div key={scope} className="rounded-xl border border-white/8 bg-black/20 p-3">
                     <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#39ff14]">
-                      {scope === 'isometric' ? 'Isometric preset' : 'Play View preset'}
+                      {scope === 'isometric' ? 'Isometric preset' : 'Third-Person preset'}
                     </div>
                     <ul className="space-y-1">
                       {BINDING_ACTIONS.filter((action) => action.scope === scope).map(bindingRow)}
@@ -623,6 +623,17 @@ export function SettingsPage({ onNavigate }: { onNavigate: (page: PlatformPage) 
                 eyebrow="Mobile"
                 title="Touch controls"
                 action={<Badge tone="green">Used by the game</Badge>}
+              />
+              <ChoiceRow
+                label="Camera mode"
+                description="Auto uses portrait for Isometric and landscape for Third-Person. You can lock either mode here."
+                value={settings.camera.mobileMode}
+                options={[
+                  { id: 'auto', label: 'Auto (phone rotation)' },
+                  { id: 'isometric', label: 'Lock Isometric' },
+                  { id: 'third-person', label: 'Lock Third-Person' },
+                ]}
+                onChange={(value) => patchSection('camera', { mobileMode: value })}
               />
               <ChoiceRow
                 label="Movement stick"

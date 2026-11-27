@@ -254,9 +254,13 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   // already chose.
   const mobileRuntime = device.deviceClass === 'mobile' || device.deviceClass === 'tablet';
   const [isPortrait, setIsPortrait] = useState<boolean>(() => readPortraitOrientation());
-  const [viewMode, setViewMode] = useState<ViewMode>(() =>
-    mobileRuntime ? (readPortraitOrientation() ? 'isometric' : 'play') : 'isometric'
-  );
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    if (!mobileRuntime) return 'isometric';
+    const preference = settings.camera.mobileMode;
+    if (preference === 'isometric') return 'isometric';
+    if (preference === 'third-person') return 'play';
+    return readPortraitOrientation() ? 'isometric' : 'play';
+  });
   const [mode, setMode] = useState<GameMode>(() =>
     entry?.kind === 'suite' && entry.edit ? 'edit' : gameplayAllowed ? 'walk' : 'edit'
   );
@@ -318,7 +322,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [cityStreet, setCityStreet] = useState('M St & 15th St');
   // Z toggles the camera distance only: close avatar view vs wide room view.
   const [closeZoom, setCloseZoom] = useState(false);
-  // F toggles Follow Character in Isometric Mode; Play View always follows.
+  // F toggles Follow Character in Isometric Mode; Third-Person always follows.
   const [followCharacter, setFollowCharacter] = useState(true);
   const playerPoseRef = useRef({ x: 0, z: 0, yaw: 0 });
 
@@ -345,13 +349,19 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     };
   }, []);
 
-  // Phones and tablets derive the camera from orientation. Editing pins
-  // isometric so taps land on the grid, and rotating back restores the
-  // orientation view. A desktop touchscreen keeps its chosen camera mode.
+  // Mobile camera mode follows orientation by default. Players can lock either
+  // view in Settings; editing temporarily pins the isometric build camera.
+  // Desktop retains manual switching with V.
   useEffect(() => {
     if (!mobileRuntime || mode === 'edit') return;
-    setViewMode(isPortrait ? 'isometric' : 'play');
-  }, [mobileRuntime, isPortrait, mode]);
+    const preference = settings.camera.mobileMode;
+    const next = preference === 'isometric'
+      ? 'isometric'
+      : preference === 'third-person'
+      ? 'play'
+      : isPortrait ? 'isometric' : 'play';
+    setViewMode(next);
+  }, [mobileRuntime, isPortrait, mode, settings.camera.mobileMode]);
 
   // Mobile browsers and unsupported runtimes get the loft manager only: no
   // walking, no worlds, no second camera. This is enforced in app state, not
@@ -841,9 +851,9 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         setPlacingCatalogId(null);
         setMovingUid(null);
         setAvatarModalOpen(false);
-        showHint('Play View · WASD move · drag to look · Z close/wide');
+        showHint('Third-Person · WASD move · mouse to look · Z close/wide');
       } else {
-        showHint('Isometric View · click to walk · WASD pans · F follow · Z zoom');
+        showHint('Isometric · WASD move · drag to orbit · click to walk · F follow · Z zoom');
       }
       return next;
     });
@@ -951,7 +961,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     [selectedItem, items, pushHistory]
   );
 
-  // Keyboard shortcuts (R to rotate, Esc to cancel, Delete to remove, H to toggle dock, V Play View, M City Map)
+  // Keyboard shortcuts (R to rotate, Esc to cancel, Delete to remove, H to toggle dock, V Third-Person, M City Map)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (
@@ -1118,7 +1128,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   /** F changes only Follow Character, and only in Isometric Mode. */
   const toggleFollowCharacter = useCallback(() => {
     if (viewMode === 'play') {
-      showHint('Play View always follows · V switches to Isometric for camera-free mode');
+      showHint('Third-Person always follows · V switches to Isometric');
       return;
     }
     sfx.playClick();
@@ -1126,8 +1136,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     setFollowCharacter(next);
     showHint(
       next
-        ? 'Following your avatar · WASD pans temporarily, F stops following'
-        : 'Camera free · WASD pans freely, F follows your avatar again'
+        ? 'Following your avatar · F stops following'
+        : 'Camera free · WASD still moves your avatar, F follows again'
     );
   }, [followCharacter, showHint, viewMode]);
 
@@ -1179,10 +1189,10 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   /** The menu asks for a specific camera; the existing toggle preserves state. */
   const handleSetView = useCallback(
     (next: ViewMode) => {
-      if (!gameplayAllowed || next === viewMode) return;
+      if (!device.desktop || !gameplayAllowed || next === viewMode) return;
       handleTogglePlayView();
     },
-    [gameplayAllowed, viewMode, handleTogglePlayView]
+    [device.desktop, gameplayAllowed, viewMode, handleTogglePlayView]
   );
 
   const toggleFullscreen = useCallback(() => {
@@ -1620,7 +1630,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       />
       </Suspense>
 
-      {/* Functional Aiming Reticle when Pointer-Locked in Play View */}
+      {/* Functional aiming reticle when pointer-locked in Third-Person */}
       {viewMode === 'play' && pointerLocked && (
         <div className="fixed inset-0 pointer-events-none z-20 flex items-center justify-center">
           <div className="w-1.5 h-1.5 rounded-full bg-[#39ff14] shadow-sm ring-2 ring-black/60" />
@@ -1631,6 +1641,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
           contextual actions and build tools. */}
       <GameInterface
         device={device}
+        viewMode={viewMode}
         portrait={isPortrait}
         menuOpen={menuOpen}
         chatOpen={session.chatOpen}
@@ -1690,6 +1701,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
           emotes, settings, controls and leaving the session. */}
       <GameMenu
         open={menuOpen}
+        canChangeView={device.desktop}
         onClose={() => setMenuOpen(false)}
         location={location}
         world={activeWorld}
