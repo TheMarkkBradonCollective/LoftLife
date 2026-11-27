@@ -40,8 +40,6 @@ import {
   closeDistanceFor,
   cutawayForCamera,
   followCamera,
-  panBoundsFor,
-  panCamera,
   playViewDistance,
 } from '../../shared/camera-modes.mjs';
 import { WALL_ROT_STEPS, wallAxis } from '../../shared/room-walls.mjs';
@@ -2342,8 +2340,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         av.z = safe.z;
       }
 
-      // 1. Input. In Isometric Mode WASD/stick pan the camera and the avatar
-      // only walks click paths; Play View moves the avatar with the same keys.
+      // 1. Input. Both views use camera-relative WASD movement; Isometric
+      // additionally keeps click-to-walk available.
       let moveX = 0;
       let moveZ = 0;
       if (currentView === 'play') {
@@ -2449,7 +2447,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         }
       }
 
-      // Isometric point-and-click walking runs independently of camera pans.
+      // Isometric point-and-click walking remains available alongside direct movement.
       if (canWalk && !ride && currentView === 'isometric' && av.path.length > 0) {
         {
           const target = av.path[0];
