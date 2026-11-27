@@ -5,9 +5,11 @@ import { ActionCluster } from './ActionCluster';
 import { CameraPopover, EmotePopover } from './popovers';
 import { hudShowsActions } from '../../shared/hud-presentation.mjs';
 import type { CameraHudState, EmoteHudState, HudAction, HudContextAction, HudState } from './types';
+import type { ViewMode } from '../game/types';
 
 interface ActionLayerProps {
   state: HudState;
+  viewMode: ViewMode;
   riding: boolean;
   primary: HudContextAction | null;
   side: 'left' | 'right';
@@ -31,6 +33,7 @@ interface ActionLayerProps {
  */
 export const ActionLayer: React.FC<ActionLayerProps> = ({
   state,
+  viewMode,
   riding,
   primary,
   side,
@@ -55,7 +58,7 @@ export const ActionLayer: React.FC<ActionLayerProps> = ({
     touchInput.sprint = false;
     setCameraOpen(false);
     setEmoteOpen(false);
-  }, [state]);
+  }, [state, viewMode]);
 
   useEffect(() => {
     if (!hudShowsActions(state)) {
@@ -74,7 +77,23 @@ export const ActionLayer: React.FC<ActionLayerProps> = ({
   if (!hudShowsActions(state)) return null;
 
   const actions: HudAction[] = [];
-  if (!riding) {
+  if (viewMode === 'isometric') {
+    // Isometric play stays minimal: movement and camera orbit happen on the
+    // world, so only emotes and contextual interactions remain on-screen.
+    if (!riding) {
+      actions.push({
+        id: 'emote',
+        label: 'Emote',
+        icon: <Sparkles />,
+        onPress: () => {
+          setCameraOpen(false);
+          setEmoteOpen((open) => !open);
+        },
+        pressed: emoteOpen,
+        hint: 'Wave, dance, cheer',
+      });
+    }
+  } else if (!riding) {
     actions.push(
       {
         id: 'camera',
