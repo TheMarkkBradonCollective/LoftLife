@@ -28,12 +28,12 @@ export const AdminDashboard: React.FC<{ onClose: () => void }> = ({ onClose }) =
   const [departments, setDepartments] = useState<string[]>(['player-support']);
   const [notice, setNotice] = useState('');
 
-  const load = useCallback(async (search = query) => {
+  const load = useCallback(async (search = '') => {
     setLoading(true); setError('');
     try { setData(await api.adminConsole(search)); }
     catch (cause) { setError(cause instanceof ApiError ? cause.message : 'Could not load administration data.'); }
     finally { setLoading(false); }
-  }, [query]);
+  }, []);
 
   useEffect(() => { void load(''); }, [load]);
 
