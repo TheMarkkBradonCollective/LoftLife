@@ -1,6 +1,6 @@
 import React from 'react';
-import { Activity, RefreshCw } from 'lucide-react';
 import {
+  Activity,
   ArrowRight,
   BellRing,
   Building2,
@@ -10,6 +10,7 @@ import {
   DoorOpen,
   MapPin,
   MessageCircle,
+  RefreshCw,
   UserPlus,
   Users,
 } from 'lucide-react';
