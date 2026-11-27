@@ -1,5 +1,7 @@
 # LoftLife — Roadmap
 
+The product direction and design principles live in the root [`plan.md`](../plan.md). This file tracks implementation status and engineering sequence; keep both documents aligned when priorities change.
+
 Status legend: **Done** (implemented and verified) · **Partial** (real functionality, notable gaps) ·
 **Not started**.
 
@@ -16,7 +18,7 @@ Status legend: **Done** (implemented and verified) · **Partial** (real function
 | 7 | Main City, transportation, vehicles, interactive locations | **Done** — city, ambient traffic, two rideable LoftLine routes with server-assigned seats |
 | 8 | Economy: Yuanzi, Tongbao, wallets, transactions, shops | **Partial** — wallets, ledger, purchases, daily reward. No earned income loop from activities, no player trading |
 | 9 | Cross-platform (browser / Windows / Android, Unity 6) | **Partial** — the web client is responsive with dedicated touch controls; the protocol is documented for a Unity client, which is not started |
-| 10 | Testing and launch preparation | **Partial** — 112 tests, CI checks and Cloudflare deployment workflow are active; commit `262e285` is deployed. Live two-client guest validation against Neon/Durable Objects, migration verification and load testing remain open |
+| 10 | Testing and launch preparation | **Partial** — 124 automated checks cover API, permissions, economy, parties, voice, transit, city presence/capacity and the Worker path. Live two-client guest validation against Neon/Durable Objects, migration verification and load testing remain open |
 
 ## Deliberately not done, because it needs a decision
 
