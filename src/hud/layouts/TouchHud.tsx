@@ -72,7 +72,7 @@ export const TouchHud: React.FC<TouchHudProps> = ({
           side={stickSide}
           scale={scale}
           opacity={opacity}
-          label={camera.viewMode === 'play' ? 'Move' : 'Pan'}
+          label="Move"
         />
       )}
 
