@@ -5,6 +5,7 @@ import { handleSocialRoute } from './social';
 import { handleEconomyRoute } from './economy';
 import { cityTravelDestinations, handleTransitRoute } from './transit';
 import { handlePlatformRoute } from './platform';
+import { handleAdminRoute } from './admin';
 export { LoftLifeRealtime } from './realtime';
 import {
   hashPassword,
@@ -64,6 +65,8 @@ interface WorkerFetcher {
 export interface CloudflareEnv {
   DATABASE_URL?: string;
   LOFTLIFE_SESSION_SECRET?: string;
+  /** Comma-separated exact account handles for the two founders (Markk and Alijah). */
+  LOFTLIFE_FOUNDER_HANDLES?: string;
   GAME_ORIGIN?: string;
   REALTIME?: { idFromName(name: string): unknown; get(id: unknown): { fetch(request: Request): Promise<Response> } };
   ASSETS?: WorkerFetcher;
@@ -994,6 +997,14 @@ export default {
         if (!env.REALTIME) return fail('Realtime Durable Object binding is not configured.',503,'realtime_unconfigured');
         const id = env.REALTIME.idFromName('party:global');
         return env.REALTIME.get(id).fetch(new Request('https://loftlife-internal/internal/party/presence-snapshot'));
+      }
+
+      if (url.pathname.startsWith('/api/admin/console')) {
+        const auth = await currentAccount(request, env);
+        const sql = auth?.sql ?? await database(env);
+        if (!sql) return fail('DATABASE_URL is not configured.', 503, 'unconfigured');
+        const adminResponse = await handleAdminRoute(request, sql, auth?.account ?? null, env.LOFFLIFE_FOUNDER_HANDLES);
+        if (adminResponse) return adminResponse;
       }
 
       if (url.pathname === '/api/admin/monitoring' && request.method === 'GET') {
