@@ -102,7 +102,7 @@ export interface GameInterfaceProps {
   onToggleFullscreen: () => void;
   currentStreet: string;
   locationLabel: string;
-  playerPoseRef: React.MutableRefObject<{ x: number; z: number; yaw: number }>;
+  playerPoseRef: React.MutableRefObject<{ x: number; z: number; yaw: number; known: boolean }>;
   onOpenCityMap: () => void;
 }
 
