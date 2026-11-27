@@ -206,10 +206,6 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
             presentation={presentation as 'desktop-browser' | 'desktop-app'}
             state={state}
             top={top}
-            camera={camera}
-            emote={emote}
-            primary={primary}
-            onJump={onJump}
             fullscreen={fullscreen}
             onToggleFullscreen={onToggleFullscreen}
           />
