@@ -37,7 +37,8 @@ export interface TransitStop {
 export interface TransitLine {
   id: string;
   label: string;
-  kind: 'bus';
+  kind: 'bus' | 'rail';
+  color?: string;
   stops: TransitStop[];
 }
 
@@ -45,14 +46,65 @@ export interface TransitVehicle {
   id: string;
   lineId: string;
   label: string;
-  kind: 'bus';
+  kind: 'bus' | 'rail' | 'taxi';
+  color?: string;
   x: number;
   z: number;
   heading: number;
   stopIndex: number;
   dwelling: boolean;
+  state?: string | null;
+  destinationId?: string | null;
+  destinationLabel?: string | null;
   seats: number;
   riders: { userId: string; handle: string; seat: number }[];
+}
+
+export interface TaxiDestination {
+  id: string;
+  label: string;
+  x: number;
+  z: number;
+  arrival: { x: number; z: number };
+}
+
+export interface TaxiTrip {
+  state: 'waiting' | 'driving' | 'arrived' | string;
+  destinationId?: string | null;
+  destinationLabel?: string | null;
+  destinations: TaxiDestination[];
+  etaSeconds?: number;
+}
+
+export interface TravelDestination {
+  id: string;
+  label: string;
+  kind: 'city' | 'world';
+  location?: string;
+  spawn?: { x: number; z: number; yaw?: number };
+  worldId?: string;
+  worldName?: string;
+  ownerHandle?: string;
+  access?: string;
+  blurb?: string;
+}
+
+export interface TravelJourney {
+  id: string;
+  mode: 'rail' | 'air';
+  phase: 'boarding' | 'enroute' | 'arrived';
+  destination: TravelDestination;
+  startedAt: number;
+  departAt: number;
+  arriveAt: number;
+  vehicleId: string;
+  label: string;
+}
+
+export interface TravelEvent {
+  action: 'boarding' | 'departed' | 'arrived' | 'cancelled';
+  journey?: TravelJourney;
+  mode?: 'rail' | 'air';
 }
 
 export interface PartyMember {
@@ -150,10 +202,19 @@ export interface RealtimeOptions {
   onParty?: (party: Party | null, invites: Party[]) => void;
   onVoice?: (signal: VoiceSignal) => void;
   onTransit?: (payload: {
-    riding: { vehicleId: string; lineId: string; seat: number; label?: string } | null;
+    riding: {
+      vehicleId: string;
+      lineId: string;
+      seat: number;
+      label?: string;
+      kind?: 'bus' | 'rail' | 'taxi';
+    } | null;
     vehicles: TransitVehicle[];
+    taxi?: TaxiTrip;
+    taxiArrived?: boolean;
     exited?: { x: number; z: number; lineId: string | null; label: string | null } | null;
   }) => void;
+  onTravel?: (event: TravelEvent) => void;
   onHotel?: (event: HotelEvent) => void;
   onError?: (code: string, message: string) => void;
 }
@@ -293,13 +354,23 @@ export class RealtimeClient {
         case 'transit':
           this.options.onTransit?.({
             riding:
-              (msg.riding as { vehicleId: string; lineId: string; seat: number; label?: string } | null) ??
-              null,
+              (msg.riding as {
+                vehicleId: string;
+                lineId: string;
+                seat: number;
+                label?: string;
+                kind?: 'bus' | 'rail' | 'taxi';
+              } | null) ?? null,
             vehicles: (msg.vehicles as TransitVehicle[]) ?? [],
+            taxi: (msg.taxi as TaxiTrip | undefined) ?? undefined,
+            taxiArrived: Boolean(msg.taxiArrived),
             exited:
               (msg.exited as { x: number; z: number; lineId: string | null; label: string | null } | null) ??
               null,
           });
+          break;
+        case 'travel':
+          this.options.onTravel?.(msg as unknown as TravelEvent);
           break;
         case 'error':
           this.options.onError?.(String(msg.code ?? 'error'), String(msg.message ?? ''));
@@ -402,6 +473,30 @@ export class RealtimeClient {
   exitTransit() {
     if (this.socket?.readyState !== WebSocket.OPEN) return false;
     this.socket.send(JSON.stringify({ t: 'transit', action: 'exit' }));
+    return true;
+  }
+
+  hailTaxi(vehicleId: string) {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify({ t: 'transit', action: 'hailTaxi', vehicleId }));
+    return true;
+  }
+
+  chooseTaxiDestination(destinationId: string) {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify({ t: 'transit', action: 'taxiDestination', destinationId }));
+    return true;
+  }
+
+  startJourney(mode: 'rail' | 'air', destinationId: string) {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify({ t: 'travel', action: 'start', mode, destinationId }));
+    return true;
+  }
+
+  cancelJourney() {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify({ t: 'travel', action: 'cancel' }));
     return true;
   }
 

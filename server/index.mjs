@@ -34,7 +34,8 @@ import { ApiError, forbidden, handler, notFound, unauthorized } from './errors.m
 import { createGuestSession, guestForToken, revokeGuestSession } from './guests.mjs';
 import { attachRealtime, presenceSnapshot } from './realtime.mjs';
 import { partyFor, partyView, pendingInvitesFor } from './parties.mjs';
-import { transitLines } from './transit.mjs';
+import { taxiDestinations, transitHubs, transitLines } from './transit.mjs';
+import { travelDestinations } from './travel.mjs';
 import {
   acceptFriend,
   blockPlayer,
@@ -524,8 +525,29 @@ export function createApp() {
   /** Route data is server-owned so a Unity client can render the same lines. */
   app.get('/api/transit', (_req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=300');
-    res.json({ lines: transitLines() });
+    res.json({
+      lines: transitLines(),
+      taxis: taxiDestinations(),
+      hubs: transitHubs(),
+    });
   });
+
+  /**
+   * Eligible long-distance destinations. Private worlds are filtered through
+   * the same access rules as entering them, so this list is the only source the
+   * departure UI can offer.
+   */
+  app.get(
+    '/api/travel/destinations',
+    optionalAuth,
+    handler((req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      const player = req.user
+        ? { userId: req.user.id, isGuest: false }
+        : { userId: null, isGuest: true };
+      res.json(travelDestinations(player));
+    })
+  );
 
   /* ------------------------------- static ------------------------------- */
 

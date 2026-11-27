@@ -28,6 +28,9 @@ import {
   type Profile,
   type SessionUser,
   type SuiteState,
+  type TransitDestination,
+  type TransitHub,
+  type TravelDestination,
   type VoicePreferences,
   type VoiceRangeSetting,
   type Wallet,
@@ -41,8 +44,10 @@ import {
   type InstanceInfo,
   type Party,
   type RemotePlayer,
+  type TaxiTrip,
   type TransitLine,
   type TransitVehicle,
+  type TravelEvent,
 } from './net/realtime';
 import { VoiceManager, type VoiceDevice, type VoiceStatus } from './net/voice';
 import {
@@ -64,6 +69,19 @@ export interface RidingState {
   lineId: string;
   seat: number;
   label?: string;
+  kind?: 'bus' | 'rail' | 'taxi';
+}
+
+export interface TransitExit {
+  x: number;
+  z: number;
+  label: string | null;
+  at: number;
+}
+
+export interface TravelDestinationList {
+  city: TravelDestination[];
+  worlds: TravelDestination[];
 }
 
 /** Snapshot of the shared voice state every control surface renders. */
@@ -125,7 +143,15 @@ interface SessionValue {
   hotelEvent: HotelEvent | null;
   transitLines: TransitLine[];
   transitVehicles: TransitVehicle[];
+  transitTaxis: TransitDestination[];
+  transitHubs: TransitHub[];
   riding: RidingState | null;
+  /** Set while a hired taxi is waiting for a destination or driving there. */
+  taxiTrip: TaxiTrip | null;
+  /** Server-authored drop-off from the last transit exit. */
+  transitExit: TransitExit | null;
+  /** Latest intercity rail / flight journey event. */
+  travel: TravelEvent | null;
   voice: VoiceSnapshot;
   /** Shared chat panel visibility (C key and the mobile chat button). */
   chatOpen: boolean;
@@ -166,7 +192,13 @@ interface SessionValue {
     data?: { handle?: string; userId?: string }
   ) => boolean;
   boardTransit: (lineId: string, stopId: string) => boolean;
+  hailTaxi: (vehicleId: string) => boolean;
+  chooseTaxiDestination: (destinationId: string) => boolean;
   exitTransit: () => boolean;
+  startJourney: (mode: 'rail' | 'air', destinationId: string) => boolean;
+  cancelJourney: () => boolean;
+  clearTravel: () => void;
+  clearTransitExit: () => void;
   ringDoorbell: (roomNumber: string) => boolean;
   answerDoorbell: (requestId: string, accept: boolean) => boolean;
   cancelDoorbell: (requestId: string) => boolean;
@@ -248,7 +280,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [partyInvites, setPartyInvites] = useState<Party[]>([]);
   const [transitLines, setTransitLines] = useState<TransitLine[]>([]);
   const [transitVehicles, setTransitVehicles] = useState<TransitVehicle[]>([]);
+  const [transitTaxis, setTransitTaxis] = useState<TransitDestination[]>([]);
+  const [transitHubs, setTransitHubs] = useState<TransitHub[]>([]);
   const [riding, setRiding] = useState<RidingState | null>(null);
+  const [taxiTrip, setTaxiTrip] = useState<TaxiTrip | null>(null);
+  const [transitExit, setTransitExit] = useState<TransitExit | null>(null);
+  const [travel, setTravel] = useState<TravelEvent | null>(null);
   const [chatOpen, setChatOpenState] = useState(false);
 
   const voiceControlsRef = useRef<VoiceControlState | null>(null);
@@ -475,6 +512,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setRemotePlayers(players.filter((player) => player.connId !== you.connId));
         setTransitVehicles([]);
         setRiding(null);
+        setTaxiTrip(null);
+        setTravel(null);
         if (status === 'online') api
           .party()
           .then((state) => {
@@ -526,11 +565,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       onVoice: (signal) => {
         void voiceRef.current?.handleSignal(signal);
       },
-      onTransit: ({ riding: nextRiding, vehicles, exited }) => {
+      onTransit: ({ riding: nextRiding, vehicles, exited, taxi, taxiArrived }) => {
         setTransitVehicles(vehicles);
         setRiding(nextRiding);
-        if (exited) setChatError(`You stepped off at ${exited.label ?? 'the stop'}`);
+        if (taxi) {
+          setTaxiTrip((previous) => ({
+            ...taxi,
+            destinations: taxi.destinations?.length
+              ? taxi.destinations
+              : previous?.destinations ?? [],
+          }));
+        }
+        if (taxiArrived) setTaxiTrip(null);
+        if (!nextRiding && !taxi) setTaxiTrip(null);
+        if (exited) {
+          setTransitExit({ ...exited, label: exited.label ?? null, at: Date.now() });
+          setChatError(`You stepped off at ${exited.label ?? 'the stop'}`);
+        }
       },
+      onTravel: (event) => setTravel(event),
       onHotel: (event) => setHotelEvent(event),
       onError: (code, message) => {
         if (status === 'guest' && (code === 'unauthorized' || code === 'guest_expired')) {
@@ -554,7 +607,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     api
       .transit()
-      .then((result) => setTransitLines(result.lines ?? []))
+      .then((result) => {
+        setTransitLines(result.lines ?? []);
+        setTransitTaxis(result.taxis ?? []);
+        setTransitHubs(result.hubs ?? []);
+      })
       .catch(() => {
         // Without routes the transit prompt simply never appears.
       });
@@ -916,7 +973,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setRealtimeActive(false); pendingWorldRef.current = null;
     realtimeRef.current?.close(); realtimeRef.current = null;
     setRemotePlayers([]); setMessages([]); setInstance(null); setConnection('idle');
-    setParty(null); setPartyInvites([]); setTransitVehicles([]); setRiding(null);
+    setParty(null); setPartyInvites([]);     setTransitVehicles([]);
+    setRiding(null);
+    setTaxiTrip(null);
+    setTransitExit(null);
+    setTravel(null);
     voiceRef.current?.disable(); applyVoice();
   }, [applyVoice]);
 
@@ -957,9 +1018,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return realtimeRef.current?.boardTransit(lineId, stopId) ?? false;
   }, []);
 
+  const hailTaxi = useCallback((vehicleId: string) => {
+    return realtimeRef.current?.hailTaxi(vehicleId) ?? false;
+  }, []);
+
+  const chooseTaxiDestination = useCallback((destinationId: string) => {
+    return realtimeRef.current?.chooseTaxiDestination(destinationId) ?? false;
+  }, []);
+
   const exitTransit = useCallback(() => {
     return realtimeRef.current?.exitTransit() ?? false;
   }, []);
+
+  const startJourney = useCallback((mode: 'rail' | 'air', destinationId: string) => {
+    return realtimeRef.current?.startJourney(mode, destinationId) ?? false;
+  }, []);
+
+  const cancelJourney = useCallback(() => {
+    return realtimeRef.current?.cancelJourney() ?? false;
+  }, []);
+
+  const clearTravel = useCallback(() => setTravel(null), []);
+  const clearTransitExit = useCallback(() => setTransitExit(null), []);
 
   const setVoiceAnchor = useCallback((anchor: { x: number; z: number; location: string }) => {
     voiceAnchorRef.current = anchor;
@@ -1082,7 +1162,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       hotelEvent,
       transitLines,
       transitVehicles,
+      transitTaxis,
+      transitHubs,
       riding,
+      taxiTrip,
+      transitExit,
+      travel,
       voice,
       chatOpen,
       login,
@@ -1104,7 +1189,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       clearChatError,
       partyAction,
       boardTransit,
+      hailTaxi,
+      chooseTaxiDestination,
       exitTransit,
+      startJourney,
+      cancelJourney,
+      clearTravel,
+      clearTransitExit,
       ringDoorbell,
       answerDoorbell,
       cancelDoorbell,
@@ -1150,7 +1241,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       hotelEvent,
       transitLines,
       transitVehicles,
+      transitTaxis,
+      transitHubs,
       riding,
+      taxiTrip,
+      transitExit,
+      travel,
       voice,
       chatOpen,
       login,
@@ -1172,7 +1268,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       clearChatError,
       partyAction,
       boardTransit,
+      hailTaxi,
+      chooseTaxiDestination,
       exitTransit,
+      startJourney,
+      cancelJourney,
+      clearTravel,
+      clearTransitExit,
       ringDoorbell,
       answerDoorbell,
       cancelDoorbell,

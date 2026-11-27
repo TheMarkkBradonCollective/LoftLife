@@ -35,7 +35,14 @@ import {
   isMainWorldPosWalkable,
   resolveCityCameraScale,
 } from '../game/worldBuilder';
-import { createTransitBusMesh, createTransitStopMarker } from '../game/transitBuilder';
+import {
+  createIntercityStation,
+  createRailCarMesh,
+  createRailStationMarker,
+  createTaxiMesh,
+  createTransitBusMesh,
+  createTransitStopMarker,
+} from '../game/transitBuilder';
 import { touchInput } from '../game/touchInput';
 import { dampValue } from '../../shared/camera-zoom.mjs';
 import {
@@ -59,6 +66,7 @@ import type {
   WorldLocation,
 } from '../game/types';
 import type { RemotePlayer, TransitLine, TransitVehicle } from '../net/realtime';
+import type { TransitHub } from '../net/api';
 
 /** Stored rotation step for a wall item, matching its wall facing. */
 function wallRotationFor(wall: PlacedItem['wall']): 0 | 1 | 2 | 3 {
@@ -144,9 +152,12 @@ interface RoomViewportProps {
   playerPoseRef?: React.MutableRefObject<{ x: number; z: number; yaw: number; known?: boolean }>;
   transitLines?: TransitLine[];
   transitVehicles?: TransitVehicle[];
+  transitHubs?: TransitHub[];
   ridingVehicle?: { x: number; y?: number; z: number; heading: number } | null;
   ridingLabel?: string | null;
   onBoardTransit?: (lineId: string, stopId: string) => void;
+  onHailTaxi?: (vehicleId: string) => void;
+  onOpenRailStation?: () => void;
   onExitTransit?: () => void;
   onChangeLocation: (next: WorldLocation) => void;
   onSelectItem: (uid: string | null) => void;
@@ -271,9 +282,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   playerPoseRef,
   transitLines = [],
   transitVehicles = [],
+  transitHubs = [],
   ridingVehicle = null,
   ridingLabel = null,
   onBoardTransit,
+  onHailTaxi,
+  onOpenRailStation,
   onExitTransit,
   onChangeLocation,
   onSelectItem,
@@ -354,9 +368,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     playerPoseRef,
     transitLines,
     transitVehicles,
+    transitHubs,
     ridingVehicle,
     ridingLabel,
     onBoardTransit,
+    onHailTaxi,
+    onOpenRailStation,
     onExitTransit,
     onChangeLocation,
     onSelectItem,
@@ -414,9 +431,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     playerPoseRef,
     transitLines,
     transitVehicles,
+    transitHubs,
     ridingVehicle,
     ridingLabel,
     onBoardTransit,
+    onHailTaxi,
+    onOpenRailStation,
     onExitTransit,
     onChangeLocation,
     onSelectItem,
@@ -726,6 +746,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     scene.add(transitGroup);
     const transitMeshes = new Map<string, THREE.Group>();
     const stopMarkers = new Map<string, THREE.Group>();
+    const hubMeshes = new Map<string, THREE.Group>();
 
     // Visibility sync on boot
     roomContainer.visible =
@@ -1484,12 +1505,40 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           };
         }
       }
-      // LoftLine stops: board the server-driven bus.
+      // Autonomous taxis: the server decides whether dispatch accepts a hail.
+      for (const vehicle of propsRef.current.transitVehicles ?? []) {
+        if (vehicle.kind !== 'taxi') continue;
+        if (Math.hypot(av.x - vehicle.x, av.z - vehicle.z) > 5.5) continue;
+        return {
+          label: actionLabel('Hail Autonomous Taxi'),
+          execute: () => {
+            sfx.playClick();
+            propsRef.current.onHailTaxi?.(vehicle.id);
+          },
+        };
+      }
+
+      // Intercity rail hall: opens destination selection, not a room menu.
+      for (const hub of propsRef.current.transitHubs ?? []) {
+        if (Math.hypot(av.x - hub.x, av.z - hub.z) < 7.5) {
+          return {
+            label: actionLabel(`Enter ${hub.label}`),
+            execute: () => {
+              sfx.playClick();
+              propsRef.current.onOpenRailStation?.();
+            },
+          };
+        }
+      }
+
+      // LoftLine stops: board the server-driven bus or light-rail train.
       for (const line of propsRef.current.transitLines ?? []) {
         for (const stop of line.stops) {
           if (Math.hypot(av.x - stop.x, av.z - stop.z) < 6) {
             return {
-              label: actionLabel(`Board ${line.label} at ${stop.name}`),
+              label: actionLabel(
+                `Board ${line.kind === 'rail' ? 'train' : 'bus'} · ${line.label} at ${stop.name}`
+              ),
               execute: () => {
                 sfx.playClick();
                 propsRef.current.onBoardTransit?.(line.id, stop.id);
@@ -2427,7 +2476,12 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         seen.add(vehicle.id);
         let mesh = transitMeshes.get(vehicle.id);
         if (!mesh) {
-          mesh = createTransitBusMesh();
+          mesh =
+            vehicle.kind === 'taxi'
+              ? createTaxiMesh()
+              : vehicle.kind === 'rail'
+              ? createRailCarMesh(vehicle.color)
+              : createTransitBusMesh();
           transitGroup.add(mesh);
           transitMeshes.set(vehicle.id, mesh);
         }
@@ -2448,11 +2502,15 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             wantedStops.add(key);
             let marker = stopMarkers.get(key);
             if (!marker) {
-              marker = createTransitStopMarker();
+              marker =
+                line.kind === 'rail'
+                  ? createRailStationMarker(line.color)
+                  : createTransitStopMarker();
               transitGroup.add(marker);
               stopMarkers.set(key, marker);
             }
             marker.position.set(stop.x, 0, stop.z);
+            if (line.kind === 'rail') marker.rotation.y = Math.PI / 2;
           }
         }
       }
@@ -2460,6 +2518,26 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         if (wantedStops.has(key)) continue;
         transitGroup.remove(marker);
         stopMarkers.delete(key);
+      }
+
+      const wantedHubs = new Set<string>();
+      if (inCity) {
+        for (const hub of propsRef.current.transitHubs ?? []) {
+          wantedHubs.add(hub.id);
+          let hubMesh = hubMeshes.get(hub.id);
+          if (!hubMesh) {
+            hubMesh = createIntercityStation();
+            transitGroup.add(hubMesh);
+            hubMeshes.set(hub.id, hubMesh);
+          }
+          hubMesh.position.set(hub.x, 0, hub.z);
+          hubMesh.rotation.y = Math.PI;
+        }
+      }
+      for (const [id, mesh] of [...hubMeshes]) {
+        if (wantedHubs.has(id)) continue;
+        transitGroup.remove(mesh);
+        hubMeshes.delete(id);
       }
       transitGroup.visible = inCity;
     }

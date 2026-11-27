@@ -5,7 +5,9 @@ import { CityMapModal } from './components/CityMapModal';
 import { ElevatorPanelModal } from './components/ElevatorPanelModal';
 import { HotelDoorTerminalModal } from './components/HotelDoorTerminalModal';
 import { HotelDoorbellModal, type DoorbellRequest } from './components/HotelDoorbellModal';
-import { AirportTravelModal } from './components/AirportTravelModal';
+import { TravelModal } from './components/TravelModal';
+import { TaxiDestinationModal } from './components/TaxiDestinationModal';
+import { TravelTransition, type TransitionMode } from './components/TravelTransition';
 import { HOTEL_FLOOR_COUNT, roomRangeLabel } from '../shared/hotel-layout.mjs';
 import { RoomSettingsModal } from './components/RoomSettingsModal';
 import { SyncConflictModal } from './components/SyncConflictModal';
@@ -27,7 +29,7 @@ import { MOBILE_GAMEPLAY_MESSAGE } from '../shared/device-platform.mjs';
 const RoomViewport = lazy(() =>
   import('./components/RoomViewport').then((module) => ({ default: module.RoomViewport }))
 );
-import { api, type WorldSummary } from './net/api';
+import { api, type TravelDestination, type WorldSummary } from './net/api';
 import { VOICE_RANGE_INFO } from '../shared/voice-controls.mjs';
 import { isEditableElement } from '../shared/desktop-shortcuts.mjs';
 import { bindingMatchesEvent } from '../shared/keybindings.mjs';
@@ -255,7 +257,26 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     roomNumber: string;
   } | null>(null);
   const [elevatorModalOpen, setElevatorModalOpen] = useState(false);
-  const [airportDepartureOpen, setAirportDepartureOpen] = useState(false);
+  const [travelMode, setTravelMode] = useState<'rail' | 'air' | null>(null);
+  const [travelDestinations, setTravelDestinations] = useState<{
+    city: TravelDestination[];
+    worlds: TravelDestination[];
+  }>({ city: [], worlds: [] });
+  const [travelLoading, setTravelLoading] = useState(false);
+  const [travelError, setTravelError] = useState<string | null>(null);
+  const [elevatorTransition, setElevatorTransition] = useState<{
+    label: string;
+    detail: string;
+    startedAt: number;
+    arriveAt: number;
+  } | null>(null);
+  const [sceneTransition, setSceneTransition] = useState<{
+    mode: TransitionMode;
+    label: string;
+    detail: string;
+    startedAt: number;
+    arriveAt: number;
+  } | null>(null);
   const [clothingStoreOpen, setClothingStoreOpen] = useState(false);
   const [furnitureShopOpen, setFurnitureShopOpen] = useState(false);
   // City directory: one-shot walk-in request handed to the viewport.
@@ -825,6 +846,16 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         return;
       }
       setElevatorModalOpen(false);
+      const startedAt = Date.now();
+      setElevatorTransition({
+        label: floor === 'L' ? 'Grand Hotel Lobby' : `Floor ${floor}`,
+        detail:
+          floor === 'L'
+            ? 'Lobby · Reception & Concierge'
+            : `Suites ${roomRangeLabel(floor)} · Elevator Lobby`,
+        startedAt,
+        arriveAt: startedAt + 850,
+      });
       if (floor === 'L') {
         handleChangeLocation('lobby');
       } else {
@@ -873,6 +904,127 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     },
     [gameplayAllowed, session, showHint]
   );
+
+  // Boarding closes the destination dialog; the cutscene takes over from the
+  // server's timestamps. A cancelled journey clears it immediately.
+  useEffect(() => {
+    const event = session.travel;
+    if (!event) return;
+    if (event.action === 'boarding' || event.action === 'departed') {
+      setTravelMode(null);
+      setTravelError(null);
+    } else if (event.action === 'cancelled') {
+      setTravelMode(null);
+      setSceneTransition(null);
+      session.clearTravel();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.travel]);
+
+  // The server owns arrival. Only after the `arrived` event may the client load
+  // the destination, and a world entry is validated again through the world API.
+  const handledArrivalRef = useRef<string | null>(null);
+  useEffect(() => {
+    const event = session.travel;
+    if (event?.action !== 'arrived' || !event.journey) return;
+    if (handledArrivalRef.current === event.journey.id) return;
+    handledArrivalRef.current = event.journey.id;
+    const destination = event.journey.destination;
+    const timer = window.setTimeout(() => {
+      if (destination.kind === 'world' && destination.worldId) {
+        void handleEnterWorld(destination.worldId).finally(() => {
+          session.clearTravel();
+          setSceneTransition(null);
+        });
+        return;
+      }
+      const location = destination.location as WorldLocation | undefined;
+      if (location === 'world' && destination.spawn) {
+        handleChangeLocation('world');
+        setTravelRequest({
+          x: destination.spawn.x,
+          z: destination.spawn.z,
+          yaw: destination.spawn.yaw ?? 0,
+          label: destination.label,
+          at: Date.now(),
+        });
+      } else if (location) {
+        handleChangeLocation(location);
+      }
+      session.clearTravel();
+      setSceneTransition(null);
+    }, 850);
+    return () => window.clearTimeout(timer);
+    // Handlers are stable enough for one arrival; including the whole session
+    // object would clear the timer on every presence tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.travel]);
+
+  // Buses and taxis drop riders through a server-authored position. Apply it to
+  // the local avatar so a passenger does not reappear at the boarding stop.
+  useEffect(() => {
+    const exit = session.transitExit;
+    if (!exit) return;
+    if (location !== 'world') handleChangeLocation('world');
+    setTravelRequest({
+      x: exit.x,
+      z: exit.z,
+      yaw: 0,
+      label: exit.label ?? 'Transit stop',
+      at: Date.now(),
+    });
+    if (exit.label?.startsWith('Taxi')) {
+      const startedAt = Date.now();
+      setSceneTransition({
+        mode: 'taxi',
+        label: exit.label.replace(/^Taxi · /, ''),
+        detail: 'Autonomous taxi drop-off',
+        startedAt,
+        arriveAt: startedAt + 900,
+      });
+    }
+    session.clearTransitExit();
+  }, [session.transitExit, session, location, handleChangeLocation]);
+
+  // Boarding a bus, train or taxi gets a short mode-specific cut-in so the
+  // passenger sees the vehicle transition instead of a silent snap.
+  const boardedVehicleRef = useRef<string | null>(null);
+  useEffect(() => {
+    const vehicleId = session.riding?.vehicleId ?? null;
+    if (!vehicleId || boardedVehicleRef.current === vehicleId) return;
+    boardedVehicleRef.current = vehicleId;
+    const kind = session.riding?.kind;
+    const label =
+      session.transitVehicles.find((vehicle) => vehicle.id === vehicleId)?.label ??
+      session.riding?.label ??
+      'LoftLine';
+    const startedAt = Date.now();
+    setSceneTransition({
+      mode: kind === 'taxi' ? 'taxi' : kind === 'rail' ? 'rail' : 'bus',
+      label,
+      detail: kind === 'taxi' ? 'Autonomous taxi · boarding' : 'Server-dispatched vehicle · boarding',
+      startedAt,
+      arriveAt: startedAt + 1100,
+    });
+  }, [session.riding, session.transitVehicles]);
+
+  useEffect(() => {
+    if (!elevatorTransition) return;
+    const timer = window.setTimeout(
+      () => setElevatorTransition(null),
+      Math.max(500, elevatorTransition.arriveAt - Date.now() + 250)
+    );
+    return () => window.clearTimeout(timer);
+  }, [elevatorTransition]);
+
+  useEffect(() => {
+    if (!sceneTransition) return;
+    const timer = window.setTimeout(
+      () => setSceneTransition(null),
+      Math.max(500, sceneTransition.arriveAt - Date.now() + 250)
+    );
+    return () => window.clearTimeout(timer);
+  }, [sceneTransition]);
 
   // Apply the destination the platform asked for, once per mount. A world entry
   // still validates access through the API; a failure leaves the player in the suite.
@@ -1213,8 +1365,20 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     const vehicle = session.transitVehicles.find((entry) => entry.id === session.riding!.vehicleId);
     if (!vehicle) return null;
     const seat = session.riding.seat ?? 0;
-    const lateral = seat % 2 === 0 ? -0.62 : 0.62;
-    const along = 1.35 - Math.floor(seat / 2) * 1.25;
+    const kind = session.riding.kind ?? vehicle.kind;
+    let lateral = seat % 2 === 0 ? -0.62 : 0.62;
+    let along = 1.35 - Math.floor(seat / 2) * 1.25;
+    if (kind === 'taxi') {
+      const spots = [
+        { lateral: 0, along: 1.25 },
+        { lateral: -0.68, along: -0.35 },
+        { lateral: 0.68, along: -0.35 },
+      ];
+      ({ lateral, along } = spots[seat % spots.length]);
+    } else if (kind === 'rail') {
+      lateral = seat % 2 === 0 ? -0.72 : 0.72;
+      along = 4.6 - Math.floor(seat / 2) * 1.35;
+    }
     const forwardX = Math.sin(vehicle.heading);
     const forwardZ = Math.cos(vehicle.heading);
     const rightX = Math.cos(vehicle.heading);
@@ -1231,6 +1395,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const ridingLabel = ridingState
     ? session.transitVehicles.find((vehicle) => vehicle.id === ridingState.vehicleId)?.label
     : undefined;
+  const activeJourney = session.travel?.journey ?? null;
 
   const handleBoardTransit = useCallback(
     (lineId: string, stopId: string) => {
@@ -1247,9 +1412,54 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     [gameplayAllowed, session, showHint, touchDevice, isPortrait]
   );
 
+  const handleHailTaxi = useCallback(
+    (vehicleId: string) => {
+      if (!gameplayAllowed) {
+        showHint(MOBILE_GAMEPLAY_MESSAGE);
+        return;
+      }
+      setViewMode('play');
+      setMode('walk');
+      if (!session.hailTaxi(vehicleId)) showHint('Connecting… try hailing again');
+    },
+    [gameplayAllowed, session, showHint]
+  );
+
   const handleExitTransit = useCallback(() => {
     session.exitTransit();
   }, [session]);
+
+  /** Open the departure board for intercity rail or a flight. */
+  const openTravel = useCallback(
+    async (mode: 'rail' | 'air') => {
+      if (!gameplayAllowed) {
+        showHint(MOBILE_GAMEPLAY_MESSAGE);
+        return;
+      }
+      setTravelMode(mode);
+      setTravelLoading(true);
+      setTravelError(null);
+      try {
+        const result = await api.travelDestinations();
+        setTravelDestinations({ city: result.city ?? [], worlds: result.worlds ?? [] });
+      } catch (error) {
+        setTravelError(error instanceof Error ? error.message : 'Could not load destinations');
+      } finally {
+        setTravelLoading(false);
+      }
+    },
+    [gameplayAllowed, showHint]
+  );
+
+  const handleStartJourney = useCallback(
+    (mode: 'rail' | 'air', destinationId: string) => {
+      setTravelError(null);
+      if (!session.startJourney(mode, destinationId)) {
+        setTravelError('Not connected to the travel server. Try again in a moment.');
+      }
+    },
+    [session]
+  );
 
   /** R (and the mobile range button) cycle Off → Whisper → Talk → Shout → Off. */
   const cycleRange = useCallback(() => {
@@ -1497,7 +1707,11 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     doorTerminalOpen ||
     doorbellRequest !== null ||
     elevatorModalOpen ||
-    airportDepartureOpen ||
+    travelMode !== null ||
+    session.taxiTrip?.state === 'waiting' ||
+    Boolean(session.travel) ||
+    elevatorTransition !== null ||
+    sceneTransition !== null ||
     clothingStoreOpen ||
     furnitureShopOpen ||
     roomSettingsOpen ||
@@ -1770,7 +1984,10 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onProximityPrompt={setProximityPrompt}
         onCityStreetChange={setCityStreet}
         onOpenDoorTerminal={() => setDoorTerminalOpen(true)}
-        onOpenAirportDeparture={() => setAirportDepartureOpen(true)}
+        onOpenAirportDeparture={() => void openTravel('air')}
+        onOpenRailStation={() => void openTravel('rail')}
+        transitHubs={session.transitHubs}
+        onHailTaxi={handleHailTaxi}
         onOpenClothingStore={() => setClothingStoreOpen(true)}
         onOpenFurnitureShop={() => setFurnitureShopOpen(true)}
         travelRequest={travelRequest}
@@ -2119,12 +2336,23 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onClose={() => setDoorTerminalOpen(false)}
       />
 
-      <AirportTravelModal open={airportDepartureOpen} guest={session.status === 'guest'} onClose={() => setAirportDepartureOpen(false)} onTakeFlight={() => {
-        setAirportDepartureOpen(false);
-        if (onExitPlatform) onExitPlatform();
-        else if (session.status === 'guest') void session.endGuest();
-        else if (session.status === 'online') session.exitCity();
-      }} />
+      <TravelModal
+        open={travelMode !== null}
+        mode={travelMode ?? 'air'}
+        destinations={travelDestinations}
+        loading={travelLoading}
+        error={travelError}
+        guest={session.status === 'guest'}
+        onStart={handleStartJourney}
+        onClose={() => setTravelMode(null)}
+      />
+
+      <TaxiDestinationModal
+        open={session.taxiTrip?.state === 'waiting'}
+        destinations={session.taxiTrip?.destinations ?? []}
+        onChoose={session.chooseTaxiDestination}
+        onCancelRide={handleExitTransit}
+      />
       <ShopModal open={clothingStoreOpen} onClose={() => setClothingStoreOpen(false)} initialTab="clothing" readOnly={session.status === 'guest'} />
       <ShopModal open={furnitureShopOpen} onClose={() => setFurnitureShopOpen(false)} initialTab="furniture" readOnly={session.status === 'guest'} />
 
@@ -2140,6 +2368,47 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onArriveFloor={handleArriveFloor}
         onClose={() => setElevatorModalOpen(false)}
       />
+
+      {activeJourney && (
+        <TravelTransition
+          open
+          mode={activeJourney.mode}
+          label={activeJourney.destination.label}
+          detail={
+            activeJourney.mode === 'rail'
+              ? 'Platform 1 · Intercity departure'
+              : 'Gate boarding · Cabin secured'
+          }
+          phase={activeJourney.phase}
+          startedAt={activeJourney.startedAt}
+          arriveAt={activeJourney.arriveAt}
+          onCancel={activeJourney.phase === 'boarding' ? session.cancelJourney : undefined}
+        />
+      )}
+
+      {elevatorTransition && (
+        <TravelTransition
+          open
+          mode="elevator"
+          label={elevatorTransition.label}
+          detail={elevatorTransition.detail}
+          phase="enroute"
+          startedAt={elevatorTransition.startedAt}
+          arriveAt={elevatorTransition.arriveAt}
+        />
+      )}
+
+      {sceneTransition && (
+        <TravelTransition
+          open
+          mode={sceneTransition.mode}
+          label={sceneTransition.label}
+          detail={sceneTransition.detail}
+          phase="arrived"
+          startedAt={sceneTransition.startedAt}
+          arriveAt={sceneTransition.arriveAt}
+        />
+      )}
     </div>
   );
 }

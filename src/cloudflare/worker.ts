@@ -1,8 +1,8 @@
 import { neon } from '@neondatabase/serverless';
-import { handleWorldRoute } from './worlds';
+import { handleWorldRoute, permission } from './worlds';
 import { handleSocialRoute } from './social';
 import { handleEconomyRoute } from './economy';
-import { handleTransitRoute } from './transit';
+import { cityTravelDestinations, handleTransitRoute } from './transit';
 import { handlePlatformRoute } from './platform';
 export { LoftLifeRealtime } from './realtime';
 import {
@@ -786,6 +786,7 @@ export default {
         const transitResponse = handleTransitRoute(request);
         if (transitResponse) return transitResponse;
       }
+
       if (url.pathname === '/api/presence' && request.method === 'GET') {
         if (!env.REALTIME) return fail('Realtime Durable Object binding is not configured.',503,'realtime_unconfigured');
         const id = env.REALTIME.idFromName('party:global');
@@ -828,6 +829,35 @@ export default {
         if (!sql) return fail('DATABASE_URL is not configured.', 503, 'unconfigured');
         const worldResponse = await handleWorldRoute(request, sql, auth?.account ?? null, env.REALTIME);
         if (worldResponse) return worldResponse;
+      }
+
+      if (url.pathname === '/api/travel/destinations' && request.method === 'GET') {
+        const auth = await currentAccount(request, env);
+        const sql = auth?.sql ?? (await database(env));
+        const worlds: Array<Record<string, unknown>> = [];
+        if (auth && sql) {
+          const rows = (await sql.query(
+            "SELECT * FROM ll_worlds WHERE owner_id=$1 OR status IN ('live','available') ORDER BY updated_at DESC LIMIT 24",
+            [auth.account.id]
+          )) as Array<Record<string, unknown>>;
+          for (const row of rows) {
+            const access = await permission(sql, row, auth.account);
+            if (!access.canEnter) continue;
+            worlds.push({
+              id: `world:${String(row.id)}`,
+              label: String(row.name ?? 'Player world'),
+              kind: 'world',
+              location: 'world',
+              worldId: String(row.id),
+              access: String(row.access ?? 'private'),
+              blurb: `${String(row.kind ?? 'world').replace(/_/g, ' ')} · player-created world`,
+            });
+          }
+        }
+        return new Response(
+          JSON.stringify({ city: cityTravelDestinations(), worlds }),
+          { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }
+        );
       }
 
       if (

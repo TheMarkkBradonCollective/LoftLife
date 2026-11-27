@@ -814,8 +814,14 @@ test('realtime: boarding a LoftLine bus assigns a server-owned seat', async () =
 
   const routes = await api('GET', '/api/transit');
   assert.equal(routes.status, 200);
-  assert.equal(routes.json.lines.length, 2);
-  const line = routes.json.lines[0];
+  assert.ok(routes.json.lines.length >= 3, 'several bus routes share the city');
+  assert.ok(
+    routes.json.lines.some((entry) => entry.kind === 'rail' && entry.stops.length >= 4),
+    'light rail exposes a multi-stop line'
+  );
+  assert.ok(routes.json.taxis.length >= 3, 'autonomous taxis expose valid destinations');
+  assert.ok(routes.json.hubs.some((hub) => hub.id === 'central-station'));
+  const line = routes.json.lines.find((entry) => entry.kind === 'bus');
   assert.ok(line.stops.length >= 3, 'the 15th Street line has several stops');
 
   const stop = line.stops[1];
@@ -853,6 +859,102 @@ test('realtime: boarding a LoftLine bus assigns a server-owned seat', async () =
   assert.equal(typeof exited.exited.x, 'number');
 
   client.close();
+});
+
+test('realtime: an autonomous taxi takes a fare to a valid destination', async () => {
+  const fare = await newAccount();
+  const port = Number(new URL(base).port);
+  const client = makeClient(port);
+  await client.opened;
+  client.send({ t: 'hello', token: fare.token, place: { kind: 'city' } });
+  const ready = await client.waitFor((m) => m.t === 'ready');
+  const taxi = ready.vehicles.find((vehicle) => vehicle.kind === 'taxi');
+  assert.ok(taxi, 'the city fleet includes taxis');
+  assert.equal(taxi.riders.length, 0, 'no driver NPC occupies a taxi seat');
+
+  client.send({ t: 'pose', x: taxi.x, y: 0, z: taxi.z, yaw: 0, location: 'world' });
+  client.send({ t: 'transit', action: 'hailTaxi', vehicleId: taxi.id });
+  const boarded = await client.waitFor((m) => m.t === 'transit' && m.riding?.kind === 'taxi');
+  assert.equal(boarded.riding.vehicleId, taxi.id);
+  assert.equal(boarded.taxi.state, 'waiting');
+  assert.ok(boarded.taxi.destinations.some((entry) => entry.id === 'library'));
+
+  // Invalid destinations are rejected before dispatch moves.
+  client.send({ t: 'transit', action: 'taxiDestination', destinationId: 'moon' });
+  const rejected = await client.waitFor((m) => m.t === 'error' && m.code === 'bad_request');
+  assert.match(rejected.message, /destination/i);
+
+  client.send({ t: 'transit', action: 'taxiDestination', destinationId: 'library' });
+  const driving = await client.waitFor(
+    (m) => m.t === 'snapshot' && (m.vehicles ?? []).some((entry) => entry.id === taxi.id && entry.state === 'driving')
+  );
+  assert.ok(driving.vehicles.some((entry) => entry.destinationId === 'library'));
+
+  const arrived = await client.waitFor(
+    (m) => m.t === 'transit' && m.riding === null && m.exited?.lineId === 'taxi',
+    20_000
+  );
+  assert.match(arrived.exited.label, /Library/i);
+  assert.ok(Math.hypot(arrived.exited.x + 2.33, arrived.exited.z - 41.2) < 1.5);
+  client.close();
+});
+
+test('realtime: intercity rail checks the gateway and destination access', async () => {
+  const traveller = await newAccount();
+  const port = Number(new URL(base).port);
+  const client = makeClient(port);
+  await client.opened;
+  client.send({ t: 'hello', token: traveller.token, place: { kind: 'city' } });
+  await client.waitFor((m) => m.t === 'ready');
+
+  const routes = await api('GET', '/api/transit');
+  const hub = routes.json.hubs.find((entry) => entry.id === 'central-station');
+
+  // Stand at the station but inside the hotel: the server still refuses.
+  client.send({ t: 'pose', x: hub.x, y: 0, z: hub.z, yaw: 0, location: 'lobby' });
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  client.send({ t: 'travel', action: 'start', mode: 'rail', destinationId: 'city-plaza' });
+  const far = await client.waitFor((m) => m.t === 'error' && m.code === 'conflict');
+  assert.match(far.message, /Central Station/i);
+
+  client.send({ t: 'pose', x: hub.x, y: 0, z: hub.z, yaw: 0, location: 'world' });
+
+  // Unknown / foreign destinations are refused server-side.
+  client.send({ t: 'travel', action: 'start', mode: 'rail', destinationId: 'world:not-a-world' });
+  const missing = await client.waitFor((m) => m.t === 'error' && m.code === 'not_found');
+  assert.match(missing.message, /not available/i);
+
+  client.send({ t: 'travel', action: 'start', mode: 'rail', destinationId: 'city-plaza' });
+  const boarding = await client.waitFor((m) => m.t === 'travel' && m.action === 'boarding');
+  assert.equal(boarding.journey.destination.id, 'city-plaza');
+  assert.ok(boarding.journey.arriveAt > boarding.journey.departAt);
+  await client.waitFor((m) => m.t === 'travel' && m.action === 'departed');
+  const arrived = await client.waitFor(
+    (m) => m.t === 'travel' && m.action === 'arrived',
+    20_000
+  );
+  assert.equal(arrived.journey.destination.location, 'world');
+  assert.ok(arrived.journey.destination.spawn);
+  client.close();
+});
+
+test('travel destinations only include worlds the player may enter', async () => {
+  const owner = await newAccount();
+  const stranger = await newAccount();
+  const created = await api('POST', '/api/worlds', {
+    token: owner.token,
+    body: { name: 'Private Rail Retreat', kind: 'house', access: 'private' },
+  });
+  assert.equal(created.status, 201);
+
+  const own = await api('GET', '/api/travel/destinations', { token: owner.token });
+  assert.equal(own.status, 200);
+  assert.ok(own.json.city.length >= 4);
+  assert.ok(own.json.worlds.some((entry) => entry.worldId === created.json.id));
+
+  const other = await api('GET', '/api/travel/destinations', { token: stranger.token });
+  assert.ok(!other.json.worlds.some((entry) => entry.worldId === created.json.id));
+  await api('DELETE', `/api/worlds/${created.json.id}`, { token: owner.token });
 });
 
 /* ------------------------- platform shell features ------------------------ */
