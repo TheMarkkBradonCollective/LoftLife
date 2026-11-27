@@ -2,7 +2,17 @@
  * Typed client for the LoftLife API. All requests are same-origin (/api) and
  * proxied by Vite in development, so there is no CORS surface.
  */
-import type { AvatarConfig, LightingMood, PlacedItem, RoomSurfaceConfig } from '../game/types';
+import type {
+  AccessoryId,
+  AvatarConfig,
+  BottomStyleId,
+  CarryId,
+  JewelryId,
+  LightingMood,
+  PlacedItem,
+  RoomSurfaceConfig,
+  TopStyleId,
+} from '../game/types';
 
 const TOKEN_KEY = 'loftlife_session_token_v1';
 
@@ -73,6 +83,33 @@ export interface Profile {
 export interface Wallet {
   yuanzi: number;
   tongbao: number;
+}
+
+/** Wardrobe-only content of a saved outfit; foundations are never included. */
+export interface OutfitConfig {
+  topStyle: TopStyleId;
+  topColor: string;
+  bottomStyle: BottomStyleId;
+  bottomColor: string;
+  shoeColor: string;
+  accessory: AccessoryId;
+  jewelry: JewelryId;
+  carry: CarryId;
+}
+
+export interface SavedOutfit {
+  id: string;
+  name: string;
+  config: OutfitConfig;
+  createdAt: number;
+}
+
+export interface MakeoverResult {
+  profile: Profile;
+  wallet: Wallet;
+  charged: number;
+  duplicate: boolean;
+  changed: string[];
 }
 
 export interface InventoryEntry {
@@ -447,6 +484,7 @@ export const api = {
       profile: Profile;
       wallet: Wallet;
       inventory: InventoryEntry[];
+      outfits: SavedOutfit[];
       suite: SuiteState;
     }>('/auth/me'),
 
@@ -466,6 +504,23 @@ export const api = {
   }) => request<Profile>('/profile', { method: 'PATCH', body }),
 
   shop: () => request<{ furniture: ShopEntry[]; clothing: ShopEntry[] }>('/shop', { auth: false }),
+
+  /** Paid foundational makeover; the server owns the price and the idempotency. */
+  characterMakeover: (avatar: AvatarConfig, idempotencyKey: string) =>
+    request<MakeoverResult>('/character/makeover', {
+      method: 'POST',
+      body: { avatar, idempotencyKey },
+    }),
+
+  outfits: () => request<SavedOutfit[]>('/outfits'),
+
+  saveOutfit: (name: string, config: OutfitConfig) =>
+    request<SavedOutfit>('/outfits', { method: 'POST', body: { name, config } }),
+
+  deleteOutfit: (id: string) =>
+    request<{ deleted: boolean; id: string }>(`/outfits/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
 
   purchase: (catalogId: string, idempotencyKey: string) =>
     request<{

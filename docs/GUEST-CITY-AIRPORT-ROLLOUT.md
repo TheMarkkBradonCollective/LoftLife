@@ -43,8 +43,8 @@ This document records the implementation state of issue #8. It distinguishes cod
 - Run end-to-end checks against the actual Cloudflare Worker, Neon database, and Durable Object binding. CI passing does not prove production secrets, migrations, or bindings are configured.
 - Verify airport arrival/departure and hotel paths in the supported desktop, installed-app, and Android runtimes, including reconnect and save recovery.
 - Run the live guest flow against the deployed Worker. Local parity is covered by the Node guest test and the in-process Worker/DO two-guest test; neither replaces a check against the production Neon database, Durable Object binding, and deployed assets.
-- Implement the paid foundational facial-feature makeover service; those features are not exposed in the free bathroom/salon editor.
-- Saved outfit presets are device-local today. Account-synced outfits across devices are not implemented yet.
+- Foundational facial features use the paid **Character Makeover** (250 yuanzi); hair and makeup stay free at the bathroom mirror and salon.
+- Saved outfits are account rows and sync across devices; the starter wardrobe is free and unowned pieces cannot be worn.
 - Replace the existing sample hotel resident/intercom directory with live account-backed resident availability and invitation permissions.
 - Confirm the hotel allocation backfill on a production-like database with existing accounts and verify no duplicate room numbers.
 

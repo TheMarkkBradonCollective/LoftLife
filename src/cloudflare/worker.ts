@@ -20,6 +20,30 @@ import { normalizeVoicePreferences } from '../../shared/voice-controls.mjs';
 import { resolveInstance } from '../../shared/instance.mjs';
 import { roomForAllocationIndex } from '../../shared/hotel-layout.mjs';
 import { normalizeControlsPayload } from '../../shared/keybindings.mjs';
+import {
+  ACCESSORIES,
+  BODY_PRESETS,
+  BOTTOM_STYLES,
+  BUILDS,
+  CARRY,
+  CHARACTER_MAKEOVER,
+  CLOTHING_SHOP,
+  DEFAULT_AVATAR,
+  EYE_SHAPES,
+  EYE_STYLES,
+  EYEBROWS,
+  FACE_SHAPES,
+  FACIAL_DETAILS,
+  FACIAL_HAIR,
+  HAIR_STYLES,
+  HEIGHTS,
+  JEWELRY,
+  MAKEUP_STYLES,
+  STARTER_CLOTHING,
+  TOP_STYLES,
+  foundationalChanges,
+  outfitFromAvatar,
+} from '../../shared/character.mjs';
 
 /**
  * Cloudflare Worker: static assets, Neon-backed game APIs and Durable Object realtime.
@@ -76,32 +100,38 @@ const STARTER_SUITE = {
     { uid: 'p14', catalogId: 'wall_shelf', gx: 2, gz: 0, rot: 0, wall: 'north', color: '#c59867' },
   ],
 };
-const DEFAULT_AVATAR = {
-  name: 'Newcomer', skinTone: '#e8b48f', hairStyle: 'bob', hairColor: '#2f2119',
-  topStyle: 'tee', topColor: '#e6dfd3', bottomStyle: 'jeans', bottomColor: '#2b3a2a',
-  shoeColor: '#1b1b1b', accessory: 'none', jewelry: 'none', carry: 'none',
-  facialHair: 'none', eyebrows: 'natural', eyeStyle: 'warm_brown', makeupStyle: 'none',
-};
-const DEFAULT_CLOTHING = ['tee', 'none'];
+const DEFAULT_CLOTHING = STARTER_CLOTHING;
 const AVATAR_ENUMS = {
-  hairStyle: ['bob', 'afro', 'ponytail', 'sidepart', 'buns', 'spiky', 'long_waves', 'buzz', 'curls', 'locs', 'pixie', 'middle_part', 'top_knot', 'shoulder_waves', 'braids', 'undercut', 'fade', 'curtain'],
-  topStyle: ['hoodie', 'blazer', 'tee', 'turtleneck', 'button_shirt', 'sweater', 'jacket', 'tank', 'varsity', 'raincoat', 'suit', 'dress', 'crop_hoodie', 'cardigan'],
-  bottomStyle: ['jeans', 'chinos', 'shorts', 'skirt', 'joggers', 'dress_pants', 'cargo'],
-  accessory: ['none', 'glasses', 'headphones', 'beanie', 'cap', 'bucket_hat', 'sunglasses', 'scarf'],
-  jewelry: ['none', 'chain', 'watch', 'earrings', 'bracelet'],
-  carry: ['none', 'backpack', 'purse', 'tote'],
-  facialHair: ['none', 'stubble', 'beard', 'goatee', 'mustache'],
-  eyebrows: ['natural', 'bold', 'thin', 'arched'],
-  eyeStyle: ['warm_brown', 'deep_brown', 'hazel', 'green', 'blue', 'gray'],
-  makeupStyle: ['none', 'natural', 'soft', 'bold'],
+  bodyPreset: BODY_PRESETS,
+  height: HEIGHTS,
+  build: BUILDS,
+  faceShape: FACE_SHAPES,
+  eyeShape: EYE_SHAPES,
+  facialDetail: FACIAL_DETAILS,
+  hairStyle: HAIR_STYLES,
+  topStyle: TOP_STYLES,
+  bottomStyle: BOTTOM_STYLES,
+  accessory: ACCESSORIES,
+  jewelry: JEWELRY,
+  carry: CARRY,
+  facialHair: FACIAL_HAIR,
+  eyebrows: EYEBROWS,
+  eyeStyle: EYE_STYLES,
+  makeupStyle: MAKEUP_STYLES,
 };
 function safeAvatar(input: unknown, name: string) {
   const raw = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
   const hex = (value: unknown, fallback: string) => typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value) ? value.toLowerCase() : fallback;
-  const pick = (key: keyof typeof AVATAR_ENUMS, fallback: string) => typeof raw[key] === 'string' && AVATAR_ENUMS[key].includes(raw[key] as string) ? raw[key] as string : fallback;
+  const pick = (key: keyof typeof AVATAR_ENUMS, fallback: string) => typeof raw[key] === 'string' && (AVATAR_ENUMS[key] as readonly string[]).includes(raw[key] as string) ? raw[key] as string : fallback;
   return {
     name: typeof raw.name === 'string' && raw.name.trim().length >= 2 ? raw.name.trim().slice(0, 24) : name,
     skinTone: hex(raw.skinTone, DEFAULT_AVATAR.skinTone),
+    bodyPreset: pick('bodyPreset', DEFAULT_AVATAR.bodyPreset),
+    height: pick('height', DEFAULT_AVATAR.height),
+    build: pick('build', DEFAULT_AVATAR.build),
+    faceShape: pick('faceShape', DEFAULT_AVATAR.faceShape),
+    eyeShape: pick('eyeShape', DEFAULT_AVATAR.eyeShape),
+    facialDetail: pick('facialDetail', DEFAULT_AVATAR.facialDetail),
     hairStyle: pick('hairStyle', DEFAULT_AVATAR.hairStyle),
     hairColor: hex(raw.hairColor, DEFAULT_AVATAR.hairColor),
     topStyle: pick('topStyle', DEFAULT_AVATAR.topStyle),
@@ -202,6 +232,14 @@ const SCHEMA_STATEMENTS = [
      last_read_at BIGINT NOT NULL,
      PRIMARY KEY (user_id, peer_id)
    )`,
+  `CREATE TABLE IF NOT EXISTS ll_outfits (
+     id TEXT PRIMARY KEY,
+     user_id TEXT NOT NULL REFERENCES ll_accounts(id) ON DELETE CASCADE,
+     name TEXT NOT NULL,
+     config_json TEXT NOT NULL,
+     created_at BIGINT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS ll_outfits_user ON ll_outfits(user_id, created_at DESC)`,
   `ALTER TABLE ll_worlds ADD COLUMN IF NOT EXISTS foundation TEXT NOT NULL DEFAULT 'TG-MapDefault'`,
   `ALTER TABLE ll_worlds ADD COLUMN IF NOT EXISTS layout_json TEXT`,
   `ALTER TABLE ll_worlds ADD COLUMN IF NOT EXISTS published_layout_json TEXT`,
@@ -546,6 +584,24 @@ function profileView(account: AccountRow, row?: Record<string, unknown>) {
     voice: normalizeVoicePreferences(parseJsonField(row?.voice_json, {})),
   };
 }
+function safeOutfit(input: unknown) {
+  const raw = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
+  return outfitFromAvatar(safeAvatar({ ...DEFAULT_AVATAR, ...raw, name: 'Outfit' }, 'Outfit'));
+}
+async function missingWardrobe(sql: Sql, userId: string, avatar: Record<string, unknown>) {
+  const worn = [
+    avatar.topStyle,
+    avatar.bottomStyle,
+    avatar.accessory,
+    avatar.jewelry,
+    avatar.carry,
+  ].filter((id): id is string => typeof id === 'string' && id !== 'none' && !STARTER_CLOTHING.includes(id));
+  if (worn.length === 0) return [];
+  const owned = await Promise.all(worn.map((id) =>
+    sql.query('SELECT 1 FROM ll_inventory WHERE user_id=$1 AND kind=\'clothing\' AND catalog_id=$2 AND qty>0 LIMIT 1', [userId, id])
+  ));
+  return worn.filter((_, index) => owned[index].length === 0);
+}
 function suiteView(row?: Record<string, unknown>) {
   if (!row) return null;
   return {
@@ -561,14 +617,6 @@ const FURNITURE_PRICES: Record<string, number> = {
   table_lamp:35, monstera_plant:40, olive_tree:75, woven_rug:55, wall_art:65,
   wall_shelf:50, floor_mirror:110, neon_sign:90,
 };
-const CLOTHING_DEFS: Record<string, { label: string; price: number; currency: string }> = {
-  hoodie:{label:'Everyday Hoodie',price:80,currency:'yuanzi'},
-  blazer:{label:'Tailored Blazer',price:6,currency:'tongbao'},
-  turtleneck:{label:'Merino Turtleneck',price:120,currency:'yuanzi'},
-  glasses:{label:'Wire Glasses',price:60,currency:'yuanzi'},
-  headphones:{label:'Studio Headphones',price:5,currency:'tongbao'},
-  beanie:{label:'Ribbed Beanie',price:45,currency:'yuanzi'},
-};
 const FLOOR_STYLES = ['oak_parquet','walnut_herringbone','terrazzo','concrete','boucle_carpet'];
 const WALL_STYLES = ['warm_chalk','sage_plaster','terracotta','slate_blue','charcoal_loft','soft_blush'];
 const MOODS = ['morning','golden','night'];
@@ -577,12 +625,13 @@ const MOODS = ['morning','golden','night'];
 async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): Promise<Response | null> {
   const path = url.pathname;
   const handled = new Set([
-    '/api/shop','/api/auth/me','/api/profile','/api/inventory',
-    '/api/economy/wallet','/api/economy/history','/api/suite','/api/suite/visibility',
+    '/api/shop','/api/auth/me','/api/profile','/api/character/makeover','/api/inventory',
+    '/api/outfits','/api/economy/wallet','/api/economy/history','/api/suite','/api/suite/visibility',
     '/api/mod/reports','/api/mod/suspend',
   ]);
   const suiteMatch = path.match(/^\/api\/suites\/([^/]+)$/);
-  if (!handled.has(path) && !suiteMatch) return null;
+  const outfitMatch = path.match(/^\/api\/outfits\/([^/]+)$/);
+  if (!handled.has(path) && !suiteMatch && !outfitMatch) return null;
   const isPublic = path === '/api/shop';
   const auth = isPublic ? null : await currentAccount(request, env);
   if (!isPublic && !auth) return fail('Sign in to continue.', 401, 'unauthorized');
@@ -629,20 +678,22 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
   if (path === '/api/shop' && request.method === 'GET') {
     return json({
       furniture: Object.entries(FURNITURE_PRICES).map(([id, price]) => ({ id, kind:'furniture', price, currency:'yuanzi' })),
-      clothing: Object.entries(CLOTHING_DEFS).map(([id, item]) => ({ id, kind:'clothing', ...item })),
+      clothing: CLOTHING_SHOP,
     });
   }
   if (path === '/api/auth/me' && request.method === 'GET' && sql && account) {
-    const [profiles,wallets,inventory,suites] = await Promise.all([
+    const [profiles,wallets,inventory,suites,outfits] = await Promise.all([
       sql.query('SELECT * FROM ll_profiles WHERE user_id=$1 LIMIT 1',[account.id]),
       sql.query('SELECT yuanzi,tongbao FROM ll_wallets WHERE user_id=$1 LIMIT 1',[account.id]),
       sql.query('SELECT kind,catalog_id,qty,acquired_at FROM ll_inventory WHERE user_id=$1 ORDER BY acquired_at DESC',[account.id]),
       sql.query('SELECT * FROM ll_suites WHERE owner_id=$1 LIMIT 1',[account.id]),
-    ]) as [Array<Record<string,unknown>>,Array<Record<string,unknown>>,Array<Record<string,unknown>>,Array<Record<string,unknown>>];
+      sql.query('SELECT id,name,config_json,created_at FROM ll_outfits WHERE user_id=$1 ORDER BY created_at DESC',[account.id]),
+    ]) as [Array<Record<string,unknown>>,Array<Record<string,unknown>>,Array<Record<string,unknown>>,Array<Record<string,unknown>>,Array<Record<string,unknown>>];
     return json({
       user: publicAccount(account), profile: profileView(account,profiles[0]),
       wallet: wallets[0] ?? {yuanzi:0,tongbao:0},
       inventory: inventory.map(row=>({kind:row.kind,catalogId:row.catalog_id,qty:Number(row.qty),acquiredAt:Number(row.acquired_at)})),
+      outfits: outfits.map(row=>({id:row.id,name:row.name,config:parseJsonField(row.config_json,{}),createdAt:Number(row.created_at)})),
       suite: suiteView(suites[0]),
     });
   }
@@ -655,7 +706,16 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
     const displayName = validateDisplayName(body.displayName ?? account.display_name, account.handle);
     const bio = typeof body.bio === 'string' ? body.bio.replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,160) : undefined;
     const rows = await sql.query('SELECT avatar_json,bio,voice_json FROM ll_profiles WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
-    const avatar = body.avatar === undefined ? parseJsonField(rows[0]?.avatar_json,safeAvatar(undefined,displayName)) : safeAvatar(body.avatar,displayName);
+    const currentAvatar = parseJsonField(rows[0]?.avatar_json,safeAvatar(undefined,displayName)) as Record<string, unknown>;
+    const avatar = body.avatar === undefined ? currentAvatar : safeAvatar(body.avatar,displayName);
+    const foundation = foundationalChanges(currentAvatar, avatar);
+    if (foundation.length > 0) {
+      return fail(`Foundational features (${foundation.join(', ')}) require the paid Character Makeover.`,403,'makeover_required',{fields:foundation});
+    }
+    const missing = await missingWardrobe(sql, account.id, avatar);
+    if (missing.length > 0) {
+      return fail(`You do not own: ${missing.join(', ')}. Buy clothing in the Wardrobe shop first.`,403,'forbidden',{missing});
+    }
     // Voice preferences are only written when the client sends them, so an
     // outfit save cannot reset the microphone mode.
     const voice = body.voice === undefined
@@ -666,6 +726,77 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
       sql.query('UPDATE ll_profiles SET display_name=$1,avatar_json=$2,bio=$3,voice_json=$4,updated_at=$5 WHERE user_id=$6',[displayName,JSON.stringify(avatar),bio ?? String(rows[0]?.bio ?? ''),JSON.stringify(voice),Date.now(),account.id]),
     ]);
     return json({userId:account.id,handle:account.handle,displayName,bio:bio ?? String(rows[0]?.bio ?? ''),avatar,voice});
+  }
+  if (path === '/api/character/makeover' && request.method === 'POST' && sql && account) {
+    const body = await readJson(request);
+    if (!body.avatar || typeof body.avatar !== 'object') return fail('avatar is required.',400,'invalid_input');
+    const rows = await sql.query('SELECT avatar_json FROM ll_profiles WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
+    const current = safeAvatar(parseJsonField(rows[0]?.avatar_json, safeAvatar(undefined, account.handle)), account.handle);
+    const next = safeAvatar(body.avatar, current.name || account.handle);
+    const foundation = foundationalChanges(current, next);
+    if (foundation.length === 0) {
+      return json({profile:profileView(account,{...rows[0],avatar_json:JSON.stringify(next)}),wallet:(await sql.query('SELECT yuanzi,tongbao FROM ll_wallets WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>)[0] ?? {yuanzi:0,tongbao:0},charged:0,duplicate:false,changed:[]});
+    }
+    const missing = await missingWardrobe(sql, account.id, next);
+    if (missing.length > 0) return fail(`You do not own: ${missing.join(', ')}.`,403,'forbidden',{missing});
+    const idempotencyKey = String(body.idempotencyKey ?? '');
+    if (idempotencyKey.length < 8 || idempotencyKey.length > 160) return fail('A valid idempotencyKey is required for a makeover.',400,'invalid_input');
+    const at = Date.now();
+    const ledgerId = crypto.randomUUID();
+    const result = await sql.query(
+      `WITH lock AS MATERIALIZED (SELECT pg_advisory_xact_lock(hashtextextended($1,0))),
+       prior AS MATERIALIZED (SELECT id,user_id FROM ll_ledger WHERE idempotency_key=$1 AND EXISTS(SELECT 1 FROM lock)),
+       debit AS (
+         UPDATE ll_wallets SET yuanzi=yuanzi-$4
+         WHERE user_id=$2 AND NOT EXISTS(SELECT 1 FROM prior) AND yuanzi >= $4
+         RETURNING yuanzi
+       ),
+       ledger AS (
+         INSERT INTO ll_ledger(id,user_id,currency,delta,balance_after,reason,ref,idempotency_key,created_at)
+         SELECT $5,$2,'yuanzi',-$4,debit.yuanzi,'character_makeover',$6,$1,$7 FROM debit RETURNING id
+       ),
+       updated AS (
+         UPDATE ll_profiles SET avatar_json=$3,updated_at=$7 WHERE user_id=$2
+           AND (EXISTS(SELECT 1 FROM debit) OR EXISTS(SELECT 1 FROM prior WHERE prior.user_id=$2))
+         RETURNING user_id
+       )
+       SELECT (SELECT id FROM prior) AS prior_id,(SELECT user_id FROM prior) AS prior_user_id,
+              (SELECT id FROM ledger) AS ledger_id,(SELECT user_id FROM updated) AS updated_user`,
+      [idempotencyKey, account.id, JSON.stringify(next), CHARACTER_MAKEOVER.price, ledgerId, foundation.join(','), at]
+    ) as Array<Record<string,unknown>>;
+    const outcome = result[0] ?? {};
+    if (outcome.prior_id && outcome.prior_user_id !== account.id) return fail('That idempotency key has already been used.',409,'conflict');
+    if (!outcome.prior_id && !outcome.ledger_id) {
+      const balances = await sql.query('SELECT yuanzi,tongbao FROM ll_wallets WHERE user_id=$1 LIMIT 1',[account.id]) as Array<Record<string,unknown>>;
+      return fail('Not enough yuanzi for a Character Makeover.',402,'insufficient_funds',{currency:'yuanzi',required:CHARACTER_MAKEOVER.price,available:Number(balances[0]?.yuanzi ?? 0)});
+    }
+    const [saved, walletRows] = await Promise.all([
+      sql.query('SELECT * FROM ll_profiles WHERE user_id=$1 LIMIT 1',[account.id]),
+      sql.query('SELECT yuanzi,tongbao FROM ll_wallets WHERE user_id=$1 LIMIT 1',[account.id]),
+    ]) as [Array<Record<string,unknown>>,Array<Record<string,unknown>>];
+    return json({profile:profileView(account,saved[0]),wallet:walletRows[0] ?? {yuanzi:0,tongbao:0},charged:outcome.prior_id?0:CHARACTER_MAKEOVER.price,duplicate:Boolean(outcome.prior_id),changed:foundation});
+  }
+  if (path === '/api/outfits' && sql && account) {
+    if (request.method === 'GET') {
+      const rows = await sql.query('SELECT id,name,config_json,created_at FROM ll_outfits WHERE user_id=$1 ORDER BY created_at DESC',[account.id]) as Array<Record<string,unknown>>;
+      return json(rows.map((row)=>({id:row.id,name:row.name,config:parseJsonField(row.config_json,{}),createdAt:Number(row.created_at)})));
+    }
+    if (request.method === 'POST') {
+      const body = await readJson(request);
+      const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim().slice(0,32) : 'My Outfit';
+      const config = safeOutfit(body.config ?? {});
+      const missing = await missingWardrobe(sql, account.id, config);
+      if (missing.length > 0) return fail(`You do not own: ${missing.join(', ')}.`,403,'forbidden',{missing});
+      const id = crypto.randomUUID();
+      const createdAt = Date.now();
+      await sql.query('INSERT INTO ll_outfits(id,user_id,name,config_json,created_at) VALUES ($1,$2,$3,$4,$5)',[id,account.id,name,JSON.stringify(config),createdAt]);
+      return json({id,name,config,createdAt});
+    }
+  }
+  if (outfitMatch && request.method === 'DELETE' && sql && account) {
+    const rows = await sql.query('DELETE FROM ll_outfits WHERE id=$1 AND user_id=$2 RETURNING id',[decodeURIComponent(outfitMatch[1]),account.id]) as Array<Record<string,unknown>>;
+    if (rows.length === 0) return fail('Outfit not found.',404,'not_found');
+    return json({deleted:true,id:rows[0].id});
   }
   if (path === '/api/preferences/controls' && sql && account) {
     if (request.method === 'GET') {

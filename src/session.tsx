@@ -24,8 +24,11 @@ import {
   getToken,
   setToken,
   type InventoryEntry,
+  type MakeoverResult,
   type MicrophoneMode,
+  type OutfitConfig,
   type Profile,
+  type SavedOutfit,
   type SessionUser,
   type SuiteState,
   type TransitDestination,
@@ -123,6 +126,7 @@ interface SessionValue {
   profile: Profile | null;
   wallet: Wallet;
   inventory: InventoryEntry[];
+  outfits: SavedOutfit[];
   suite: SuiteState | null;
   authError: string | null;
   authBusy: boolean;
@@ -168,6 +172,9 @@ interface SessionValue {
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   buy: (catalogId: string) => Promise<void>;
+  makeover: (avatar: AvatarConfig) => Promise<MakeoverResult>;
+  saveOutfit: (name: string, config: OutfitConfig) => Promise<SavedOutfit>;
+  deleteOutfit: (id: string) => Promise<void>;
   claimDaily: () => Promise<{ yuanzi: number; tongbao: number } | null>;
   saveRoomState: (payload: RoomStatePayload) => void;
   saveWorldState: (worldId: string, payload: RoomStatePayload) => void;
@@ -260,6 +267,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [wallet, setWallet] = useState<Wallet>(EMPTY_WALLET);
   const [inventory, setInventory] = useState<InventoryEntry[]>([]);
+  const [outfits, setOutfits] = useState<SavedOutfit[]>([]);
   const [suite, setSuite] = useState<SuiteState | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
@@ -407,6 +415,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setProfile(payload.profile);
     setWallet(payload.wallet);
     setInventory(payload.inventory);
+    setOutfits(payload.outfits ?? []);
     setSuite(payload.suite);
     // Voice preferences: changes made offline win (they sync up), otherwise the
     // account copy wins. Restoring prefs never enables the microphone and never
@@ -813,6 +822,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setProfile(null);
     setWallet(EMPTY_WALLET);
     setInventory([]);
+    setOutfits([]);
     setSuite(null);
     setRemotePlayers([]);
     setMessages([]);
@@ -844,6 +854,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const result = await api.purchase(catalogId, key);
     setWallet(result.wallet);
     setInventory(result.inventory);
+  }, []);
+
+  const makeover = useCallback(async (avatar: AvatarConfig) => {
+    const key = `makeover_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+    const result = await api.characterMakeover(avatar, key);
+    setProfile(result.profile);
+    setWallet(result.wallet);
+    return result;
+  }, []);
+
+  const saveOutfit = useCallback(async (name: string, config: OutfitConfig) => {
+    const saved = await api.saveOutfit(name, config);
+    setOutfits((current) => [saved, ...current]);
+    return saved;
+  }, []);
+
+  const deleteOutfit = useCallback(async (id: string) => {
+    await api.deleteOutfit(id);
+    setOutfits((current) => current.filter((outfit) => outfit.id !== id));
   }, []);
 
   const claimDaily = useCallback(async () => {
@@ -1145,6 +1174,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       profile,
       wallet,
       inventory,
+      outfits,
       suite,
       authError,
       authBusy,
@@ -1177,6 +1207,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       logout,
       refresh,
       buy,
+      makeover,
+      saveOutfit,
+      deleteOutfit,
       claimDaily,
       saveRoomState,
       saveWorldState,
@@ -1224,6 +1257,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       profile,
       wallet,
       inventory,
+      outfits,
       suite,
       authError,
       authBusy,
@@ -1256,6 +1290,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       logout,
       refresh,
       buy,
+      makeover,
+      saveOutfit,
+      deleteOutfit,
       claimDaily,
       saveRoomState,
       saveWorldState,

@@ -8,6 +8,7 @@
  */
 import { db, newId, now, tx, audit } from './db.mjs';
 import { ApiError, badRequest, conflict, notFound } from './errors.mjs';
+import { CLOTHING_CATALOG, CLOTHING_SHOP, STARTER_CLOTHING } from '../shared/character.mjs';
 
 export const CURRENCIES = /** @type {const} */ (['yuanzi', 'tongbao']);
 
@@ -89,43 +90,8 @@ export const FURNITURE_PRICES = {
   wall_art_set: 85,
 };
 
-/** Premium wardrobe pieces are priced in the secondary currency (Tongbao). */
-const CLOTHING_DEFS = {
-  // Tops
-  hoodie: { label: 'Everyday Hoodie', price: 80, currency: 'yuanzi' },
-  blazer: { label: 'Tailored Blazer', price: 6, currency: 'tongbao' },
-  turtleneck: { label: 'Merino Turtleneck', price: 120, currency: 'yuanzi' },
-  button_shirt: { label: 'Oxford Button-Down', price: 95, currency: 'yuanzi' },
-  sweater: { label: 'Knit Crew Sweater', price: 110, currency: 'yuanzi' },
-  jacket: { label: 'Utility Jacket', price: 160, currency: 'yuanzi' },
-  tank: { label: 'Ribbed Tank', price: 40, currency: 'yuanzi' },
-  varsity: { label: 'Varsity Jacket', price: 7, currency: 'tongbao' },
-  raincoat: { label: 'Technical Raincoat', price: 180, currency: 'yuanzi' },
-  suit: { label: 'Two-Piece Suit', price: 12, currency: 'tongbao' },
-  dress: { label: 'Slip Dress', price: 150, currency: 'yuanzi' },
-  crop_hoodie: { label: 'Cropped Hoodie', price: 90, currency: 'yuanzi' },
-  cardigan: { label: 'Longline Cardigan', price: 130, currency: 'yuanzi' },
-  // Head / face accessories
-  glasses: { label: 'Wire Glasses', price: 60, currency: 'yuanzi' },
-  headphones: { label: 'Studio Headphones', price: 5, currency: 'tongbao' },
-  beanie: { label: 'Ribbed Beanie', price: 45, currency: 'yuanzi' },
-  cap: { label: 'Ball Cap', price: 35, currency: 'yuanzi' },
-  bucket_hat: { label: 'Bucket Hat', price: 40, currency: 'yuanzi' },
-  sunglasses: { label: 'Designer Sunglasses', price: 70, currency: 'yuanzi' },
-  scarf: { label: 'Wool Scarf', price: 55, currency: 'yuanzi' },
-  // Jewelry
-  chain: { label: 'Fine Chain', price: 4, currency: 'tongbao' },
-  watch: { label: 'Steel Watch', price: 5, currency: 'tongbao' },
-  earrings: { label: 'Gold Earrings', price: 3, currency: 'tongbao' },
-  bracelet: { label: 'Beaded Bracelet', price: 35, currency: 'yuanzi' },
-  // Bags
-  backpack: { label: 'Canvas Backpack', price: 85, currency: 'yuanzi' },
-  purse: { label: 'Structured Purse', price: 110, currency: 'yuanzi' },
-  tote: { label: 'Everyday Tote', price: 60, currency: 'yuanzi' },
-};
-
 /** Free starting wardrobe so a new character is never locked out of dressing. */
-export const DEFAULT_OWNED_CLOTHING = ['tee', 'none'];
+export const DEFAULT_OWNED_CLOTHING = STARTER_CLOTHING;
 
 export const FURNITURE_SHOP = Object.entries(FURNITURE_PRICES).map(([id, price]) => ({
   id,
@@ -134,13 +100,12 @@ export const FURNITURE_SHOP = Object.entries(FURNITURE_PRICES).map(([id, price])
   currency: 'yuanzi',
 }));
 
-export const CLOTHING_SHOP = Object.entries(CLOTHING_DEFS).map(([id, def]) => ({
-  id,
-  kind: 'clothing',
-  label: def.label,
-  price: def.price,
-  currency: def.currency,
-}));
+/** Prices and labels live in shared/character.mjs so the edge agrees exactly. */
+export { CLOTHING_SHOP };
+
+export function isKnownClothing(id) {
+  return Object.hasOwn(CLOTHING_CATALOG, id);
+}
 
 const SHOP = new Map([...FURNITURE_SHOP, ...CLOTHING_SHOP].map((entry) => [entry.id, entry]));
 

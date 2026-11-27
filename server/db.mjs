@@ -96,6 +96,17 @@ CREATE TABLE IF NOT EXISTS inventory (
   UNIQUE (user_id, kind, catalog_id)
 );
 
+-- Unlimited named outfits, account-scoped so they follow the player across
+-- devices. Only the wardrobe slice of an avatar is stored here.
+CREATE TABLE IF NOT EXISTS outfits (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  config_json TEXT NOT NULL,
+  created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS outfits_user ON outfits(user_id, created_at DESC);
+
 -- One hotel suite per player, plus the shared decoration state of it.
 CREATE TABLE IF NOT EXISTS suites (
   id           TEXT PRIMARY KEY,
