@@ -1189,10 +1189,10 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   /** The menu asks for a specific camera; the existing toggle preserves state. */
   const handleSetView = useCallback(
     (next: ViewMode) => {
-      if (!gameplayAllowed || next === viewMode) return;
+      if (!device.desktop || !gameplayAllowed || next === viewMode) return;
       handleTogglePlayView();
     },
-    [gameplayAllowed, viewMode, handleTogglePlayView]
+    [device.desktop, gameplayAllowed, viewMode, handleTogglePlayView]
   );
 
   const toggleFullscreen = useCallback(() => {
@@ -1701,6 +1701,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
           emotes, settings, controls and leaving the session. */}
       <GameMenu
         open={menuOpen}
+        canChangeView={device.desktop}
         onClose={() => setMenuOpen(false)}
         location={location}
         world={activeWorld}
