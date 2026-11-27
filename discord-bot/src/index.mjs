@@ -29,12 +29,6 @@ const commands = [
 const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
 await rest.put(Routes.applicationGuildCommands(DISCORD_CLIENT_ID, DISCORD_GUILD_ID), { body: commands });
 
-const clientRolePerms = {
-  ViewChannel: PermissionFlagsBits.ViewChannel,
-  SendMessages: PermissionFlagsBits.SendMessages,
-  ReadMessageHistory: PermissionFlagsBits.ReadMessageHistory,
-};
-
 async function ensureRole(guild, name, permissions = []) {
   return guild.roles.cache.find(role => role.name === name)
     ?? guild.roles.create({ name, permissions, reason: "LoftLife community setup" });
@@ -56,7 +50,6 @@ async function setupOfficialGuild(guild) {
   await ensureRole(guild, "LoftLife Administration");
 
   const everyone = guild.roles.everyone.id;
-  const memberView = [{ id: everyone, deny: [PermissionFlagsBits.SendMessages] }, { id: memberRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }];
   const staff = await ensureCategory(guild, "LOFTLIFE STAFF", [
     { id: everyone, deny: [PermissionFlagsBits.ViewChannel] },
     { id: guild.roles.cache.find(r => r.name === "LoftLife Administration").id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
@@ -94,7 +87,7 @@ async function createCitySpace(guild, rawName) {
   const everyone = guild.roles.everyone.id;
   const privateOverwrites = [
     { id: everyone, deny: [PermissionFlagsBits.ViewChannel] },
-    { id: ownerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels] },
+    { id: ownerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
     { id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
     { id: memberRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
   ];
