@@ -201,7 +201,8 @@ function joinInstance(player, instance) {
       }
     }
   }
-  if (instance.members.size >= instance.capacity) {
+  const activePlayers = uniquePlayers(instance);
+  if (activePlayers.length >= instance.capacity && !activePlayers.some((entry) => entry.userId === player.userId)) {
     fail(player.ws, 'instance_full', instance.kind === 'city' ? 'TheCity is full' : 'That instance is full');
     player.ws.close(1013, 'instance_full');
     return false;
