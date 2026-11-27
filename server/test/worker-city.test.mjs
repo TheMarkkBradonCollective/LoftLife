@@ -304,6 +304,21 @@ test('worker: two guests share TheCity, see movement and city chat', async () =>
   const liveBeforeBody = await liveBefore.json();
   assert.equal(liveBeforeBody.online, 2, 'presence reports the two active city connections');
   assert.equal(liveBeforeBody.players.length, 2);
+  const globalPresence = await durable.fetch(new Request('https://loftlife-internal/internal/party/presence-snapshot?details=1'));
+  const globalPresenceBody = await globalPresence.json();
+  assert.equal(globalPresenceBody.online, 2, 'global presence reconciles against the actual city sockets');
+
+  const duplicateUpgrade = await worker.fetch(websocketRequest('city'), env);
+  assert.equal(duplicateUpgrade.status, 101);
+  const duplicatePair = pairs.at(-1);
+  await durable.webSocketMessage(duplicatePair.server, JSON.stringify({
+    t: 'hello', token: guestA.session.token, place: { kind: 'city' },
+  }));
+  const duplicateReady = firstMessage(duplicatePair, 'ready');
+  assert.equal(duplicateReady.instance.count, 2, 'reconnecting the same account does not inflate the count');
+  assert.equal(guestA.pair.server.readyState, 3, 'the old account socket is replaced');
+  const deduplicatedPresence = await durable.fetch(new Request('https://loftlife-internal/internal/presence'));
+  assert.equal((await deduplicatedPresence.json()).online, 2);
 
   const staleAttachment = guestB.pair.server.deserializeAttachment();
   guestB.pair.server.serializeAttachment({ ...staleAttachment, lastSeen: Date.now() - 120_000 });
@@ -312,7 +327,7 @@ test('worker: two guests share TheCity, see movement and city chat', async () =>
   const liveAfterBody = await liveAfter.json();
   assert.equal(liveAfterBody.online, 1, 'stale sockets are removed from the live player count');
   assert.equal(liveAfterBody.players[0].userId, guestA.session.guest.id);
-  assert.ok(guestA.pair.client.messages.some((message) => message.t === 'leave' && message.connId === readyB.you.connId),
+  assert.ok(duplicatePair.client.messages.some((message) => message.t === 'leave' && message.connId === readyB.you.connId),
     'remaining players receive the stale player leave event');
   // Chat is throttled to one message per 700 ms before the guest scope guard.
   await new Promise((resolve) => setTimeout(resolve, 720));
