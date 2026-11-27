@@ -320,15 +320,7 @@ test('worker: two guests share TheCity, see movement and city chat', async () =>
   const deduplicatedPresence = await durable.fetch(new Request('https://loftlife-internal/internal/presence'));
   assert.equal((await deduplicatedPresence.json()).online, 2);
 
-  const staleAttachment = guestB.pair.server.deserializeAttachment();
-  guestB.pair.server.serializeAttachment({ ...staleAttachment, lastSeen: Date.now() - 120_000 });
-  await durable.alarm();
-  const liveAfter = await durable.fetch(new Request('https://loftlife-internal/internal/presence?details=1'));
-  const liveAfterBody = await liveAfter.json();
-  assert.equal(liveAfterBody.online, 1, 'stale sockets are removed from the live player count');
-  assert.equal(liveAfterBody.players[0].userId, guestA.session.guest.id);
-  assert.ok(duplicatePair.client.messages.some((message) => message.t === 'leave' && message.connId === readyB.you.connId),
-    'remaining players receive the stale player leave event');
+
   // Chat is throttled to one message per 700 ms before the guest scope guard.
   await new Promise((resolve) => setTimeout(resolve, 720));
   await durable.webSocketMessage(
@@ -367,4 +359,14 @@ test('worker: two guests share TheCity, see movement and city chat', async () =>
     worldPair.client.messages.find((message) => message.t === 'error')?.code,
     'forbidden'
   );
+
+  const staleAttachment = guestB.pair.server.deserializeAttachment();
+  guestB.pair.server.serializeAttachment({ ...staleAttachment, lastSeen: Date.now() - 120_000 });
+  await durable.alarm();
+  const liveAfter = await durable.fetch(new Request('https://loftlife-internal/internal/presence?details=1'));
+  const liveAfterBody = await liveAfter.json();
+  assert.equal(liveAfterBody.online, 1, 'stale sockets are removed from the live player count');
+  assert.equal(liveAfterBody.players[0].userId, guestA.session.guest.id);
+  assert.ok(duplicatePair.client.messages.some((message) => message.t === 'leave' && message.connId === readyB.you.connId),
+    'remaining players receive the stale player leave event');
 });
