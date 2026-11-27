@@ -256,12 +256,22 @@ export class LoftLifeRealtime {
         return;
       case 'voice': {
         if (player.isGuest) { error(ws, 'forbidden', 'Guest visitors cannot use private voice signalling'); return; }
+        if (!player.voice) return;
+        const kind = String(message.kind ?? '');
+        if (!['offer', 'answer', 'ice'].includes(kind)) { error(ws, 'bad_request', 'Unknown voice signal'); return; }
+        const now = Date.now();
+        const budget = (player.voiceBudget ?? []).filter((at) => now - at < 10_000);
+        if (budget.length >= 250) { error(ws, 'rate_limited', 'Voice signalling rate limited'); return; }
+        budget.push(now);
         const target = String(message.to ?? '');
         const peer = this.ctx.getWebSockets().find((candidate) => {
           const state = candidate.deserializeAttachment() as Player | undefined;
-          return state?.connId === target && state.instanceId === player.instanceId;
+          return state?.connId === target && state.instanceId === player.instanceId &&
+            state.userId !== player.userId && state.voice === true && !state.isGuest;
         });
-        if (peer) send(peer, { t: 'voice', from: { connId: player.connId, userId: player.userId, handle: player.handle, name: player.name }, kind: message.kind, data: message.data });
+        if (!peer) return;
+        ws.serializeAttachment({ ...player, voiceBudget: budget });
+        send(peer, { t: 'voice', from: { connId: player.connId, userId: player.userId, handle: player.handle, name: player.name }, kind, data: message.data ?? null });
         return;
       }
       default:
