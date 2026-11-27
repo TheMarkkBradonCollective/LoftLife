@@ -983,7 +983,7 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
                   <MenuCard className="space-y-2">
                     <SectionHeading>Account</SectionHeading>
                     <MenuRow
-                      title={guest ? `Guest · ${session.guestName ?? 'visitor'}` : online ? `@${session.profile?.handle ?? 'player'}` : 'Playing locally'}
+                      title={guest ? `Guest User - ${session.guestName ?? 'visitor'}` : online ? `@${session.profile?.handle ?? 'player'}` : 'Playing locally'}
                       detail={
                         guest
                           ? 'Guest visit: city and nearby chat only. Your room and character are saved on this device.'
