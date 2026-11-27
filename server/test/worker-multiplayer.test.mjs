@@ -481,6 +481,21 @@ test('worker: guests are labelled, restricted and counted in presence', async ()
   connection.pair.server.close(1000, 'done');
 });
 
+test('worker: a guest can reconnect with the same unexpired first-visit token', async () => {
+  const guest = await guestSession('Returning Visitor', '10.3.0.2');
+  const first = await connect('city', guest.token, { kind: 'city' });
+  assert.equal(firstMessage(first.pair, 'ready')?.you.name, 'Guest User - Returning Visitor');
+
+  first.pair.server.close(1000, 'temporary disconnect');
+  const second = await connect('city', guest.token, { kind: 'city' });
+  const ready = firstMessage(second.pair, 'ready');
+  assert.equal(ready?.you.isGuest, true);
+  assert.equal(ready?.you.userId, guest.guest.id);
+  assert.equal(ready?.you.name, 'Guest User - Returning Visitor');
+
+  second.pair.server.close(1000, 'done');
+});
+
 test('worker: a live socket is closed when its session expires', async () => {
   const short = await createAccount('expiring', { ttlSeconds: 2 });
   const connection = await connect('city', short.token, { kind: 'city' });
