@@ -851,7 +851,7 @@ export class LoftLifeRealtime {
     ws.serializeAttachment({...player,lastChatAt:now});
   }
 
-  async webSocketClose(ws: HibernatableWebSocket, code: number, reason: string) {
+  async webSocketClose(ws: HibernatableWebSocket) {
     if (code >= 1000 && code < 5000 && ![1004, 1005, 1006, 1015].includes(code)) ws.close(code, reason);
     else ws.close();
     const player = ws.deserializeAttachment() as Player | undefined;
