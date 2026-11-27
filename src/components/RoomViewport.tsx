@@ -10,6 +10,7 @@ import {
   HOTEL_RESIDENTS,
 } from '../game/catalog';
 import { buildFurnitureGroup, updateFurnitureAnimations } from '../game/furniture';
+import { preloadImportedFurniture } from '../game/importedFurniture';
 import {
   findPath,
   getEffectiveSize,
@@ -337,6 +338,17 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   // The airport faces north; the hotel and clothing store face south.
   const cityArrivalViewRef = useRef<'hotel' | 'airport' | 'store'>('hotel');
   const [webglError, setWebglError] = useState(false);
+  const [importedFurnitureRevision, setImportedFurnitureRevision] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    void preloadImportedFurniture().then((revision) => {
+      if (!cancelled && revision > 0) setImportedFurnitureRevision(revision);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // Camera distance/position captured the first time Z zoomed in, so the second
   // press returns to the exact previous view instead of a default.
   const zoomStateRef = useRef<{
@@ -4048,7 +4060,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
 
     for (const item of activeItems) {
       const prevGrp = h.furnitureMap.get(item.uid);
-      const sig = `${item.catalogId}|${item.color}|${item.active ? 1 : 0}`;
+      const sig = `${item.catalogId}|${item.color}|${item.active ? 1 : 0}|${importedFurnitureRevision}`;
       const needsRebuild = !prevGrp || prevGrp.userData.sig !== sig;
 
       if (needsRebuild) {
@@ -4072,7 +4084,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         prevGrp.visible = !(location === 'room' && item.uid === movingUid);
       }
     }
-  }, [activeItems, movingUid, location]);
+  }, [activeItems, movingUid, location, importedFurnitureRevision]);
 
   // Rebuild stacked storeys when the stack changes, and show at most the active
   // storey plus the ones below it (upper floors never occlude the build view).
@@ -4101,7 +4113,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       return;
     }
 
-    if (h.ghostKey !== activeCatalogId) {
+    const nextGhostKey = `${activeCatalogId}|${importedFurnitureRevision}`;
+    if (h.ghostKey !== nextGhostKey) {
       if (h.ghostGroup) h.scene.remove(h.ghostGroup);
       const g = buildFurnitureGroup(
         {
@@ -4117,11 +4130,11 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       g.visible = false;
       h.scene.add(g);
       h.ghostGroup = g;
-      h.ghostKey = activeCatalogId;
+      h.ghostKey = nextGhostKey;
     } else if (h.ghostGroup) {
       h.ghostGroup.rotation.y = (placingRotation * Math.PI) / 2;
     }
-  }, [location, mode, placingCatalogId, movingUid, placingRotation, placingColor, activeItems]);
+  }, [location, mode, placingCatalogId, movingUid, placingRotation, placingColor, activeItems, importedFurnitureRevision]);
 
   // Sync Selection Outline Box
   useEffect(() => {
