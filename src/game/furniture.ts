@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { buildExtraFurniture } from './furnitureExtra';
 import { getExpansionCatalogItem } from './catalogExpansion';
 import { buildCatalogModel } from './models';
+import { buildImportedFurnitureGroup } from './importedFurniture';
 import { createArtTexture, createRugTexture, createVinylTexture } from './textures';
 import type { PlacedItem } from './types';
 
@@ -48,6 +49,12 @@ export function buildFurnitureGroup(
   placed: PlacedItem,
   opts: FurnitureBuildOptions
 ): THREE.Group {
+  // Imported GLBs override only the curated catalog ids. Until the remote
+  // CC0 model has loaded (or if it is unavailable), the original builder below
+  // remains the exact fallback.
+  const imported = buildImportedFurnitureGroup(placed, opts);
+  if (imported) return imported;
+
   const group = new THREE.Group();
   group.userData.uid = placed.uid;
   group.userData.catalogId = placed.catalogId;
