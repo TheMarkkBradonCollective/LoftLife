@@ -173,12 +173,23 @@ export class LoftLifeRealtime {
       return Response.json({ok:true});
     }
     if (requestUrl.pathname === '/internal/presence') {
-      const players = this.players('city:main');
-      return new Response(JSON.stringify({
+      const url = new URL(request.url);
+      const instanceId = url.searchParams.get('instanceId') ?? 'city:main';
+      const players = this.players(instanceId);
+      const result: Record<string, unknown> = {
         online: players.length,
-        instances: [{ id: 'city:main', kind: 'city', worldId: null, capacity: MAX_PLAYERS, count: players.length }],
+        instances: [{ id: instanceId, kind: instanceId.startsWith('world:') ? 'world' : 'city', worldId: instanceId.startsWith('world:') ? instanceId.slice(6) : null, capacity: MAX_PLAYERS, count: players.length }],
         cityCapacity: MAX_PLAYERS,
-      }), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+        userIds: players.map((player) => player.userId),
+      };
+      if (url.searchParams.get('details') === '1') {
+        result.players = players.map((player) => ({
+          userId: player.userId, handle: player.handle, name: player.isGuest ? 'Guest User - ' + player.name : player.name,
+          isGuest: Boolean(player.isGuest), instanceId: player.instanceId, location: player.location,
+          connectedAt: Number(player.connectedAt ?? player.lastSeen), lastSeen: Number(player.lastSeen),
+        }));
+      }
+      return new Response(JSON.stringify(result), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
     }
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return new Response('Expected WebSocket upgrade', { status: 426 });
