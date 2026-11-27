@@ -323,7 +323,7 @@ test('worker: two guests share TheCity, see movement and city chat', async () =>
   );
   assert.equal(
     guestB.pair.client.messages.filter((message) => message.t === 'error' && message.code === 'forbidden').length,
-    2
+    3
   );
 
   const worldUpgrade = await worker.fetch(websocketRequest('world:test-world'), env);
