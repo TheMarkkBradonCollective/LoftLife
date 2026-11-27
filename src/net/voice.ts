@@ -35,6 +35,7 @@ interface PeerEntry {
   audio: HTMLAudioElement | null;
   stream: MediaStream;
   initiator: boolean;
+  pendingIceCandidates: RTCIceCandidateInit[];
 }
 
 export interface VoiceSyncContext {
@@ -261,7 +262,7 @@ export class VoiceManager {
   private createPeer(connId: string, initiator: boolean): PeerEntry {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     const stream = new MediaStream();
-    const entry: PeerEntry = { pc, audio: null, stream, initiator };
+    const entry: PeerEntry = { pc, audio: null, stream, initiator, pendingIceCandidates: [] };
     this.peers.set(connId, entry);
 
     if (this.localStream) {
@@ -295,6 +296,17 @@ export class VoiceManager {
     return entry;
   }
 
+  private async flushIceCandidates(entry: PeerEntry) {
+    if (!entry.pc.remoteDescription || entry.pendingIceCandidates.length === 0) return;
+    const pending = entry.pendingIceCandidates.splice(0);
+    for (const candidate of pending) {
+      try {
+        await entry.pc.addIceCandidate(candidate);
+      } catch {
+        // Ignore candidates made stale by a peer restart or closed connection.
+      }
+    }
+  }
   private async sendOffer(connId: string, pc: RTCPeerConnection) {
     try {
       const offer = await pc.createOffer();
@@ -377,15 +389,19 @@ export class VoiceManager {
     try {
       if (signal.kind === 'offer') {
         await pc.setRemoteDescription(signal.data as RTCSessionDescriptionInit);
+        await this.flushIceCandidates(entry);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         this.sendSignal(from.connId, 'answer', pc.localDescription?.toJSON() ?? answer);
       } else if (signal.kind === 'answer') {
         if (pc.signalingState === 'have-local-offer') {
           await pc.setRemoteDescription(signal.data as RTCSessionDescriptionInit);
+          await this.flushIceCandidates(entry);
         }
       } else if (signal.kind === 'ice') {
-        await pc.addIceCandidate(signal.data as RTCIceCandidateInit);
+        const candidate = signal.data as RTCIceCandidateInit;
+        if (pc.remoteDescription) await pc.addIceCandidate(candidate);
+        else entry.pendingIceCandidates.push(candidate);
       }
     } catch {
       // Stale or malformed signalling is ignored; the peer renegotiates on the
