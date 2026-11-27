@@ -10,6 +10,7 @@ import {
   Armchair,
 } from 'lucide-react';
 import { Notifications } from './Notifications';
+import { MiniMap } from './MiniMap';
 import { BuildPanel } from './BuildPanel';
 import { DesktopHud } from './layouts/DesktopHud';
 import { TouchHud } from './layouts/TouchHud';
@@ -98,6 +99,10 @@ export interface GameInterfaceProps {
   onJump: () => void;
   fullscreen: boolean;
   onToggleFullscreen: () => void;
+  currentStreet: string;
+  locationLabel: string;
+  playerPoseRef: React.MutableRefObject<{ x: number; z: number; yaw: number }>;
+  onOpenCityMap: () => void;
 }
 
 /**
@@ -144,6 +149,10 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
   onJump,
   fullscreen,
   onToggleFullscreen,
+  currentStreet,
+  locationLabel,
+  playerPoseRef,
+  onOpenCityMap,
 }) => {
   const presentation = useHudPresentation(device, portrait);
   const state: HudState = hudStateFor({ menuOpen, chatOpen, editing, riding, nearby: Boolean(nearbyLabel) });
@@ -190,6 +199,16 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
 
   return (
     <>
+      {state !== 'menu' && (
+        <MiniMap
+          currentStreet={currentStreet}
+          locationLabel={locationLabel}
+          poseRef={playerPoseRef}
+          presentation={presentation}
+          onOpenMap={onOpenCityMap}
+        />
+      )}
+
       {state !== 'menu' &&
         (touch ? (
           <TouchHud
