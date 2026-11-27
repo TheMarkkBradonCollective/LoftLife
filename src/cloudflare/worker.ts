@@ -764,8 +764,29 @@ export default {
       }
       if (url.pathname === '/api/presence' && request.method === 'GET') {
         if (!env.REALTIME) return fail('Realtime Durable Object binding is not configured.',503,'realtime_unconfigured');
-        const id = env.REALTIME.idFromName('party:global');
-        return env.REALTIME.get(id).fetch(new Request('https://loftlife-internal/internal/party/presence-snapshot'));
+        type PresenceInstance = { id: string; kind: string; worldId: string | null; capacity: number; count: number };
+        type PresenceBody = { online?: number; instances?: PresenceInstance[]; cityCapacity?: number };
+        // The city Durable Object counts every socket in TheCity (registered and
+        // guest); the party coordinator only knows signed-in accounts, so it is
+        // used for world instances.
+        const [cityResponse, worldsResponse] = await Promise.all([
+          env.REALTIME.get(env.REALTIME.idFromName('city:main')).fetch(
+            new Request('https://loftlife-internal/internal/presence')
+          ),
+          env.REALTIME.get(env.REALTIME.idFromName('party:global')).fetch(
+            new Request('https://loftlife-internal/internal/party/presence-snapshot')
+          ),
+        ]);
+        const city = cityResponse.ok ? (await cityResponse.json()) as PresenceBody : {};
+        const worlds = worldsResponse.ok ? (await worldsResponse.json()) as PresenceBody : {};
+        const cityInstances = (city.instances ?? []).filter((entry) => entry.id === 'city:main');
+        const worldInstances = (worlds.instances ?? []).filter((entry) => String(entry.id).startsWith('world:'));
+        const instances = [...cityInstances, ...worldInstances];
+        return json({
+          online: instances.reduce((total, entry) => total + Number(entry.count || 0), 0),
+          instances,
+          cityCapacity: Number(city.cityCapacity ?? 64),
+        });
       }
 
       if (url.pathname === '/api/settings' || url.pathname.startsWith('/api/messages/')) {
