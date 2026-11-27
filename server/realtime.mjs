@@ -177,6 +177,12 @@ function broadcast(instance, payload, exceptConnId = null) {
 }
 
 function joinInstance(player, instance) {
+  for (const existing of [...instance.members.values()]) {
+    if (existing.userId === player.userId) {
+      leaveInstance(existing);
+      existing.ws.close(4003, 'replaced');
+    }
+  }
   if (instance.members.size >= instance.capacity) {
     fail(player.ws, 'instance_full', instance.kind === 'city' ? 'TheCity is full' : 'That instance is full');
     player.ws.close(1013, 'instance_full');
@@ -682,6 +688,7 @@ export function attachRealtime(httpServer) {
       }
 
       if (!player.userId) return fail(ws, 'unauthorized', 'Send hello first');
+      player.lastSeen = now();
 
       switch (msg.t) {
         case 'pose': {
