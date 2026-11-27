@@ -852,22 +852,8 @@ export class LoftLifeRealtime {
   }
 
   async webSocketClose(ws: HibernatableWebSocket) {
-    if (code >= 1000 && code < 5000 && ![1004, 1005, 1006, 1015].includes(code)) ws.close(code, reason);
-    else ws.close();
-    const player = ws.deserializeAttachment() as Player | undefined;
-    if (player?.userId) {
-      if (!player.isGuest) await this.updatePartyPresence(player.userId, null);
-      this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
-      this.broadcastSnapshot(player.instanceId, true);
-      if (player.instanceId.startsWith('world:')) await this.syncWorldStatus(player.instanceId.slice(6),player.connId);
-    }
+    await this.disconnectPlayer(ws);
   }
   async webSocketError(ws: HibernatableWebSocket) {
-    const player = ws.deserializeAttachment() as Player | undefined;
-    if (player?.userId) {
-      if (!player.isGuest) await this.updatePartyPresence(player.userId, null);
-      this.broadcast(player.instanceId, { t: 'leave', connId: player.connId }, ws);
-      if (player.instanceId.startsWith('world:')) await this.syncWorldStatus(player.instanceId.slice(6),player.connId);
-    }
-  }
+    await this.disconnectPlayer(ws);
 }
