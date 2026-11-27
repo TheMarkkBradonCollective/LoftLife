@@ -169,7 +169,7 @@ export function preloadImportedFurniture(): Promise<number> {
               typeof entry.url === 'string' &&
               entry.url.startsWith('https://')
           )
-          .map((entry) => [entry.name as string, entry])
+          .map((entry) => [entry.name as string, entry] as const)
       );
 
       const loader = new GLTFLoader();
