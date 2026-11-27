@@ -177,10 +177,12 @@ function broadcast(instance, payload, exceptConnId = null) {
 }
 
 function joinInstance(player, instance) {
-  for (const existing of [...instance.members.values()]) {
-    if (existing.userId === player.userId) {
-      leaveInstance(existing);
-      existing.ws.close(4003, 'replaced');
+  for (const currentInstance of [...instances.values()]) {
+    for (const existing of [...currentInstance.members.values()]) {
+      if (existing.userId === player.userId) {
+        leaveInstance(existing);
+        existing.ws.close(4003, 'replaced');
+      }
     }
   }
   if (instance.members.size >= instance.capacity) {
