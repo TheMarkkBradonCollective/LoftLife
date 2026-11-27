@@ -3,7 +3,7 @@
  *
  * Keybindings, touch layout and voice preferences are owned by the existing
  * controls/voice systems; this module stores the platform-only preferences:
- * privacy, notification visibility, interface sound, graphics and accessibility.
+ * privacy, notification visibility, interface sound, graphics, camera and accessibility.
  */
 
 export const SETTINGS_VERSION = 1;
@@ -30,6 +30,9 @@ export const DEFAULT_SETTINGS = {
   graphics: {
     quality: 'high',
   },
+  camera: {
+    mobileMode: 'auto',
+  },
   accessibility: {
     largeText: false,
     highContrast: false,
@@ -51,6 +54,7 @@ export function sanitizeSettings(input) {
   const notifications = isObject(raw.notifications) ? raw.notifications : {};
   const audio = isObject(raw.audio) ? raw.audio : {};
   const graphics = isObject(raw.graphics) ? raw.graphics : {};
+  const camera = isObject(raw.camera) ? raw.camera : {};
   const accessibility = isObject(raw.accessibility) ? raw.accessibility : {};
 
   return {
@@ -74,6 +78,9 @@ export function sanitizeSettings(input) {
     },
     graphics: {
       quality: pick(graphics.quality, ['low', 'medium', 'high'], 'high'),
+    },
+    camera: {
+      mobileMode: pick(camera.mobileMode, ['auto', 'isometric', 'third-person'], 'auto'),
     },
     accessibility: {
       largeText: bool(accessibility.largeText, false),
