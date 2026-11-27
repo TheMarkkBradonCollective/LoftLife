@@ -165,7 +165,11 @@ interface RoomViewportProps {
   onCityStreetChange?: (label: string) => void;
   onOpenDoorTerminal: () => void;
   onOpenAirportDeparture: () => void;
-  onOpenAirportShop: () => void;
+  onOpenClothingShop: () => void;
+  /** Market Hall furniture counter. */
+  onOpenFurnitureShop?: () => void;
+  /** One-shot request to walk to a public destination's entrance. */
+  travelRequest?: { x: number; z: number; label: string; yaw?: number; at: number } | null;
   onEnterGuestRoom: () => void;
   onOpenCloset: () => void;
   onOpenBathroomMirror: () => void;
@@ -279,7 +283,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   onCityStreetChange,
   onOpenDoorTerminal,
   onOpenAirportDeparture,
-  onOpenAirportShop,
+  onOpenClothingShop,
+  onOpenFurnitureShop,
+  travelRequest,
   onEnterGuestRoom,
   onOpenCloset,
   onOpenBathroomMirror,
@@ -364,7 +370,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onCityStreetChange,
     onOpenDoorTerminal,
     onOpenAirportDeparture,
-    onOpenAirportShop,
+    onOpenClothingShop,
+    onOpenFurnitureShop,
+    travelRequest,
     onEnterGuestRoom,
     onOpenCloset,
     onOpenBathroomMirror,
@@ -421,7 +429,9 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onCityStreetChange,
     onOpenDoorTerminal,
     onOpenAirportDeparture,
-    onOpenAirportShop,
+    onOpenClothingShop,
+    onOpenFurnitureShop,
+    travelRequest,
     onEnterGuestRoom,
     onOpenCloset,
     onOpenBathroomMirror,
@@ -725,6 +735,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     rippleMesh.position.y = 0.03;
     scene.add(rippleMesh);
     let rippleLife = 0;
+    let lastTravelAt = 0;
 
     const handles = {
       scene,
@@ -1225,8 +1236,36 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       }
 
       // 4. Outdoor Main City ('world')
-      if (Math.hypot(av.x - CITY_LAYOUT.airportShopPos.x, av.z - CITY_LAYOUT.airportShopPos.z) < 2.25) {
-        return { label: actionLabel('Browse Airport Clothing Shop'), execute: () => { releaseCursorForModal(); propsRef.current.onOpenAirportShop(); } };
+      for (const spot of mainWorld.venueInteractions) {
+        if (Math.hypot(av.x - spot.x, av.z - spot.z) < spot.radius) {
+          if (spot.kind === 'shop_clothing') {
+            return {
+              label: actionLabel(spot.label),
+              execute: () => {
+                releaseCursorForModal();
+                sfx.playClick();
+                propsRef.current.onOpenClothingShop();
+              },
+            };
+          }
+          if (spot.kind === 'shop_furniture') {
+            return {
+              label: actionLabel(spot.label),
+              execute: () => {
+                releaseCursorForModal();
+                sfx.playClick();
+                propsRef.current.onOpenFurnitureShop?.();
+              },
+            };
+          }
+          return {
+            label: actionLabel(spot.label),
+            execute: () => {
+              sfx.playClick();
+              propsRef.current.onWalkHint?.(spot.hint ?? spot.label);
+            },
+          };
+        }
       }
       if (Math.hypot(av.x - CITY_LAYOUT.airportDeparturePos.x, av.z - CITY_LAYOUT.airportDeparturePos.z) < 2.25) {
         return { label: actionLabel('Take a flight'), execute: () => { releaseCursorForModal(); propsRef.current.onOpenAirportDeparture(); } };
@@ -2690,6 +2729,27 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             }
           }
         }
+      }
+
+      // City directory: place the avatar at a chosen public destination.
+      const travel = propsRef.current.travelRequest;
+      if (travel && travel.at !== lastTravelAt) {
+        lastTravelAt = travel.at;
+        if (currentLoc !== 'world') {
+          propsRef.current.onChangeLocation('world');
+        }
+        av.x = travel.x;
+        av.z = travel.z;
+        if (typeof travel.yaw === 'number') {
+          av.yaw = travel.yaw;
+          // Put the chase camera behind the avatar on the street side.
+          handles.playCam.yaw = travel.yaw + Math.PI;
+          handles.playCam.lastManualLookTime = 0;
+        }
+        av.path = [];
+        av.pendingPortal = null;
+        av.portalCooldown = 1.4;
+        propsRef.current.onWalkHint?.(`Arrived at ${travel.label}`);
       }
 
       // Share player coords for live City Map & Street HUD

@@ -240,7 +240,16 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [doorTerminalOpen, setDoorTerminalOpen] = useState(false);
   const [elevatorModalOpen, setElevatorModalOpen] = useState(false);
   const [airportDepartureOpen, setAirportDepartureOpen] = useState(false);
-  const [airportShopOpen, setAirportShopOpen] = useState(false);
+  const [clothingShopOpen, setClothingShopOpen] = useState(false);
+  const [furnitureShopOpen, setFurnitureShopOpen] = useState(false);
+  // City directory: one-shot walk-in request handed to the viewport.
+  const [travelRequest, setTravelRequest] = useState<{
+    x: number;
+    z: number;
+    label: string;
+    yaw: number;
+    at: number;
+  } | null>(null);
   const [avatarStudioMode, setAvatarStudioMode] = useState<'hair' | 'closet'>('hair');
 
   // Runtime environment decides controls and gameplay access. Width is never
@@ -1366,7 +1375,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
     doorTerminalOpen ||
     elevatorModalOpen ||
     airportDepartureOpen ||
-    airportShopOpen ||
+    clothingShopOpen ||
+    furnitureShopOpen ||
     roomSettingsOpen ||
     authOpen ||
     menuOpen ||
@@ -1630,7 +1640,9 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         onCityStreetChange={setCityStreet}
         onOpenDoorTerminal={() => setDoorTerminalOpen(true)}
         onOpenAirportDeparture={() => setAirportDepartureOpen(true)}
-        onOpenAirportShop={() => setAirportShopOpen(true)}
+        onOpenClothingShop={() => setClothingShopOpen(true)}
+        onOpenFurnitureShop={() => setFurnitureShopOpen(true)}
+        travelRequest={travelRequest}
         onEnterGuestRoom={handleEnterGuestRoom}
         onOpenCloset={() => { setAvatarStudioMode('closet'); setAvatarModalOpen(true); }}
         onOpenBathroomMirror={() => { setAvatarStudioMode('hair'); setAvatarModalOpen(true); }}
@@ -1889,6 +1901,10 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         open={cityMapOpen}
         currentStreet={cityStreet}
         playerPoseRef={playerPoseRef}
+        onTravel={(target) => {
+          setTravelRequest({ ...target, at: Date.now() });
+          setCityMapOpen(false);
+        }}
         onClose={() => setCityMapOpen(false)}
       />
 
@@ -1957,7 +1973,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
         else if (session.status === 'guest') void session.endGuest();
         else if (session.status === 'online') session.exitCity();
       }} />
-      <ShopModal open={airportShopOpen} onClose={() => setAirportShopOpen(false)} initialTab="clothing" readOnly={session.status === 'guest'} />
+      <ShopModal open={clothingShopOpen} onClose={() => setClothingShopOpen(false)} initialTab="clothing" readOnly={session.status === 'guest'} />
+      <ShopModal open={furnitureShopOpen} onClose={() => setFurnitureShopOpen(false)} initialTab="furniture" readOnly={session.status === 'guest'} />
 
       {/* Hotel Brass Elevator Floor Selector */}
       <ElevatorPanelModal

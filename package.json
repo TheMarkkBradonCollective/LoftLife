@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "verify:edge": "node scripts/verify-edge-auth.mjs"
+    "verify:edge": "node scripts/verify-edge-auth.mjs",
+    "check:city": "node scripts/check-city-venues.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
