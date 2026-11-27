@@ -95,6 +95,37 @@ export interface ChatEvent {
   range?: number;
 }
 
+export interface HotelSuiteVisit {
+  userId: string;
+  name: string;
+  roomNumber: string;
+  floor: number;
+  avatar: AvatarConfig | null;
+  items: import('../game/types').PlacedItem[];
+  surfaces: import('../game/types').RoomSurfaceConfig;
+  mood: import('../game/types').LightingMood;
+}
+
+export interface HotelEvent {
+  action:
+    | 'ring'
+    | 'ringing'
+    | 'granted'
+    | 'declined'
+    | 'unavailable'
+    | 'resolved'
+    | 'expired'
+    | 'cancelled';
+  requestId?: string;
+  roomNumber?: string;
+  room?: HotelSuiteVisit;
+  from?: { userId: string; handle: string; name: string };
+  reason?: string;
+  message?: string;
+  expiresAt?: number;
+  accepted?: boolean;
+}
+
 export interface InstanceInfo {
   id: string;
   kind: 'city' | 'world';
@@ -123,6 +154,7 @@ export interface RealtimeOptions {
     vehicles: TransitVehicle[];
     exited?: { x: number; z: number; lineId: string | null; label: string | null } | null;
   }) => void;
+  onHotel?: (event: HotelEvent) => void;
   onError?: (code: string, message: string) => void;
 }
 
@@ -255,6 +287,9 @@ export class RealtimeClient {
         case 'voice':
           this.options.onVoice?.(msg as unknown as VoiceSignal);
           break;
+        case 'hotel':
+          this.options.onHotel?.(msg as unknown as HotelEvent);
+          break;
         case 'transit':
           this.options.onTransit?.({
             riding:
@@ -337,6 +372,24 @@ export class RealtimeClient {
   sendVoiceSignal(to: string, kind: 'offer' | 'answer' | 'ice', data: unknown) {
     if (this.socket?.readyState !== WebSocket.OPEN) return false;
     this.socket.send(JSON.stringify({ t: 'voice', to, kind, data }));
+    return true;
+  }
+
+  ringDoorbell(roomNumber: string) {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify({ t: 'hotel', action: 'ring', roomNumber }));
+    return true;
+  }
+
+  answerDoorbell(requestId: string, accept: boolean) {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify({ t: 'hotel', action: 'respond', requestId, accept }));
+    return true;
+  }
+
+  cancelDoorbell(requestId: string) {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify({ t: 'hotel', action: 'cancel', requestId }));
     return true;
   }
 

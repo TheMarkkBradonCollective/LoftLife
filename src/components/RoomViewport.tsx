@@ -180,6 +180,8 @@ interface RoomViewportProps {
   onUnlockRoomDoor: () => void;
   onUnlockHallwayDoor: (roomNumber: string) => void;
   onEnterSuiteFromHallway: (roomNumber: string) => void;
+  /** Ring a real player's suite doorbell; the gateway checks the owner is home. */
+  onRingDoorbell: (roomNumber: string) => void;
 }
 
 const _vec3 = new THREE.Vector3();
@@ -236,6 +238,7 @@ function buildPlazaPath(
 }
 
 export const RoomViewport: React.FC<RoomViewportProps> = ({
+  onRingDoorbell,
   location,
   guestMode,
   hallwayFloor,
@@ -379,6 +382,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onUnlockRoomDoor,
     onUnlockHallwayDoor,
     onEnterSuiteFromHallway,
+    onRingDoorbell,
   });
   propsRef.current = {
     location,
@@ -438,6 +442,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     onUnlockRoomDoor,
     onUnlockHallwayDoor,
     onEnterSuiteFromHallway,
+    onRingDoorbell,
   };
 
   const prevLocationRef = useRef<{ loc: WorldLocation; roomNumber: string | null }>({
@@ -688,7 +693,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     hallwayHandles.setFloorState(
       propsRef.current.hallwayFloor,
       new Set(propsRef.current.unlockedRooms),
-      HOTEL_RESIDENTS,
+      [],
       propsRef.current.avatarConfig.name,
       propsRef.current.playerSuiteNumber,
       propsRef.current.playerSuiteFloor,
@@ -1183,31 +1188,21 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
                 },
               };
             }
-            if (d.resident) {
-              const targetRes = d.resident;
+            if (d.kind === 'housekeeping') {
               return {
-                label: actionLabel(`Ring ${targetRes.name} (Suite ${d.roomNumber})`),
+                label: 'Housekeeping · Staff Only',
                 execute: () => {
-                  sfx.playIntercomRing();
-                  propsRef.current.onWalkHint?.(
-                    `Ringing ${targetRes.name} in Suite ${d.roomNumber}...`
-                  );
-                  window.setTimeout(() => {
-                    sfx.playKeycardBeep();
-                    propsRef.current.onUnlockHallwayDoor(d.roomNumber);
-                    propsRef.current.onNpcChat?.(
-                      targetRes.name,
-                      `Come on in! Suite ${d.roomNumber} is unlocked now.`
-                    );
-                  }, 550);
+                  sfx.playRemove();
+                  propsRef.current.onWalkHint?.('Housekeeping room · Staff only');
                 },
               };
             }
+            // Real doorbell: the owner must be online and inside their suite.
             return {
-              label: `Suite ${d.roomNumber} · Vacant Room`,
+              label: actionLabel(`Ring Doorbell · Suite ${d.roomNumber}`),
               execute: () => {
-                sfx.playRemove();
-                propsRef.current.onWalkHint?.(`Suite ${d.roomNumber} is currently vacant`);
+                sfx.playIntercomRing();
+                propsRef.current.onRingDoorbell(d.roomNumber);
               },
             };
           }
@@ -2871,7 +2866,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           av.pendingPortal = null;
           sfx.playToggle(true);
           propsRef.current.onChangeLocation('clothing_store');
-        } else if (currentLoc === 'airport' && av.z > 13.25 && Math.abs(av.x) < 2.4) {
+        } else if (currentLoc === 'airport' && av.z > 35.0 && Math.abs(av.x) < 6.2) {
           av.portalCooldown = 1.2;
           av.path = [];
           av.pendingPortal = null;
@@ -2893,17 +2888,17 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
           };
           cityArrivalViewRef.current = 'store';
           propsRef.current.onChangeLocation('world');
-        } else if (currentLoc === 'lobby' && av.z > 7.42 && Math.abs(av.x) < 0.85) {
+        } else if (currentLoc === 'lobby' && av.z > 11.3 && Math.abs(av.x) < 2.1) {
           av.portalCooldown = 1.0;
           av.path = [];
           av.pendingPortal = null;
           sfx.playToggle(true);
           propsRef.current.onChangeLocation('world');
-        } else if (currentLoc === 'lobby' && av.z < -7.45 && Math.abs(av.x) < 0.85) {
+        } else if (currentLoc === 'lobby' && av.z < -10.5 && Math.abs(av.x) < 1.15) {
           av.portalCooldown = 1.6;
           av.path = [];
           av.pendingPortal = null;
-          av.z = -7.05;
+          av.z = -10.0;
           releaseCursorForModal();
           sfx.playElevatorDing();
           propsRef.current.onOpenElevator();
@@ -3374,8 +3369,8 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         h.cameraAnim.pos.set(av.x + 12.5, 11.5, av.z + 14.5);
         h.cameraAnim.target.set(av.x, 0.8, av.z);
       } else if (loc === 'lobby') {
-        h.cameraAnim.pos.set(11.0, 11.2, 13.8);
-        h.cameraAnim.target.set(0, 0.8, 0);
+        h.cameraAnim.pos.set(16.5, 15.5, 20.5);
+        h.cameraAnim.target.set(0, 0.8, -0.6);
       } else if (loc === 'hallway') {
         h.cameraAnim.pos.set(av.x + 2.5, 9.6, 12.5);
         h.cameraAnim.target.set(av.x, 0.9, -0.6);
@@ -3476,33 +3471,33 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       if (prev.loc === 'hallway') {
         // Came down from Elevator
         h.avatarState.x = 0;
-        h.avatarState.z = -6.0;
+        h.avatarState.z = -8.9;
         h.avatarState.yaw = 0;
         h.playCam.yaw = Math.PI;
       } else {
         // Entered from Main City South Doors
         h.avatarState.x = 0;
-        h.avatarState.z = 6.2;
+        h.avatarState.z = 8.8;
         h.avatarState.yaw = Math.PI;
         h.playCam.yaw = 0;
       }
       h.avatarState.y = 0;
-      h.controls.minAzimuthAngle = -0.85;
-      h.controls.maxAzimuthAngle = Math.PI / 2 + 0.2;
-      h.controls.maxDistance = 28;
-      fog.near = 35;
-      fog.far = 90;
-      const d = 16;
+      h.controls.minAzimuthAngle = -1.25;
+      h.controls.maxAzimuthAngle = Math.PI / 2 + 0.4;
+      h.controls.maxDistance = 44;
+      fog.near = 55;
+      fog.far = 140;
+      const d = 24;
       h.keyLight.shadow.camera.left = -d;
       h.keyLight.shadow.camera.right = d;
       h.keyLight.shadow.camera.top = d;
       h.keyLight.shadow.camera.bottom = -d;
       h.keyLight.shadow.camera.updateProjectionMatrix();
       h.keyLight.target.position.set(0, 0, 0);
-      h.keyLight.position.set(-10, 15, 8);
+      h.keyLight.position.set(-16, 24, 16);
       if (vm === 'isometric') {
-        h.cameraAnim.pos.set(11.0, 11.2, 13.8);
-        h.cameraAnim.target.set(0, 0.8, 0);
+        h.cameraAnim.pos.set(16.5, 15.5, 20.5);
+        h.cameraAnim.target.set(0, 0.8, -0.6);
         h.cameraAnim.active = true;
       }
       propsRef.current.onEmoteChange('idle');
@@ -3549,26 +3544,26 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       propsRef.current.onEmoteChange('idle');
     } else if (location === 'airport') {
       h.avatarState.x = 0;
-      h.avatarState.z = 12.1;
+      h.avatarState.z = 34.2;
       h.avatarState.yaw = Math.PI;
       h.avatarState.y = 0;
       h.playCam.yaw = 0;
       h.controls.minAzimuthAngle = -Infinity;
       h.controls.maxAzimuthAngle = Infinity;
-      h.controls.maxDistance = 34;
-      fog.near = 40;
-      fog.far = 125;
-      const d = 24;
+      h.controls.maxDistance = 74;
+      fog.near = 90;
+      fog.far = 240;
+      const d = 46;
       h.keyLight.shadow.camera.left = -d;
       h.keyLight.shadow.camera.right = d;
       h.keyLight.shadow.camera.top = d;
       h.keyLight.shadow.camera.bottom = -d;
       h.keyLight.shadow.camera.updateProjectionMatrix();
       h.keyLight.target.position.set(0, 0, 4);
-      h.keyLight.position.set(-18, 26, 22);
+      h.keyLight.position.set(-34, 54, 46);
       if (vm === 'isometric') {
-        h.cameraAnim.pos.set(13, 8.5, 13.5);
-        h.cameraAnim.target.set(0, 1.0, 1.5);
+        h.cameraAnim.pos.set(44, 30, 52);
+        h.cameraAnim.target.set(0, 1.0, -2);
         h.cameraAnim.active = true;
       }
       propsRef.current.onEmoteChange('idle');
@@ -3653,7 +3648,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     h.hallwayHandles.setFloorState(
       hallwayFloor,
       new Set(unlockedRooms),
-      HOTEL_RESIDENTS,
+      [],
       avatarConfig.name,
       playerSuiteNumber,
       playerSuiteFloor,

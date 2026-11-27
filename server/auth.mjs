@@ -12,6 +12,7 @@ import { CLOTHING_SHOP } from './economy.mjs';
 import { EDGE_TOKEN_PREFIX, edgeUserForToken } from './edge-auth.mjs';
 import { STARTER_SUITE } from './starter.mjs';
 import { DEFAULT_AVATAR, sanitizeAvatar } from './validate.mjs';
+import { firstFreeRoomNumber } from '../shared/hotel-layout.mjs';
 
 export { DEFAULT_AVATAR };
 
@@ -180,13 +181,19 @@ export function registerUser({ handle, email, password, displayName, avatar }) {
       );
     }
 
-    // A new account starts in a furnished suite, not an empty box.
+    // Every account gets its own suite from the canonical 65-room hotel.
+    // Previously every account was handed Suite 402, which made the doorbell,
+    // the hallway plaques and the elevator directory lie about occupancy.
+    const usedNumbers = db.prepare('SELECT number FROM suites').all().map((row) => row.number);
+    const allocation = firstFreeRoomNumber(usedNumbers);
     db.prepare(
       `INSERT INTO suites (id, owner_id, number, floor, name, items_json, surfaces_json, mood, is_public, updated_at)
-       VALUES (?, ?, '402', 4, ?, ?, ?, ?, 0, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`
     ).run(
       newId('ste'),
       userId,
+      allocation.number,
+      allocation.floor,
       STARTER_SUITE.name,
       JSON.stringify(STARTER_SUITE.items),
       JSON.stringify(STARTER_SUITE.surfaces),

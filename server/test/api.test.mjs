@@ -156,7 +156,14 @@ test('new account gets a wallet, welcome grant, suite and default wardrobe', asy
   assert.equal(me.status, 200);
   assert.equal(me.json.wallet.yuanzi, 500);
   assert.equal(me.json.wallet.tongbao, 25);
-  assert.equal(me.json.suite.number, '402');
+  // Every account is allocated its own suite from the 65-room hotel; the old
+  // behaviour handed every account Suite 402, which made doorbells ambiguous.
+  assert.match(me.json.suite.number, /^[2-7](0[1-9]|1[01])$/);
+  assert.equal(me.json.suite.floor, Number(me.json.suite.number.slice(0, 1)));
+  const second = await newAccount();
+  const secondMe = await api('GET', '/api/auth/me', { token: second.token });
+  assert.match(secondMe.json.suite.number, /^[2-7](0[1-9]|1[01])$/);
+  assert.notEqual(secondMe.json.suite.number, me.json.suite.number);
   assert.equal(me.json.profile.avatar.topStyle, 'tee');
 
   const history = await api('GET', '/api/economy/history', { token: account.token });
@@ -648,6 +655,61 @@ test('moderation: first account is admin and can review reports', async () => {
     const list = await api('GET', '/api/mod/reports', { token: admin.token });
     assert.equal(list.status, 200);
   }
+});
+
+test('realtime: a suite doorbell only reaches an owner inside their room', async () => {
+  const owner = await newAccount();
+  const visitor = await newAccount();
+  const ownerMe = await api('GET', '/api/auth/me', { token: owner.token });
+  const suiteNumber = ownerMe.json.suite.number;
+  const port = Number(new URL(base).port);
+  const ownerClient = makeClient(port);
+  const visitorClient = makeClient(port);
+  await Promise.all([ownerClient.opened, visitorClient.opened]);
+  ownerClient.send({ t: 'hello', token: owner.token, place: { kind: 'city' } });
+  visitorClient.send({ t: 'hello', token: visitor.token, place: { kind: 'city' } });
+  await Promise.all([
+    ownerClient.waitFor((m) => m.t === 'ready'),
+    visitorClient.waitFor((m) => m.t === 'ready'),
+  ]);
+
+  // Owners are only reachable while their live location is their own room.
+  ownerClient.send({ t: 'pose', x: 0, y: 0, z: 0, yaw: 0, location: 'room' });
+  visitorClient.send({ t: 'pose', x: 0, y: 0, z: 0, yaw: 0, location: 'hallway' });
+  await new Promise((resolve) => setTimeout(resolve, 180));
+
+  visitorClient.send({ t: 'hotel', action: 'ring', roomNumber: suiteNumber });
+  const ringing = await visitorClient.waitFor(
+    (m) => m.t === 'hotel' && m.action === 'ringing' && m.roomNumber === suiteNumber
+  );
+  const ring = await ownerClient.waitFor((m) => m.t === 'hotel' && m.action === 'ring');
+  assert.equal(ring.requestId, ringing.requestId);
+  assert.equal(ring.from.name, visitor.user.displayName ?? visitor.handle);
+
+  ownerClient.send({ t: 'hotel', action: 'respond', requestId: ring.requestId, accept: true });
+  const granted = await visitorClient.waitFor((m) => m.t === 'hotel' && m.action === 'granted');
+  assert.equal(granted.room.roomNumber, suiteNumber);
+  assert.equal(granted.room.userId, owner.user.id);
+  assert.ok(Array.isArray(granted.room.items));
+
+  // Decline leaves the door locked.
+  visitorClient.send({ t: 'hotel', action: 'ring', roomNumber: suiteNumber });
+  const ring2 = await ownerClient.waitFor((m) => m.t === 'hotel' && m.action === 'ring');
+  ownerClient.send({ t: 'hotel', action: 'respond', requestId: ring2.requestId, accept: false });
+  const declined = await visitorClient.waitFor((m) => m.t === 'hotel' && m.action === 'declined');
+  assert.equal(declined.roomNumber, suiteNumber);
+
+  // Stepping out of the suite makes the owner unreachable.
+  ownerClient.send({ t: 'pose', x: 0, y: 0, z: 0, yaw: 0, location: 'lobby' });
+  await new Promise((resolve) => setTimeout(resolve, 180));
+  visitorClient.send({ t: 'hotel', action: 'ring', roomNumber: suiteNumber });
+  const unavailable = await visitorClient.waitFor(
+    (m) => m.t === 'hotel' && m.action === 'unavailable'
+  );
+  assert.equal(unavailable.reason, 'not_in_room');
+
+  ownerClient.close();
+  visitorClient.close();
 });
 
 test('realtime: parties invite, accept, chat and leave', async () => {

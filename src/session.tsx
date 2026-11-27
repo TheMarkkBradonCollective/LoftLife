@@ -37,6 +37,7 @@ import {
   type ChatEvent,
   type ChatScope,
   type ConnectionStatus,
+  type HotelEvent,
   type InstanceInfo,
   type Party,
   type RemotePlayer,
@@ -120,6 +121,8 @@ interface SessionValue {
   presenceOnline: number;
   party: Party | null;
   partyInvites: Party[];
+  /** Latest hotel doorbell event (request, grant, decline, timeout). */
+  hotelEvent: HotelEvent | null;
   transitLines: TransitLine[];
   transitVehicles: TransitVehicle[];
   riding: RidingState | null;
@@ -164,6 +167,10 @@ interface SessionValue {
   ) => boolean;
   boardTransit: (lineId: string, stopId: string) => boolean;
   exitTransit: () => boolean;
+  ringDoorbell: (roomNumber: string) => boolean;
+  answerDoorbell: (requestId: string, accept: boolean) => boolean;
+  cancelDoorbell: (requestId: string) => boolean;
+  clearHotelEvent: () => void;
   setVoiceAnchor: (anchor: { x: number; z: number; location: string }) => void;
   enableVoice: () => Promise<VoiceStatus>;
   disableVoice: () => void;
@@ -234,6 +241,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [remotePlayers, setRemotePlayers] = useState<RemotePlayer[]>([]);
   const [messages, setMessages] = useState<ChatEvent[]>([]);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [hotelEvent, setHotelEvent] = useState<HotelEvent | null>(null);
   const [presenceOnline, setPresenceOnline] = useState(0);
 
   const [party, setParty] = useState<Party | null>(null);
@@ -523,6 +531,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setRiding(nextRiding);
         if (exited) setChatError(`You stepped off at ${exited.label ?? 'the stop'}`);
       },
+      onHotel: (event) => setHotelEvent(event),
       onError: (code, message) => {
         if (status === 'guest' && (code === 'unauthorized' || code === 'guest_expired')) {
           writeGuestSession(null, null);
@@ -933,6 +942,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return realtimeRef.current?.partyAction(action, data) ?? false;
   }, [status]);
 
+  const ringDoorbell = useCallback((roomNumber: string) => {
+    return realtimeRef.current?.ringDoorbell(roomNumber) ?? false;
+  }, []);
+  const answerDoorbell = useCallback((requestId: string, accept: boolean) => {
+    return realtimeRef.current?.answerDoorbell(requestId, accept) ?? false;
+  }, []);
+  const cancelDoorbell = useCallback((requestId: string) => {
+    return realtimeRef.current?.cancelDoorbell(requestId) ?? false;
+  }, []);
+  const clearHotelEvent = useCallback(() => setHotelEvent(null), []);
+
   const boardTransit = useCallback((lineId: string, stopId: string) => {
     return realtimeRef.current?.boardTransit(lineId, stopId) ?? false;
   }, []);
@@ -1059,6 +1079,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       presenceOnline,
       party,
       partyInvites,
+      hotelEvent,
       transitLines,
       transitVehicles,
       riding,
@@ -1084,6 +1105,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       partyAction,
       boardTransit,
       exitTransit,
+      ringDoorbell,
+      answerDoorbell,
+      cancelDoorbell,
+      clearHotelEvent,
       setVoiceAnchor,
       enableVoice,
       disableVoice,
@@ -1122,6 +1147,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       presenceOnline,
       party,
       partyInvites,
+      hotelEvent,
       transitLines,
       transitVehicles,
       riding,
@@ -1147,6 +1173,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       partyAction,
       boardTransit,
       exitTransit,
+      ringDoorbell,
+      answerDoorbell,
+      cancelDoorbell,
+      clearHotelEvent,
       setVoiceAnchor,
       enableVoice,
       disableVoice,
