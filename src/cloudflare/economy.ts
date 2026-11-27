@@ -1,4 +1,5 @@
 import { EXPANSION_PRICES } from '../../shared/catalog/expansion.mjs';
+import { KENNEY_PRICES } from '../../shared/catalog/kenney-library.mjs';
 import { CLOTHING_CATALOG } from '../../shared/character.mjs';
 import {
   ATM_IDS,
@@ -25,6 +26,7 @@ const FURNITURE: Record<string, number> = {
 // Construction / business / nightlife / specialty / event / outdoor / vehicle
 // catalog shares one price table with the game client and the renderer.
 for (const [id, entry] of Object.entries(EXPANSION_PRICES)) FURNITURE[id] = entry.price;
+for (const [id, entry] of Object.entries(KENNEY_PRICES)) FURNITURE[id] = entry.price;
 
 const CLOTHING = Object.fromEntries(
   Object.entries(CLOTHING_CATALOG).map(([id, item]) => [id, { price: item.price, currency: item.currency }])

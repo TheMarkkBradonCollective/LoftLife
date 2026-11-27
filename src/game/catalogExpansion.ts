@@ -1,5 +1,6 @@
 import { EXPANSION_ITEMS, type ExpansionItem } from '../../shared/catalog/expansion.mjs';
 import type { FurnitureCatalogItem, FurnitureCategory } from './types';
+import { assetUrl } from './assets/assetUrl';
 
 /**
  * Bridges the shared catalog records into the game's furniture catalog.
@@ -58,12 +59,17 @@ export function isExpansionItem(id: string): boolean {
  * Variant 0 is the item's base image; other variants use `-<index>`.
  */
 export function catalogPreviewUrl(
-  item: Pick<FurnitureCatalogItem, 'id' | 'previewBase' | 'colors'>,
+  item: Pick<FurnitureCatalogItem, 'id' | 'previewBase' | 'colors'> & {
+    asset?: Pick<NonNullable<FurnitureCatalogItem['asset']>, 'preview'>;
+  },
   colour?: string
 ): string {
+  // Imported GLB records ship one preview rendered from that exact model.
+  if (item.asset?.preview) return assetUrl(item.asset.preview);
   const base = item.previewBase ?? `/catalog-previews/${item.id}`;
-  if (!colour) return `${base}.png`;
+  const url = (path: string) => assetUrl(path);
+  if (!colour) return url(`${base}.png`);
   const index = item.colors.findIndex((swatch) => swatch.hex.toLowerCase() === colour.toLowerCase());
-  if (index <= 0) return `${base}.png`;
-  return `${base}-${index}.png`;
+  if (index <= 0) return url(`${base}.png`);
+  return url(`${base}-${index}.png`);
 }

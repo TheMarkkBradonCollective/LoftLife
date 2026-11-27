@@ -3,6 +3,7 @@ import { Banknote, CreditCard, Loader2, Search, ShoppingBag, Shirt, Sofa, Store,
 import { CATALOG_CATEGORIES } from '../../shared/catalog/expansion.mjs';
 import { getCatalogItem } from '../game/catalog';
 import { catalogPreviewUrl } from '../game/catalogExpansion';
+import { assetUrl } from '../game/assets/assetUrl';
 import { ModelInspector } from './ModelInspector';
 import { api, ApiError, type ShopEntry } from '../net/api';
 import { useSession } from '../session';
@@ -51,6 +52,11 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
   const [colour, setColour] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(60);
+
+  useEffect(() => {
+    setVisibleCount(60);
+  }, [tab, category, query]);
 
   useEffect(() => {
     if (!open) return;
@@ -213,7 +219,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search 344 models…"
+                placeholder={`Search ${furniture.length} models…`}
                 aria-label="Search the catalog"
                 className="w-full bg-transparent text-[11px] text-white outline-none placeholder:text-slate-500"
               />
@@ -294,7 +300,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
                   catalogId={preview.id}
                   colour={activeColour}
                   label={labelFor(preview)}
-                  fallbackSrc={preview.preview ?? undefined}
+                  fallbackSrc={preview.preview ? assetUrl(preview.preview) : undefined}
                   className="h-full w-full"
                 />
               ) : (
@@ -367,7 +373,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
 
         <div className="p-4 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-2">
           {items.length === 0 && <p className="text-xs text-slate-500">Loading the catalog…</p>}
-          {items.map((item) => {
+          {items.slice(0, visibleCount).map((item) => {
             const count = owned.get(item.id) ?? 0;
             const canPay = affordable(item);
             const clothingOwned = tab === 'clothing' && count > 0;
@@ -390,7 +396,11 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
                 {tab === 'furniture' && (item.preview ?? catalogPreviewUrlFor(item)) && (
                   <span className="flex h-20 items-center justify-center rounded-lg border border-white/5 bg-[radial-gradient(circle_at_50%_35%,rgba(255,255,255,0.10),rgba(0,0,0,0.28))]">
                     <img
-                      src={(item.preview ?? catalogPreviewUrlFor(item)) as string}
+                      src={
+                        (item.preview
+                          ? assetUrl(item.preview)
+                          : catalogPreviewUrlFor(item)) as string
+                      }
                       alt={`${label(item)} 3D preview`}
                       loading="lazy"
                       decoding="async"
@@ -425,6 +435,15 @@ export const ShopModal: React.FC<ShopModalProps> = ({ open, onClose, initialTab 
               </div>
             );
           })}
+          {tab === 'furniture' && items.length > visibleCount && (
+            <button
+              type="button"
+              onClick={() => setVisibleCount((count) => count + 60)}
+              className="rounded-xl border border-white/20 bg-white/[0.08] p-3 text-xs font-semibold text-white hover:bg-white/15"
+            >
+              Show {Math.min(60, items.length - visibleCount)} more
+            </button>
+          )}
         </div>
 
         <p className="px-4 py-2 border-t border-white/8 text-[11px] text-slate-500">

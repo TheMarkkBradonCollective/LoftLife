@@ -1,4 +1,5 @@
 import { EXPANSION_PRICES } from '../../shared/catalog/expansion.mjs';
+import { KENNEY_PRICES } from '../../shared/catalog/kenney-library.mjs';
 import { MAX_LEVELS } from '../../shared/building.mjs';
 import { invitationsAllowedWith } from './platform';
 import {
@@ -129,6 +130,7 @@ export function sanitizeState(body: Record<string, unknown>) {
     'coffee_table','side_desk','record_console','media_tv','fireplace','bookshelf','arc_lamp','table_lamp',
     'monstera_plant','olive_tree','woven_rug','wall_art','wall_shelf','floor_mirror','neon_sign',
     ...Object.keys(EXPANSION_PRICES),
+    ...Object.keys(KENNEY_PRICES),
   ]);
   const floors = new Set(['oak_parquet','walnut_herringbone','terrazzo','concrete','boucle_carpet']);
   const walls = new Set(['warm_chalk','sage_plaster','terracotta','slate_blue','charcoal_loft','soft_blush']);

@@ -384,8 +384,14 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   const [conflictOpen, setConflictOpen] = useState(false);
   const [syncPaused, setSyncPaused] = useState(false);
   // Account writes stay blocked until the screen has adopted the account copy,
-  // so a stale device mirror can never be pushed over it on boot.
-  const onlineReadyRef = useRef(false);
+  // so a stale device mirror can never be pushed over it on boot. When the app
+  // mounts directly into an online session (the platform opens the suite after
+  // sign-in), `initial` above has already adopted the server suite, so writes
+  // are safe immediately; otherwise the status effect below flips this once the
+  // account copy has been adopted.
+  const onlineReadyRef = useRef(
+    session.status === 'online' && Boolean(session.suite) && Boolean(session.profile)
+  );
   const [cityMapOpen, setCityMapOpen] = useState(false);
   const [cityStreet, setCityStreet] = useState('M St & 15th St');
   // Z toggles the camera distance only: close avatar view vs wide room view.
@@ -491,7 +497,13 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
   useEffect(() => {
     const previous = previousStatusRef.current;
     previousStatusRef.current = session.status;
-    if (session.status !== 'online' || previous === 'online') return;
+    if (session.status !== 'online') return;
+    if (previous === 'online') {
+      // Mounted online, or the account suite arrived after mount: the screen is
+      // showing the account copy, so autosave may start.
+      if (session.suite && session.profile) onlineReadyRef.current = true;
+      return;
+    }
 
     if (session.justRegistered) {
       const saved = loadSavedState();

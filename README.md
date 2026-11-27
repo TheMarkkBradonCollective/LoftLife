@@ -27,16 +27,21 @@ Other scripts:
 | `npm run dev` | Vite only (no backend — the app falls back to offline mode) |
 | `npm run server` | API + realtime gateway on `:8787`; also serves `dist/` if built |
 | `npm run build` | Production build to `dist/` |
-| `npm run assets:previews` | Render every catalog preview PNG from its actual 3D model (`--force`, `--only=`, `--category=`) |
-| `npm run assets:check` | Re-validate every catalog image against the model signature that produced it |
-| `npm run assets:upload` | Upload previews to R2 under `catalog/v1/<category>/` (needs `CATALOG_R2_BUCKET` + `CLOUDFLARE_API_TOKEN`) |
+| `npm run assets:previews` | Render every procedural catalog preview PNG from its actual 3D model (`--force`, `--only=`, `--category=`) |
+| `npm run assets:import` | Re-import the classified Kenney kits from `.cache/kenney` and regenerate the catalog |
+| `npm run assets:kenney` | Render the imported models' previews from their shipped GLBs (`--force`, `--kit=`, `--limit=`) |
+| `npm run assets:check` | Re-validate every procedural and imported preview against the model that produced it |
+| `npm run assets:gallery` | Rebuild the searchable `public/asset-gallery.html` preview gallery |
+| `npm run assets:upload` | Upload previews, GLBs, textures and manifests to R2 under `catalog/v1/` (needs `CATALOG_R2_BUCKET` + `CLOUDFLARE_API_TOKEN`) |
 | `npm run db:seed` | Apply the catalog migration + generated seed to Neon (`--apply`, needs `DATABASE_URL`) |
 | `npm test` | 180 integration/acceptance checks: HTTP API, permissions, CUBITS/TG-Banking/cash, economy, parties, voice signalling, transit seats, Cloudflare-issued identity, two-client city movement, 64-player capacity, the shipping Worker/Durable Object path, the catalog/preview pipeline, and multi-storey build persistence |
 | `npm run lint` | `tsc --noEmit` |
 
-Catalog assets are generated, not hand-drawn: `shared/catalog/expansion.mjs` is the single record of
-what exists, and `scripts/render-catalog-previews.mjs` renders each item's real Three.js model into
-`public/catalog-previews/`. See [docs/CATALOG-EXPANSION.md](docs/CATALOG-EXPANSION.md).
+Catalog assets are generated, not hand-drawn: `shared/catalog/expansion.mjs` records the authored
+items, `shared/catalog/kenney-library.mjs` records the imported Kenney library, and the renderers
+produce each item's preview from its real Three.js model or shipped GLB into
+`public/catalog-previews/`. See [docs/CATALOG-EXPANSION.md](docs/CATALOG-EXPANSION.md) and
+[docs/KENNEY-ASSET-LIBRARY.md](docs/KENNEY-ASSET-LIBRARY.md).
 
 ### Environment variables
 
@@ -52,6 +57,7 @@ All optional; sensible defaults are used.
 | `LOFTLIFE_SESSION_SECRET` | unset | Optional. HMAC key (≥ 32 chars) for tokens minted by the Cloudflare edge; must match the Worker's secret |
 | `DATABASE_URL` | unset | Optional. Neon pooled connection string — read by the Cloudflare Worker, never by the game server |
 | `GAME_ORIGIN` | `http://127.0.0.1:8787` | Optional. Where the Worker proxies `/api/*` and `/ws` |
+| `VITE_ASSET_BASE_URL` | unset | Optional. R2/CDN root ending in `/catalog/v1`; unset serves models and previews from `public/` |
 
 **No secrets or API keys are required for local play.** Passwords are hashed with scrypt, session
 tokens are stored only as SHA-256 digests, and nothing sensitive belongs in source control.
@@ -107,10 +113,12 @@ known gaps, priorities and long-term roadmap. The more implementation-specific s
 
 **Game (pre-existing, preserved)**
 - Third-person and isometric camera, WASD + pointer-lock mouse look, sprint, jump, emotes, sitting.
-- Grid-based room builder: **344 catalog items** (73 original + 271 expansion) covering construction,
-  residential, commercial, nightlife, specialty, event, outdoor and vehicle pieces — with a preview
-  thumbnail per item and per colour variant rendered from that item's own model, search, category and
-  themed-collection filters. **Up to four stacked storeys** with per-storey finishes, real slabs,
+- Grid-based room builder: **1,971 catalog items** — 73 original suite pieces, 271 authored
+  expansion pieces, and 1,627 imported Kenney models (from 1,676 imported across 21 kits; 49 existing
+  pieces now use imported visuals). Covers construction, residential, commercial, nightlife,
+  specialty, events, outdoor, vehicles, buildings, roads, nature, food, retail, arcade and static
+  character props — with a preview thumbnail rendered from that item's own model, search, category,
+  art-style and themed-collection filters. **Up to four stacked storeys** with per-storey finishes, real slabs,
   walls and rooftop railings, stairs that move the avatar between floors, and storey-local
   collision (see [docs/BUILDING-MULTIFLOOR.md](docs/BUILDING-MULTIFLOOR.md)).
   Recolour/rotate/move/duplicate/delete, undo, 5 floor finishes, 6 wall paints, 3 lighting moods,
@@ -131,7 +139,7 @@ known gaps, priorities and long-term roadmap. The more implementation-specific s
   at Hotel Plaza and Market Hall, and a server-priced general store accepting wallet, card or cash.
 - Legacy **YUANZI (元子)** and **TONGBAO (通宝)** wallets, append-only ledger, idempotent purchases
   and a daily reward remain intact. No exchange rate or automatic conversion is applied.
-- Furniture/wardrobe shop: **344 world assets** + 6 wardrobe pieces at shared-catalog prices, with
+- Furniture/wardrobe shop: **1,971 world assets** + 6 wardrobe pieces at shared-catalog prices, with
   transparent previews, search, category filters and a live per-item 3D inspector.
 - Player-owned worlds: create, decorate, publish, five access modes
   (public / private / invite-only / friends-only / collaborative), collaborator build rights.
@@ -162,8 +170,14 @@ known gaps, priorities and long-term roadmap. The more implementation-specific s
   exact previous distance and angle in both isometric and third-person views.
 - Wardrobe studio locks unowned clothing with its server price; the 3D viewport is lazy-loaded so
   the sign-in wall no longer ships Three.js.
-- **Asset pipeline**: 1,434 transparent 512×512 PNG previews rendered offline from the same
-  `THREE.Object3D` the game places, with a manifest tying item id → model signature → image hash.
+- **Imported 3D library**: 1,676 Kenney CC0 models across 21 classified kits (furniture, city,
+  architecture, roads, vehicles, nature, food, retail, arcade, seasonal, industrial and static
+  character props), stored as GLB + textures and loaded on demand through one cached GLTFLoader.
+  1,676 previews are rendered from those exact GLBs, and the catalogue is searchable and filterable
+  in the real build panel. See [docs/KENNEY-ASSET-LIBRARY.md](docs/KENNEY-ASSET-LIBRARY.md).
+- **Asset pipeline**: 1,434 procedural plus 1,676 imported transparent 512×512 PNG previews rendered
+  offline from the same object the game places, with manifests tying item id → model signature →
+  image hash.
   `npm test` fails if a preview is missing, opaque, off-centre, unlinked from its model, or priced
   differently on the server than in the catalog.
 - Reports and admin moderation endpoints; audit log.
@@ -205,8 +219,12 @@ src/
   components/      AuthGate, 3D viewport, world menu, shop/worlds/settings modals
   game/            city layout, hotel/world builders, furniture, avatar rig, transit, audio
 shared/            pure rules shared by server and client (device detection, HUD presentation)
-shared/catalog/    expansion.mjs (344-item catalog + model params), preview-manifest.json
-scripts/           render-catalog-previews.mjs, export-catalog-sql.mjs, lib/ (PNG codec, CPU
+shared/catalog/    expansion.mjs (authored catalog), kenney-library.mjs (generated import),
+                   kenney-replacements.mjs, preview manifests
+shared/kenney/     GLB reader and full PNG decoder used by the import/preview pipeline
+public/models/     kenney/<kit>/ GLB models + Textures (served locally, mirrored to R2)
+scripts/           render-catalog-previews.mjs, import-kenney-library.mjs,
+                   render-kenney-previews.mjs, export-catalog-sql.mjs, lib/ (PNG codec, CPU
                    renderer, headless DOM shim)
 migrations/        Postgres/Neon schema, incl. 0009 catalog metadata + generated seed
 docs/              AUDIT.md, ARCHITECTURE.md, CATALOG-EXPANSION.md, ROADMAP.md, HUD-REDESIGN.md
@@ -226,8 +244,11 @@ docs/              AUDIT.md, ARCHITECTURE.md, CATALOG-EXPANSION.md, ROADMAP.md, 
 - [docs/BUILDING-MULTIFLOOR.md](docs/BUILDING-MULTIFLOOR.md) — storey model, editor controls,
   stairs and movement, persistence/Worker parity, wall joining and limits.
 - [plan.md](plan.md) — living status table: shipped, blocked storage, clothing expansion next.
-- [docs/CATALOG-EXPANSION.md](docs/CATALOG-EXPANSION.md) — the 344-item catalog, model kinds,
+- [docs/CATALOG-EXPANSION.md](docs/CATALOG-EXPANSION.md) — the authored catalog, model kinds,
   preview-rendering pipeline, database/storage changes, verification and known limitations.
+- [docs/KENNEY-ASSET-LIBRARY.md](docs/KENNEY-ASSET-LIBRARY.md) — the imported 1,676-model Kenney
+  library: kit classification and exclusions, catalog metadata, preview provenance, runtime loader,
+  replacements, R2 layout, character/animation audit, verification and limitations.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased plan with current status.
 - [docs/MULTIPLAYER-VALIDATION.md](docs/MULTIPLAYER-VALIDATION.md) — multiplayer and
   production validation: what the automated checks prove, what still needs a deployed run.

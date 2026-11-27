@@ -3,6 +3,7 @@ import { getCatalogItem } from './catalog';
 import { getExpansionCatalogItem } from './catalogExpansion';
 import { buildFurnitureGroup } from './furniture';
 import { buildCatalogModel } from './models';
+import { getKenneyAssetModel } from './assets/kenneyRuntime';
 
 /**
  * Build the actual game model for a catalog id, for live 3D inspection in the
@@ -13,6 +14,9 @@ export function buildPreviewModel(catalogId: string, color?: string, active = tr
   const item = getCatalogItem(catalogId);
   if (!item) return null;
   const colour = color ?? item.defaultColor;
+  if (item.asset) {
+    return getKenneyAssetModel(item, { color: colour, active });
+  }
   const expansion = getExpansionCatalogItem(catalogId);
   if (expansion) {
     const group = buildCatalogModel(expansion, { color: colour, active });

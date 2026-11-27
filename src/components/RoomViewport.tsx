@@ -31,6 +31,7 @@ import { buildHotelHallway, buildHotelLobby } from '../game/hotelBuilder';
 import { buildAirportTerminal } from '../game/airportBuilder';
 import { buildClothingStore } from '../game/clothingStoreBuilder';
 import { buildRoomArchitecture, SUITE_DOOR_Z } from '../game/roomBuilder';
+import { preloadKenneyAssets, subscribeKenneyAssets } from '../game/assets/kenneyRuntime';
 import {
   buildMainWorld,
   getCityGroundY,
@@ -337,6 +338,10 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
   // The airport faces north; the hotel and clothing store face south.
   const cityArrivalViewRef = useRef<'hotel' | 'airport' | 'store'>('hotel');
   const [webglError, setWebglError] = useState(false);
+  // Bumped whenever an imported GLB finishes loading. Rebuilding is scoped to
+  // groups that were marked pending, so untouched furniture keeps its state.
+  const [kenneyRevision, setKenneyRevision] = useState(0);
+  useEffect(() => subscribeKenneyAssets(() => setKenneyRevision((value) => value + 1)), []);
   // Camera distance/position captured the first time Z zoomed in, so the second
   // press returns to the exact previous view instead of a default.
   const zoomStateRef = useRef<{
@@ -350,6 +355,15 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     location === 'resident_room' && activeResident ? activeResident.surfaces : surfaces;
   const activeMood =
     location === 'resident_room' && activeResident ? activeResident.mood : mood;
+
+  // Preload only the GLBs this room actually contains. Downloads are shared
+  // and deduplicated, so walking between rooms never refetches a model.
+  useEffect(() => {
+    const imported = activeItems
+      .map((item) => getCatalogItem(item.catalogId))
+      .filter((item): item is NonNullable<typeof item> => Boolean(item?.asset));
+    if (imported.length) void preloadKenneyAssets(imported);
+  }, [activeItems]);
 
   const propsRef = useRef({
     location,
@@ -4049,7 +4063,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     for (const item of activeItems) {
       const prevGrp = h.furnitureMap.get(item.uid);
       const sig = `${item.catalogId}|${item.color}|${item.active ? 1 : 0}`;
-      const needsRebuild = !prevGrp || prevGrp.userData.sig !== sig;
+      const needsRebuild = !prevGrp || prevGrp.userData.sig !== sig || Boolean(prevGrp.userData.assetPending);
 
       if (needsRebuild) {
         if (prevGrp) h.furnitureRoot.remove(prevGrp);
@@ -4072,7 +4086,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
         prevGrp.visible = !(location === 'room' && item.uid === movingUid);
       }
     }
-  }, [activeItems, movingUid, location]);
+  }, [activeItems, movingUid, location, kenneyRevision]);
 
   // Rebuild stacked storeys when the stack changes, and show at most the active
   // storey plus the ones below it (upper floors never occlude the build view).
@@ -4101,7 +4115,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       return;
     }
 
-    if (h.ghostKey !== activeCatalogId) {
+    if (h.ghostKey !== activeCatalogId || h.ghostGroup?.userData.assetPending) {
       if (h.ghostGroup) h.scene.remove(h.ghostGroup);
       const g = buildFurnitureGroup(
         {
@@ -4121,7 +4135,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     } else if (h.ghostGroup) {
       h.ghostGroup.rotation.y = (placingRotation * Math.PI) / 2;
     }
-  }, [location, mode, placingCatalogId, movingUid, placingRotation, placingColor, activeItems]);
+  }, [location, mode, placingCatalogId, movingUid, placingRotation, placingColor, activeItems, kenneyRevision]);
 
   // Sync Selection Outline Box
   useEffect(() => {
