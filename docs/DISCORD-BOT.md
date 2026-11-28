@@ -31,7 +31,9 @@ Cloudflare Containers runs the Gateway's existing Docker image. The separate Wor
 
 ### Configure secrets
 
-From the `discord-bot` directory, set the two secrets on the new Worker (never commit or paste them into chat):
+The deployment workflow creates and shares a fresh `CONTROL_SECRET` between the two Workers. After it finishes, add the existing Discord bot token to the new Gateway Worker as a Cloudflare secret named `DISCORD_BOT_TOKEN`. Never commit or paste it into chat.
+
+For a manual deployment, from the `discord-bot` directory, set both secrets on the new Worker (never commit or paste them into chat):
 
 ```sh
 npx wrangler secret put DISCORD_BOT_TOKEN
@@ -51,7 +53,7 @@ npx wrangler deploy
 
 Wrangler builds and pushes the Docker image with the Worker. The first container may take several minutes to provision. Check its health at the deployed Worker URL plus `/health`.
 
-The Worker uses a six-hour inactivity timeout and a five-minute scheduled health request to keep the Gateway process available. This requires Cloudflare Workers Paid: Containers are not included on the Free plan, and the Durable Object scheduling policy is currently public beta. Because the five-minute ping keeps this 1 GiB container active around the clock, the published memory rate works out to roughly $6.26/month above the included 25 GiB-hours for a 30-day month, before CPU, Worker, Durable Object or other charges. This is an estimate, not a total bill. The container starts as `basic` (1 GiB memory) to give the Node.js Discord client and audio processing more headroom. The Durable Object scheduling policy does not support `max_instances`; concurrency is controlled by the single named Durable Object instance in this design. Cloudflare can still stop active containers for host maintenance or other platform events; the bot must reconnect when the container restarts. Cloudflare does not guarantee uninterrupted container uptime.
+The Worker uses a six-hour inactivity timeout and a five-minute scheduled health request to keep the Gateway process available. This requires Cloudflare Workers Paid: Containers are not included on the Free plan, and the Durable Object scheduling policy is currently public beta. With the five-minute ping keeping the 1 GiB container awake around the clock, a 30-day month is approximately $6.26 in memory charges after the included 25 GiB-hours, plus about $0.68 in provisioned-disk charges after the included 200 GB-hours. The $5 Workers Paid plan is separate, and Worker/Durable Object usage, CPU, and egress may add more. This is an estimate, not a total bill. The container starts as `basic` (1 GiB memory) to give the Node.js Discord client and audio processing more headroom. The Durable Object scheduling policy selects the image and instance size in the Durable Object code; the single stable Durable Object name in this design keeps one Gateway process for the server. Cloudflare can still stop active containers for host maintenance or other platform events; the bot must reconnect when the container restarts. Cloudflare does not guarantee uninterrupted container uptime.
 
 ### Connect the existing interaction Worker
 
