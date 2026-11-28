@@ -184,7 +184,6 @@ export const GameMenu: React.FC<GameMenuProps> = (props) => {
     canChangeView,
     closeZoom,
     followCharacter,
-    mood,
     touch,
     syncing,
     syncError,
