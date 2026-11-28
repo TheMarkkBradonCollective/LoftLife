@@ -870,7 +870,7 @@ test('realtime: boarding a LoftLine bus assigns a server-owned seat', async () =
     routes.json.lines.some((entry) => entry.kind === 'rail' && entry.stops.length >= 4),
     'light rail exposes a multi-stop line'
   );
-  assert.ok(routes.json.taxis.length >= 3, 'autonomous taxis expose valid destinations');
+  assert.deepEqual(routes.json.taxis, [], 'the city does not publish autonomous taxi services');
   assert.ok(routes.json.hubs.some((hub) => hub.id === 'central-station'));
   const line = routes.json.lines.find((entry) => entry.kind === 'bus');
   assert.ok(line.stops.length >= 3, 'the 15th Street line has several stops');
@@ -912,48 +912,18 @@ test('realtime: boarding a LoftLine bus assigns a server-owned seat', async () =
   client.close();
 });
 
-test('realtime: an autonomous taxi takes a fare to a valid destination', async () => {
-  const fare = await newAccount();
+test('realtime: the city does not spawn autonomous taxi cars', async () => {
+  const player = await newAccount();
   const port = Number(new URL(base).port);
   const client = makeClient(port);
   await client.opened;
-  client.send({ t: 'hello', token: fare.token, place: { kind: 'city' } });
+  client.send({ t: 'hello', token: player.token, place: { kind: 'city' } });
   const ready = await client.waitFor((m) => m.t === 'ready');
-  const taxi = ready.vehicles.find((vehicle) => vehicle.kind === 'taxi');
-  assert.ok(taxi, 'the city fleet includes taxis');
-  assert.equal(taxi.riders.length, 0, 'no driver NPC occupies a taxi seat');
-
-  client.send({ t: 'pose', x: taxi.x, y: 0, z: taxi.z, yaw: 0, location: 'world' });
-  client.send({ t: 'transit', action: 'hailTaxi', vehicleId: taxi.id });
-  const boarded = await client.waitFor((m) => m.t === 'transit' && m.riding?.kind === 'taxi');
-  assert.equal(boarded.riding.vehicleId, taxi.id);
-  assert.equal(boarded.taxi.state, 'waiting');
-  assert.ok(boarded.taxi.destinations.some((entry) => entry.id === 'library'));
-
-  // Invalid destinations are rejected before dispatch moves.
-  client.send({ t: 'transit', action: 'taxiDestination', destinationId: 'moon' });
-  const rejected = await client.waitFor((m) => m.t === 'error' && m.code === 'bad_request');
-  assert.match(rejected.message, /destination/i);
-
-  client.send({ t: 'transit', action: 'taxiDestination', destinationId: 'library' });
-  const driving = await client.waitFor(
-    (m) => m.t === 'snapshot' && (m.vehicles ?? []).some((entry) => entry.id === taxi.id && entry.state === 'driving')
-  );
-  assert.ok(driving.vehicles.some((entry) => entry.destinationId === 'library'));
-
-  const arrived = await client.waitFor(
-    (m) => m.t === 'transit' && m.riding === null && m.exited?.lineId === 'taxi',
-    20_000
-  );
-  assert.match(arrived.exited.label, /Library/i);
-  // The drop-off must match the server-declared destination exactly, so the
-  // test follows the city plan rather than hard-coding a street coordinate.
-  const library = boarded.taxi.destinations.find((entry) => entry.id === 'library');
-  assert.ok(library, 'the library has a taxi destination');
-  assert.ok(Math.hypot(arrived.exited.x - library.arrival.x, arrived.exited.z - library.arrival.z) < 0.5);
+  assert.ok(ready.vehicles.some((vehicle) => vehicle.kind === 'bus'));
+  assert.ok(ready.vehicles.some((vehicle) => vehicle.kind === 'rail'));
+  assert.equal(ready.vehicles.some((vehicle) => vehicle.kind === 'taxi'), false);
   client.close();
 });
-
 test('realtime: intercity rail checks the gateway and destination access', async () => {
   const traveller = await newAccount();
   const port = Number(new URL(base).port);

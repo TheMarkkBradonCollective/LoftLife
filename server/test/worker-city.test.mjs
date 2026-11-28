@@ -374,13 +374,13 @@ test('worker: two guests share TheCity, see movement and city chat', async () =>
     'remaining players receive the stale player leave event');
 });
 
-test('worker: light rail, autonomous taxis and intercity gateways are exposed', async () => {
+test('worker: scheduled transit and intercity gateways are exposed without AI cars', async () => {
   const transitResponse = await worker.fetch(new Request(`${ORIGIN}/api/transit`), env);
   assert.equal(transitResponse.status, 200);
   const transit = await transitResponse.json();
   assert.ok(transit.lines.filter((line) => line.kind === 'bus').length >= 3);
   assert.ok(transit.lines.filter((line) => line.kind === 'rail').length >= 2);
-  assert.ok(transit.taxis.some((entry) => entry.id === 'library'));
+  assert.deepEqual(transit.taxis, [], 'taxi destination data is not exposed as an active fleet');
   assert.ok(transit.hubs.some((hub) => hub.id === 'central-station'));
 
   const destinationsResponse = await worker.fetch(
@@ -392,35 +392,12 @@ test('worker: light rail, autonomous taxis and intercity gateways are exposed', 
   assert.ok(destinations.city.length >= 4);
   assert.deepEqual(destinations.worlds, [], 'guests cannot list player worlds');
 
-  const taxiGuest = await openGuest('Taxi Guest');
-  const snapshot = taxiGuest.pair.client.messages.filter((message) => message.t === 'snapshot').at(-1);
+  const guest = await openGuest('Transit Guest');
+  const snapshot = guest.pair.client.messages.filter((message) => message.t === 'snapshot').at(-1);
   assert.ok(snapshot, 'the city sends a vehicle snapshot');
-  const taxi = snapshot.vehicles.find((vehicle) => vehicle.kind === 'taxi');
-  assert.ok(taxi, 'the ambient fleet includes a taxi');
-  assert.equal(taxi.riders.length, 0);
-
-  await durable.webSocketMessage(
-    taxiGuest.pair.server,
-    JSON.stringify({ t: 'pose', x: taxi.x, y: 0, z: taxi.z, yaw: 0, location: 'world' })
-  );
-  await durable.webSocketMessage(
-    taxiGuest.pair.server,
-    JSON.stringify({ t: 'transit', action: 'hailTaxi', vehicleId: taxi.id })
-  );
-  const boarded = taxiGuest.pair.client.messages.find(
-    (message) => message.t === 'transit' && message.riding?.kind === 'taxi'
-  );
-  assert.ok(boarded, 'the taxi accepts a hail');
-  assert.equal(boarded.taxi.state, 'waiting');
-
-  await durable.webSocketMessage(
-    taxiGuest.pair.server,
-    JSON.stringify({ t: 'transit', action: 'taxiDestination', destinationId: 'library' })
-  );
-  const driving = taxiGuest.pair.client.messages.find(
-    (message) => message.t === 'transit' && message.taxi?.state === 'driving'
-  );
-  assert.ok(driving, 'the server dispatches the taxi to the chosen destination');
+  assert.ok(snapshot.vehicles.some((vehicle) => vehicle.kind === 'bus'));
+  assert.ok(snapshot.vehicles.some((vehicle) => vehicle.kind === 'rail'));
+  assert.equal(snapshot.vehicles.some((vehicle) => vehicle.kind === 'taxi'), false);
 
   const travelGuest = await openGuest('Rail Guest');
   const hub = transit.hubs.find((entry) => entry.id === 'central-station');

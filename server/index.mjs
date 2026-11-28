@@ -44,7 +44,7 @@ import {
   worldPlayerCount,
 } from './realtime.mjs';
 import { partyFor, partyView, pendingInvitesFor } from './parties.mjs';
-import { taxiDestinations, transitHubs, transitLines } from './transit.mjs';
+import { transitHubs, transitLines } from './transit.mjs';
 import { travelDestinations } from './travel.mjs';
 import {
   acceptFriend,
@@ -718,7 +718,7 @@ export function createApp() {
     res.setHeader('Cache-Control', 'public, max-age=300');
     res.json({
       lines: transitLines(),
-      taxis: taxiDestinations(),
+      taxis: [],
       hubs: transitHubs(),
     });
   });

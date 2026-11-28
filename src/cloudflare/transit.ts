@@ -321,7 +321,7 @@ export function handleTransitRoute(request: Request): Response | null {
         color: line.color,
         stops: line.stops,
       })),
-      taxis: TAXI_DESTINATIONS,
+      taxis: [],
       hubs: TRANSIT_HUBS,
     }),
     { headers: { 'content-type': 'application/json', 'cache-control': 'public,max-age=300' } }

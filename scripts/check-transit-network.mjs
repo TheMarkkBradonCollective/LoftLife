@@ -45,7 +45,6 @@ check(rails.length >= 2, `expected at least 2 light-rail lines, found ${rails.le
 check(rails.every((line) => line.stops.length >= 5), 'each rail line needs at least 5 stations');
 check(new Set(lines.map((line) => line.id)).size === lines.length, 'line ids must be unique');
 check(transit.TRANSIT_HUBS.length >= 1, 'an intercity rail hub is required');
-check(transit.TAXI_DESTINATIONS.length >= 5, 'taxis need at least 5 valid destinations');
 check(travel.CITY_TRAVEL_DESTINATIONS.length >= 4, 'intercity travel needs city destinations');
 
 const stopKeys = new Set();
@@ -58,18 +57,12 @@ for (const line of lines) {
     check(Number.isFinite(stop.x) && Number.isFinite(stop.z), `${key} has no coordinates`);
   }
 }
-for (const destination of transit.TAXI_DESTINATIONS) {
-  check(destination.arrival, `${destination.id} has no arrival point`);
-}
-
 transit.resetTransit();
 const fleet = transit.ensureFleet('check-city');
 const taxis = [...fleet.values()].filter((vehicle) => vehicle.kind === 'taxi');
-check(taxis.length === 3, `expected 3 autonomous taxis, found ${taxis.length}`);
-check(taxis.every((taxi) => taxi.riders.size === 0), 'taxis must not have NPC drivers');
+check(taxis.length === 0, `expected no autonomous taxis, found ${taxis.length}`);
 
 const started = Date.now();
-const origin = new Map(taxis.map((taxi) => [taxi.id, { x: taxi.x, z: taxi.z }]));
 let previous = started;
 for (let i = 0; i < 900; i++) {
   const now = started + i * 100;
@@ -77,16 +70,12 @@ for (let i = 0; i < 900; i++) {
   previous = now;
 }
 const elapsed = Date.now() - started;
-const moved = taxis.filter((taxi) => {
-  const start = origin.get(taxi.id);
-  return Math.hypot(taxi.x - start.x, taxi.z - start.z) > 2;
-});
-check(moved.length === 3, 'autonomous taxis should cruise the loop with no riders');
 check(elapsed < 2_000, `fleet update is too slow: ${elapsed} ms for 900 ticks`);
 
 const vehicles = transit.vehiclesFor('check-city', started + 60_000);
 const kinds = new Set(vehicles.map((vehicle) => vehicle.kind));
-for (const kind of ['bus', 'rail', 'taxi']) check(kinds.has(kind), `ambient fleet is missing ${kind}`);
+for (const kind of ['bus', 'rail']) check(kinds.has(kind), `scheduled fleet is missing ${kind}`);
+check(!kinds.has('taxi'), 'the active fleet must not contain autonomous cars');
 transit.resetTransit();
 
 if (problems.length) {
@@ -99,6 +88,6 @@ console.log('Transit network OK');
 console.log(`  bus routes:  ${buses.length} (${buses.map((line) => line.id).join(', ')})`);
 console.log(`  rail lines:  ${rails.length} (${rails.map((line) => line.id).join(', ')})`);
 console.log(`  stations:    ${rails.reduce((total, line) => total + line.stops.length, 0)}`);
-console.log(`  taxi stops:  ${transit.TAXI_DESTINATIONS.length}`);
+console.log('  AI cars:     disabled');
 console.log(`  intercity:   ${travel.CITY_TRAVEL_DESTINATIONS.length} city destinations`);
-console.log(`  fleet tick:  ${elapsed} ms for 900 ticks (90 s simulated, ambient fleet)`);
+console.log(`  fleet tick:  ${elapsed} ms for 900 ticks (90 s simulated, scheduled fleet)`);

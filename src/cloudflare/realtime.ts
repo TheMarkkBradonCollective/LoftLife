@@ -1006,27 +1006,7 @@ export class LoftLifeRealtime {
         riders:group.map(r=>({userId:r.userId,handle:r.handle,seat:r.transitSeat})),
       };
     });
-    for(let i=1;i<=3;i++){
-      const id=`taxi_${i}`;
-      const group=players.filter(player=>player.taxiId===id);
-      const first=group[0];
-      let x=0,z=0,heading=0,state='roam';
-      if(first){
-        const path=first.taxiPath;const startedAt=Number(first.taxiStartedAt??first.taxiBoardedAt??now);
-        if(path&&path.length>1){
-          const elapsed=Math.max(0,now-startedAt);
-          const duration=Number(first.taxiDurationMs??1);
-          const pos=pathPointAt(path,Math.min(pathLength(path),(elapsed/1000)*TAXI_SPEED));
-          x=pos.x;z=pos.z;heading=pos.heading;state=elapsed>=duration?'arrived':'driving';
-        } else {
-          x=Number(first.taxiX??0);z=Number(first.taxiZ??0);heading=Number(first.taxiHeading??0);state='waiting';
-        }
-      } else {
-        const pos=taxiLoopPoint((now/1000)*TAXI_SPEED+i*70);
-        x=pos.x;z=pos.z;heading=pos.heading;
-      }
-      vehicles.push({id,lineId:'taxi',label:'Autonomous Taxi',kind:'taxi',color:'#f5b718',x:Math.round(x*100)/100,z:Math.round(z*100)/100,heading:Math.round(heading*1000)/1000,stopIndex:0,dwelling:state!=='driving',state,seats:TAXI_SEATS,destinationId:first?.taxiDestinationId??null,destinationLabel:first?.taxiDestinationLabel??null,riders:group.map(r=>({userId:r.userId,handle:r.handle,seat:r.taxiSeat}))});
-    }
+    // No autonomous cars are spawned; only scheduled bus and rail vehicles exist.
     return vehicles;
   }
   private transit(ws: HibernatableWebSocket, player: Player, message: Record<string, unknown>) {
@@ -1054,36 +1034,11 @@ export class LoftLifeRealtime {
       return;
     }
     if(action==='hailTaxi'){
-      if(player.riding){error(ws,'conflict','You are already riding transit');return;}
-      if(player.journey){error(ws,'conflict','Finish your journey first');return;}
-      if(player.location!=='world'){error(ws,'conflict','Walk to a taxi first');return;}
-      const taxiId=String(message.vehicleId??'');
-      const index=Number(taxiId.replace('taxi_',''));
-      if(!Number.isFinite(index)||index<1||index>3){error(ws,'not_found','That taxi is not available');return;}
-      const now=Date.now();
-      const pos=taxiLoopPoint((now/1000)*TAXI_SPEED+index*70);
-      if(Math.hypot(player.x-pos.x,player.z-pos.z)>9){error(ws,'bad_request','Walk closer to the taxi');return;}
-      const group=this.players(player.instanceId).filter(r=>r.taxiId===taxiId);
-      const used=new Set(group.map(r=>r.taxiSeat));
-      let seat=-1;for(let i=0;i<TAXI_SEATS;i++){if(!used.has(i)){seat=i;break;}}
-      if(seat<0){error(ws,'conflict','This taxi is full');return;}
-      const next:Player={...player,riding:taxiId,taxiId,taxiSeat:seat,taxiBoardedAt:now,taxiX:pos.x,taxiZ:pos.z,taxiHeading:pos.heading,taxiPath:undefined,taxiStartedAt:undefined,taxiDurationMs:undefined,taxiDestinationId:undefined,taxiDestinationLabel:undefined,taxiArrival:undefined,location:'transit',lastSeen:now};
-      ws.serializeAttachment(next);
-      send(ws,{t:'transit',riding:{vehicleId:taxiId,lineId:'taxi',seat,label:'Autonomous Taxi',kind:'taxi'},taxi:{state:'waiting',destinations:TAXI_DESTINATIONS},vehicles:this.vehiclesFor(player.instanceId,now)});
-      this.broadcastSnapshot(player.instanceId,true);
+      error(ws,'not_found','Autonomous taxis are disabled in LoftLife');
       return;
     }
     if(action==='taxiDestination'){
-      if(!player.taxiId){error(ws,'conflict','You are not in a taxi');return;}
-      const destination=TAXI_DESTINATIONS.find(entry=>entry.id===String(message.destinationId??''));
-      if(!destination){error(ws,'bad_request','Unknown taxi destination');return;}
-      const path=taxiPath({x:Number(player.taxiX??player.x),z:Number(player.taxiZ??player.z)},destination);
-      const duration=Math.max(1000,(pathLength(path)/TAXI_SPEED)*1000);
-      const now=Date.now();
-      const next:Player={...player,taxiPath:path,taxiStartedAt:now,taxiDurationMs:duration,taxiDestinationId:destination.id,taxiDestinationLabel:destination.label,taxiArrival:destination.arrival,lastSeen:now};
-      ws.serializeAttachment(next);
-      send(ws,{t:'transit',taxi:{state:'driving',destinationId:destination.id,destinationLabel:destination.label,destinations:[],etaSeconds:Math.ceil(duration/1000)},vehicles:this.vehiclesFor(player.instanceId,now)});
-      this.broadcastSnapshot(player.instanceId,true);
+      error(ws,'not_found','Autonomous taxis are disabled in LoftLife');
       return;
     }
     if(action==='exit'){

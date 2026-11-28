@@ -468,36 +468,8 @@ export function ensureFleet(instanceId) {
       riders: new Map(),
     });
   }
-  for (let i = 0; i < 3; i++) {
-    const id = `taxi_${instanceId}_${i + 1}`;
-    if (map.has(id)) continue;
-    const loop = taxiLoop();
-    const point = loopPoint(loop, i / 3);
-    map.set(id, {
-      id,
-      instanceId,
-      lineId: 'taxi',
-      label: 'Autonomous Taxi',
-      kind: 'taxi',
-      color: '#f5b718',
-      x: point.x,
-      z: point.z,
-      heading: point.heading,
-      speed: 0,
-      state: 'roam',
-      destinationId: null,
-      destination: null,
-      path: [],
-      pathIndex: 0,
-      loop,
-      loopDistance: i === 0 ? 0 : loop.total * (i / 3),
-      pauseUntil: 0,
-      lastPauseAt: 0,
-      waitingSince: 0,
-      arrivedAt: 0,
-      riders: new Map(),
-    });
-  }
+  // Autonomous taxis are intentionally disabled; players travel via scheduled transit.
+
   return map;
 }
 
