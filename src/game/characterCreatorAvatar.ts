@@ -212,6 +212,13 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
     const bodyMesh = bodyMeshes[0];
     if (!bodyMesh) return;
 
+    const files = [...clothingFor(next), hairFor(next.hairStyle)];
+    const loaded = await Promise.all(files.map(async (id) => {
+      const file = id.endsWith('.glb') ? id : `clothing_${id}.glb`;
+      return { file, gltf: await loadGltf(file) };
+    }));
+    if (disposed || modelRoot !== target || revision !== wardrobeRevision) return;
+
     const previous: THREE.Object3D[] = [];
     target.traverse((object) => {
       if (object.userData.characterCreatorWearable) previous.push(object);
@@ -227,13 +234,6 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
       });
       object.parent?.remove(object);
     }
-
-    const files = [...clothingFor(next), hairFor(next.hairStyle)];
-    const loaded = await Promise.all(files.map(async (id) => {
-      const file = id.endsWith('.glb') ? id : `clothing_${id}.glb`;
-      return { file, gltf: await loadGltf(file) };
-    }));
-    if (disposed || modelRoot !== target || revision !== wardrobeRevision) return;
 
     for (const { file, gltf } of loaded) {
       const wearable = cloneSkeleton(gltf.scene) as THREE.Group;
