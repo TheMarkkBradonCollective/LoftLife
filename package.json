@@ -20,6 +20,8 @@
     "assets:previews": "node scripts/render-catalog-previews.mjs",
     "assets:check": "node scripts/render-catalog-previews.mjs --validate-only && node scripts/render-kenney-previews.mjs --validate-only",
     "assets:import": "node scripts/import-kenney-library.mjs",
+    "assets:charactercreator": "node scripts/import-charactercreator-assets.mjs",
+    "assets:charactercreator:dry": "node scripts/import-charactercreator-assets.mjs --dry-run",
     "assets:kenney": "node scripts/render-kenney-previews.mjs",
     "assets:gallery": "node scripts/build-catalog-gallery.mjs",
     "check:character": "node scripts/check-character.mjs",
