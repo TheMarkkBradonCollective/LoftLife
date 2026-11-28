@@ -2,20 +2,13 @@
 /**
  * Upload the complete LoftLife asset set to Cloudflare R2.
  *
- * Two asset families share one versioned layout so a single CDN base works:
- *
- *   catalog/v1/catalog-previews/<file>.png        (all previews, procedural + Kenney)
- *   catalog/v1/models/kenney/<kit>/<file>.glb     (imported models + textures)
- *   catalog/v1/manifest/preview-manifest.json
- *   catalog/v1/manifest/kenney-preview-manifest.json
+ * Versioned layout:
+ *   catalog/v1/catalog-previews/<file>.png
+ *   catalog/v1/models/kenney/<kit>/<file>.glb
+ *   catalog/v1/models/charactercreator/<file>.glb
+ *   catalog/v1/manifest/<manifest>.json
  *
  * Set VITE_ASSET_BASE_URL to the public R2/CDN root ending in /catalog/v1.
- *
- * Usage:
- *   CATALOG_R2_BUCKET=loftlife-assets node scripts/upload-catalog-r2.mjs [--dry-run] [--limit=N]
- *
- * Auth is Wrangler's: CLOUDFLARE_API_TOKEN with R2 write access (and
- * CLOUDFLARE_ACCOUNT_ID when the token can see several accounts).
  */
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
@@ -33,8 +26,8 @@ const bucket = process.env.CATALOG_R2_BUCKET;
 
 if (!bucket) {
   console.error(
-    'BLOCKED: CATALOG_R2_BUCKET is not set (for example loftlife-assets).\n' +
-      'Also required: CLOUDFLARE_API_TOKEN with R2 write access, and CLOUDFLARE_ACCOUNT_ID if the token spans accounts.\n' +
+    'BLOCKED: CATALOG_R2_BUCKET is not set (for example loftlife-assets).\\n' +
+      'Also required: CLOUDFLARE_API_TOKEN with R2 write access, and CLOUDFLARE_ACCOUNT_ID if the token spans accounts.\\n' +
       'Nothing was uploaded.'
   );
   process.exit(2);
@@ -44,6 +37,7 @@ const contentType = (file) => {
   if (file.endsWith('.glb')) return 'model/gltf-binary';
   if (file.endsWith('.png')) return 'image/png';
   if (file.endsWith('.json')) return 'application/json';
+  if (file.endsWith('.md')) return 'text/markdown; charset=utf-8';
   if (file.endsWith('.txt')) return 'text/plain; charset=utf-8';
   return 'application/octet-stream';
 };
@@ -64,10 +58,9 @@ const addTree = (directory, keyPrefix) => {
   }
 };
 
-// Every preview file (legacy variants and imported models) plus the manifests.
 addTree(path.join(root, 'public', 'catalog-previews'), 'catalog/v1/catalog-previews');
-// Kenney GLBs, their Textures/ siblings and per-kit license files.
 addTree(path.join(root, 'public', 'models', 'kenney'), 'catalog/v1/models/kenney');
+addTree(path.join(root, 'public', 'models', 'charactercreator'), 'catalog/v1/models/charactercreator');
 for (const manifest of ['preview-manifest.json', 'kenney-preview-manifest.json']) {
   const local = path.join(root, 'shared', 'catalog', manifest);
   if (fs.existsSync(local)) {
@@ -82,7 +75,7 @@ console.log(
     `(${models} GLB models) to r2://${bucket}/catalog/v1/`
 );
 if (dryRun) {
-  for (const file of todo.slice(0, 8)) console.log(`  ${file.key}  (${path.basename(file.local)})`);
+  for (const file of todo.slice(0, 12)) console.log(`  ${file.key}  (${path.basename(file.local)})`);
   console.log('Re-run without --dry-run (and with credentials) to upload.');
   process.exit(0);
 }
@@ -102,17 +95,10 @@ for (const file of todo) {
     await run(
       'npx',
       [
-        'wrangler',
-        'r2',
-        'object',
-        'put',
-        `${bucket}/${file.key}`,
-        '--file',
-        file.local,
-        '--content-type',
-        file.type,
-        '--cache-control',
-        'public, max-age=31536000, immutable',
+        'wrangler', 'r2', 'object', 'put', `${bucket}/${file.key}`,
+        '--file', file.local,
+        '--content-type', file.type,
+        '--cache-control', 'public, max-age=31536000, immutable',
       ],
       { cwd: root, maxBuffer: 8 * 1024 * 1024 }
     );
