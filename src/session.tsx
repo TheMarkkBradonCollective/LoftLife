@@ -419,6 +419,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const loadSession = useCallback(async () => {
     const payload = await api.me();
+    setMustChangePassword(Boolean(payload.mustChangePassword));
     setUser(payload.user);
     setProfile(payload.profile);
     setWallet(payload.wallet);
