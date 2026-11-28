@@ -29,6 +29,18 @@ The game Worker named `loftlife` is separate and must not be overwritten.
 
 Cloudflare Containers runs the Gateway's existing Docker image. The separate Worker in `discord-bot/cloudflare/worker.ts` routes authenticated control requests to one Durable Object-backed container.
 
+### One-click deployment workflow
+
+After PR #40 is merged into the repository's default branch:
+
+1. In GitHub, open **Settings → Secrets and variables → Actions**.
+2. Add a repository secret named `CLOUDFLARE_API_TOKEN`. It needs Cloudflare Workers product-level **Admin** access on the LoftLife account because the workflow creates the new Gateway Worker and deploys it.
+3. Open **Actions → Deploy LoftLife Discord Gateway → Run workflow**, select `deploy`, and run it.
+4. The workflow deploys the Gateway, generates a random `CONTROL_SECRET`, and securely writes the matching control secret and Gateway URL to the existing `loftlife-discord` Worker.
+5. In Cloudflare, open `loftlife-discord-gateway` → **Settings → Variables and Secrets** and add `DISCORD_BOT_TOKEN` as a secret using the current bot token. Do not put the token in GitHub, chat, or source files.
+
+The workflow intentionally does not store or request the Discord bot token. Add it directly in Cloudflare after the workflow succeeds.
+
 ### Configure secrets
 
 The deployment workflow creates and shares a fresh `CONTROL_SECRET` between the two Workers. After it finishes, add the existing Discord bot token to the new Gateway Worker as a Cloudflare secret named `DISCORD_BOT_TOKEN`. Never commit or paste it into chat.
