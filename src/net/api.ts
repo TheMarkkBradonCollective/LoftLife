@@ -506,6 +506,7 @@ export interface AuthResult {
   user: SessionUser;
   token: string;
   expiresAt: number;
+  mustChangePassword?: boolean;
 }
 
 export const api = {
@@ -526,6 +527,8 @@ export const api = {
 
   login: (body: { identifier: string; password: string }) =>
     request<AuthResult>('/auth/login', { method: 'POST', body, auth: false }),
+
+  changePassword: (password: string) => request<{ ok: boolean; token: string; expiresAt: number; mustChangePassword: false }>('/auth/change-password', { method: 'POST', body: { password } }),
 
   logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 
