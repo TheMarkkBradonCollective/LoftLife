@@ -626,7 +626,7 @@ async function currentAccount(request: Request, env: CloudflareEnv) {
   const sql = await database(env);
   if (!sql) return null;
   const rows = await sql.query(
-    'SELECT a.id,a.handle,a.email,a.password_hash,a.role,a.created_at,a.display_name FROM ll_sessions s JOIN ll_accounts a ON a.id=s.account_id WHERE s.jti_hash=$1 AND s.account_id=$2 AND s.expires_at>$3 AND COALESCE(a.suspended_until,0)<=$4 LIMIT 1',
+    'SELECT a.id,a.handle,a.email,a.password_hash,a.role,a.created_at,a.display_name,a.must_change_password FROM ll_sessions s JOIN ll_accounts a ON a.id=s.account_id WHERE s.jti_hash=$1 AND s.account_id=$2 AND s.expires_at>$3 AND COALESCE(a.suspended_until,0)<=$4 LIMIT 1',
     [await sha256Hex(payload.sid), payload.sub, Date.now(), Date.now()]
   ) as AccountRow[];
   return rows[0] ? { sql, account: rows[0] } : null;
