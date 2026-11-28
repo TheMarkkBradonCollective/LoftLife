@@ -543,9 +543,10 @@ async function handleChangePassword(request: Request, env: CloudflareEnv): Promi
   const body = await readJson(request);
   const password = validatePassword(body.password);
   if (!password || password === '1234567890') return fail('Choose a new password of at least 10 characters that is not the temporary password.', 400, 'invalid_password');
-  await auth.sql.query('UPDATE ll_accounts SET password_hash=$2,must_change_password=FALSE WHERE id=$1',[auth.account.id,await hashPassword(password)]);
+  const passwordHash = await hashPassword(password);
+  await auth.sql.query('UPDATE ll_accounts SET password_hash=$2,must_change_password=FALSE WHERE id=$1',[auth.account.id,passwordHash]);
   await auth.sql.query('DELETE FROM ll_sessions WHERE account_id=$1',[auth.account.id]);
-  const session = await issueSession(auth.sql,{...auth.account,password_hash:await hashPassword(password),must_change_password:false},secretFor(env)!);
+  const session = await issueSession(auth.sql,{...auth.account,password_hash:passwordHash,must_change_password:false},secretFor(env)!);
   return json({ok:true,token:session.token,expiresAt:session.expiresAt,mustChangePassword:false},200,{'set-cookie':sessionCookie(session.token,SESSION_TTL_SECONDS)});
 }
 
