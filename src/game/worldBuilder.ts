@@ -11,8 +11,6 @@ import {
   uzToWorldX,
   worldToU,
 } from './cityLayout';
-import { createCityTraffic } from './cityTraffic';
-import { createCityCrowd, type CityCrowdHandles } from './cityCrowd';
 import { buildCityVenues } from './venueBuilder';
 import { CITY_VENUES, type VenueInteractionPoint } from './venues';
 import {
@@ -76,8 +74,6 @@ export interface MainWorldHandles {
   djDeckGroup: THREE.Group;
   seats: WorldSeatTarget[];
   npcs: WorldNpc[];
-  /** Sidewalk population with near-rig / distant-prop LOD. */
-  cityCrowd: CityCrowdHandles;
   /** Counters, racks and desks in the public destinations. */
   venueInteractions: VenueInteractionPoint[];
   /** Building shell boxes for every public destination (u/z space). */
@@ -2759,139 +2755,15 @@ export function buildMainWorld(
   obstacles.push({type:'box',x:salonPos.x,z:salonPos.z-0.45,hw:2.65,hd:1.75});
 
   // 11. Animated City Visitors / NPCs
-  const npcSpecs: {
-    id: string;
-    name: string;
-    greeting: string;
-    config: AvatarConfig;
-    waypoints: { x: number; z: number }[];
-    idleEmote: EmoteType;
-  }[] = [
-    {
-      id: 'npc_aria',
-      name: 'Aria',
-      greeting: 'Welcome to Main City! Watch out for traffic on 15th & M St, and check out the elevated Metro on 16th St!',
-      config: {
-        name: 'Aria',
-        skinTone: '#e8b896',
-        hairStyle: 'ponytail',
-        hairColor: '#b55436',
-        topStyle: 'blazer',
-        topColor: '#c86b51',
-        bottomColor: '#364152',
-        shoeColor: '#eae4d8',
-        accessory: 'glasses',
-      },
-      waypoints: [
-        { x: fX - 2.4, z: fZ - 1.2 },
-        { x: fX + 2.4, z: fZ - 1.2 },
-        { x: fX + 2.4, z: fZ + 2.6 },
-        { x: fX - 2.4, z: fZ + 2.6 },
-      ],
-      idleEmote: 'wave',
-    },
-    {
-      id: 'npc_sora',
-      name: 'Sora',
-      greeting: 'Holding Shift lets you sprint down the multi-lane diagonal avenues! Explore all the way from A St to Z St!',
-      config: {
-        name: 'Sora',
-        skinTone: '#f6d5be',
-        hairStyle: 'buns',
-        hairColor: '#7482b8',
-        topStyle: 'hoodie',
-        topColor: '#785874',
-        bottomColor: '#26282e',
-        shoeColor: '#d697a0',
-        accessory: 'headphones',
-      },
-      waypoints: [
-        { x: djX - 0.5, z: djZ + 1.2 },
-        { x: djX + 0.6, z: djZ + 1.6 },
-      ],
-      idleEmote: 'dance',
-    },
-    {
-      id: 'npc_leo',
-      name: 'Leo',
-      greeting: 'The LoftLine buses cruise right along 15th St and M St while the Metro glides overhead on 16th St!',
-      config: {
-        name: 'Leo',
-        skinTone: '#ae7248',
-        hairStyle: 'afro',
-        hairColor: '#2d2320',
-        topStyle: 'turtleneck',
-        topColor: '#eae4d8',
-        bottomColor: '#c7b08e',
-        shoeColor: '#32363f',
-        accessory: 'none',
-      },
-      waypoints: [
-        { x: uzToWorldX(uLines[12] + uHalfWidths[12] + 1.2, zLines[14] + zHalfWidths[14] + 1.2), z: zLines[14] + zHalfWidths[14] + 1.2 },
-        { x: uzToWorldX(uLines[13] - uHalfWidths[13] - 1.2, zLines[14] + zHalfWidths[14] + 1.2), z: zLines[14] + zHalfWidths[14] + 1.2 },
-        { x: uzToWorldX(uLines[13] - uHalfWidths[13] - 1.2, zLines[15] - zHalfWidths[15] - 1.2), z: zLines[15] - zHalfWidths[15] - 1.2 },
-      ],
-      idleEmote: 'idle',
-    },
-    {
-      id: 'npc_kai',
-      name: 'Kai',
-      greeting: 'Press V for third-person Play View — the camera follows smoothly behind you and dodges skyscrapers!',
-      config: {
-        name: 'Kai',
-        skinTone: '#d3976d',
-        hairStyle: 'spiky',
-        hairColor: '#719178',
-        topStyle: 'tee',
-        topColor: '#456799',
-        bottomColor: '#26282e',
-        shoeColor: '#eae4d8',
-        accessory: 'beanie',
-      },
-      waypoints: [
-        { x: uzToWorldX(uLines[11] + uHalfWidths[11] + 1.4, zLines[14] + zHalfWidths[14] + 1.4), z: zLines[14] + zHalfWidths[14] + 1.4 },
-        { x: uzToWorldX(uLines[11] + uHalfWidths[11] + 1.4, zLines[15] - zHalfWidths[15] - 1.4), z: zLines[15] - zHalfWidths[15] - 1.4 },
-      ],
-      idleEmote: 'cheer',
-    },
-  ];
-
-  const npcs: WorldNpc[] = npcSpecs.map((spec) => {
-    const rig = createAvatarRig(spec.config);
-    const start = spec.waypoints[0];
-    rig.root.position.set(start.x, 0.14, start.z);
-    rig.root.userData.npcId = spec.id;
-    worldGroup.add(rig.root);
-    return {
-      id: spec.id,
-      name: spec.name,
-      greeting: spec.greeting,
-      rig,
-      x: start.x,
-      z: start.z,
-      yaw: 0,
-      waypoints: spec.waypoints,
-      wpIndex: 1 % spec.waypoints.length,
-      waitTimer: 1.0 + Math.random() * 1.5,
-      idleEmote: spec.idleEmote,
-      greetTimer: 0,
-    };
-  });
+  // LoftLife has no simulated pedestrians or NPCs; only connected players appear in-world.
+  const npcs: WorldNpc[] = [];
 
   // 12. Real-time Cars, Buses & Elevated Metro Trains
-  const traffic = createCityTraffic(maxAnisotropy);
   // 10d. Public destinations: library, Med Deck, community centre, café, market,
   // clothing store and cinema, each with a walkable interior.
   const cityVenues = buildCityVenues(maxAnisotropy);
   worldGroup.add(cityVenues.group);
 
-  // 10e. Sidewalk population: animated rigs near the player, static imported
-  // Kenney pedestrians in the middle distance, nothing far away.
-  const cityCrowd = createCityCrowd({ seats: cityVenues.seats, quality: crowdQuality });
-  worldGroup.add(cityCrowd.group);
-  if (import.meta.env.DEV) {
-    (window as unknown as { __loftlifeCrowd?: CityCrowdHandles }).__loftlifeCrowd = cityCrowd;
-  }
   for (const s of cityVenues.seats) {
     const anchor = new THREE.Group();
     anchor.position.set(s.x, 0.14, s.z);
@@ -2913,10 +2785,6 @@ export function buildMainWorld(
   // cutaway, and treating the whole block as an occluder snapped the chase
   // camera into the facade whenever a player stood at a door.
 
-  worldGroup.add(traffic.trafficGroup);
-  if (import.meta.env.DEV) {
-    (window as unknown as { __loftlifeTraffic?: typeof traffic }).__loftlifeTraffic = traffic;
-  }
 
   let partyMode = true;
   function togglePartyMode() {
@@ -2982,16 +2850,6 @@ export function buildMainWorld(
       fMat.emissiveIntensity = 0.18 + nightBoost * 0.85;
     }
 
-    // 4. Cars, Buses, Metro Trains & Traffic Signal Phase
-    const phase = traffic.updateTraffic(delta, playerX, playerZ, mood);
-    cityCrowd.update(elapsed, delta, playerX, playerZ);
-    ewRedMat.emissiveIntensity = !phase.ewGreen && !phase.ewYellow ? 1.8 : 0.08;
-    ewYellowMat.emissiveIntensity = phase.ewYellow ? 1.8 : 0.08;
-    ewGreenMat.emissiveIntensity = phase.ewGreen ? 1.8 : 0.08;
-    nsRedMat.emissiveIntensity = !phase.nsGreen && !phase.nsYellow ? 1.8 : 0.08;
-    nsYellowMat.emissiveIntensity = phase.nsYellow ? 1.8 : 0.08;
-    nsGreenMat.emissiveIntensity = phase.nsGreen ? 1.8 : 0.08;
-
     // 5. Auto-swing Hotel Main Double Doors when UNLOCKED
     const doorDist = Math.hypot(playerX - loftDoorPos.x, playerZ - loftDoorPos.z);
     const targetDoorAngle = mainDoorUnlocked && doorDist < 2.8 ? 1.25 : 0;
@@ -3007,46 +2865,6 @@ export function buildMainWorld(
       dk
     );
 
-    // 6. NPC strolling
-    for (const npc of npcs) {
-      let isMoving = false;
-      let emote: EmoteType = npc.idleEmote;
-
-      if (npc.greetTimer > 0) {
-        npc.greetTimer -= delta;
-        const targetYaw = Math.atan2(playerX - npc.x, playerZ - npc.z);
-        let diff = ((targetYaw - npc.yaw + Math.PI) % (Math.PI * 2)) - Math.PI;
-        if (diff < -Math.PI) diff += Math.PI * 2;
-        npc.yaw += diff * (1 - Math.exp(-10 * delta));
-        emote = 'wave';
-      } else if (npc.waitTimer > 0) {
-        npc.waitTimer -= delta;
-      } else {
-        const target = npc.waypoints[npc.wpIndex];
-        const dx = target.x - npc.x;
-        const dz = target.z - npc.z;
-        const dist = Math.hypot(dx, dz);
-        const speed = 1.55;
-
-        if (dist < 0.16) {
-          npc.wpIndex = (npc.wpIndex + 1) % npc.waypoints.length;
-          npc.waitTimer = 1.8 + Math.random() * 2.2;
-        } else {
-          npc.x += (dx / dist) * speed * delta;
-          npc.z += (dz / dist) * speed * delta;
-          const targetYaw = Math.atan2(dx, dz);
-          let diff = ((targetYaw - npc.yaw + Math.PI) % (Math.PI * 2)) - Math.PI;
-          if (diff < -Math.PI) diff += Math.PI * 2;
-          npc.yaw += diff * (1 - Math.exp(-8 * delta));
-          isMoving = true;
-          emote = 'walk';
-        }
-      }
-
-      npc.rig.root.position.set(npc.x, getCityGroundY(npc.x, npc.z), npc.z);
-      npc.rig.root.rotation.y = npc.yaw;
-      npc.rig.updateAnimation(emote, isMoving, elapsed + npc.id.length, delta, 0);
-    }
   }
 
   const plazaAtm = {
@@ -3071,7 +2889,6 @@ export function buildMainWorld(
     djDeckGroup,
     seats,
     npcs,
-    cityCrowd,
     venueInteractions: [...cityVenues.interactions, plazaAtm],
     venueFootprints: cityVenues.occluders,
     obstacles,
