@@ -1,10 +1,11 @@
+import { DurableObject } from "cloudflare:workers";
+
 const PORT = 8788;
 const INACTIVITY_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 
 interface ContainerPortFetcher {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 }
-
 interface GatewayContainer {
   readonly running: boolean;
   readonly images: { readonly base: string };
@@ -18,13 +19,11 @@ interface GatewayContainer {
   getTcpPort(port: number): ContainerPortFetcher;
   monitor(): Promise<void>;
 }
-
 interface DurableObjectState {
   container?: GatewayContainer;
   blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
   waitUntil(promise: Promise<unknown>): void;
 }
-
 interface DurableObjectId {}
 interface DurableObjectStub {
   fetch(request: Request): Promise<Response>;
@@ -33,7 +32,6 @@ interface DurableObjectNamespace<T> {
   idFromName(name: string): DurableObjectId;
   get(id: DurableObjectId): DurableObjectStub;
 }
-
 interface Env {
   DISCORD_GATEWAY: DurableObjectNamespace<DiscordGatewayContainer>;
   DISCORD_BOT_TOKEN: string;
@@ -41,11 +39,16 @@ interface Env {
   GUILD_ID: string;
 }
 
-export class DiscordGatewayContainer {
-  constructor(
-    readonly ctx: DurableObjectState,
-    readonly env: Env
-  ) {
+export class DiscordGatewayContainer extends DurableObject<Env> {
+  private starting?: Promise<void>;
+  private monitoring?: Promise<void>;
+  private readonly state: DurableObjectState;
+  private readonly bindings: Env;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    this.state = ctx;
+    this.bindings = env;
     if (ctx.container?.running) {
       void ctx.blockConcurrencyWhile(() =>
         ctx.container!.setInactivityTimeout(INACTIVITY_TIMEOUT_MS)
@@ -64,14 +67,11 @@ export class DiscordGatewayContainer {
     url.host = "container";
     const forwarded = new Request(url, request);
     forwarded.headers.delete("host");
-    return this.ctx.container!.getTcpPort(PORT).fetch(forwarded);
+    return this.state.container!.getTcpPort(PORT).fetch(forwarded);
   }
 
-  private starting?: Promise<void>;
-  private monitoring?: Promise<void>;
-
   private async startAndWaitForPort(): Promise<void> {
-    const container = this.ctx.container;
+    const container = this.state.container;
     if (!container) throw new Error("No container is configured for this Durable Object");
     if (!container.running) {
       container.start({
@@ -79,9 +79,9 @@ export class DiscordGatewayContainer {
         instance: "basic",
         enableInternet: true,
         env: {
-          DISCORD_BOT_TOKEN: this.env.DISCORD_BOT_TOKEN,
-          CONTROL_SECRET: this.env.CONTROL_SECRET,
-          GUILD_ID: this.env.GUILD_ID,
+          DISCORD_BOT_TOKEN: this.bindings.DISCORD_BOT_TOKEN,
+          CONTROL_SECRET: this.bindings.CONTROL_SECRET,
+          GUILD_ID: this.bindings.GUILD_ID,
           PORT: String(PORT)
         }
       });
@@ -106,13 +106,13 @@ export class DiscordGatewayContainer {
 
   private observeExit(): void {
     if (this.monitoring) return;
-    this.monitoring = this.ctx.container!.monitor()
+    this.monitoring = this.state.container!.monitor()
       .then(() => console.log("Discord Gateway container exited"))
       .catch((error: unknown) => console.error("Discord Gateway container failed:", error))
       .finally(() => {
         this.monitoring = undefined;
       });
-    this.ctx.waitUntil(this.monitoring);
+    this.state.waitUntil(this.monitoring);
   }
 }
 
