@@ -30,6 +30,7 @@ const players = new Map();
 const queues = new Map();
 const activeChannels = new Map();
 const spam = new Map();
+let guildReady = false;
 
 async function log(guild, message) {
   const channel = guild.channels.cache.find(c => c.name === LOG_CHANNEL_NAME && c.isTextBased());
@@ -88,9 +89,14 @@ function validateAudioUrl(value) {
 }
 
 client.once('ready', async () => {
-  console.log('LoftLife Gateway online as ' + client.user.tag);
-  const guild = await guildFor();
-  console.log('Connected to ' + guild.name + ' (' + guild.id + ')');
+  try {
+    console.log('LoftLife Gateway online as ' + client.user.tag);
+    const guild = await guildFor();
+    guildReady = true;
+    console.log('Connected to ' + guild.name + ' (' + guild.id + ')');
+  } catch (error) {
+    console.error('Discord guild initialization failed:', error.message);
+  }
 });
 client.on('guildMemberAdd', async member => {
   if (member.guild.id !== GUILD_ID) return;
@@ -159,11 +165,14 @@ client.on('messageCreate', async message => {
 
 const app = express();
 app.use(express.json({ limit: '16kb' }));
-app.get('/health', (_req, res) => res.json({
-  ok: client.isReady(),
-  bot: client.user?.tag || null,
-  guildId: GUILD_ID
-}));
+app.get('/health', (_req, res) => {
+  const ready = client.isReady() && guildReady;
+  res.status(ready ? 200 : 503).json({
+    ok: ready,
+    bot: client.user?.tag || null,
+    guildId: GUILD_ID
+  });
+});
 app.use('/control', requireControl);
 
 app.post('/control/music/:action', async (req, res) => {
