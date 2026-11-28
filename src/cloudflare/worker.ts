@@ -5,7 +5,7 @@ import { handleSocialRoute } from './social';
 import { handleEconomyRoute } from './economy';
 import { cityTravelDestinations, handleTransitRoute } from './transit';
 import { handlePlatformRoute } from './platform';
-import { handleAdminRoute } from './admin';
+import { founderBootstrap, handleAdminRoute } from './admin';
 export { LoftLifeRealtime } from './realtime';
 import {
   hashPassword,
@@ -515,6 +515,9 @@ async function handleLogin(request: Request, env: CloudflareEnv): Promise<Respon
   const sql = await database(env);
   if (!sql) return fail('DATABASE_URL is not configured.', 503, 'unconfigured');
 
+  // Founder accounts must exist before their very first login. Bootstrap from the
+  // configured email secret here, not only from the authenticated admin console.
+  await founderBootstrap(sql, env.LOFTLIFE_FOUNDER_EMAILS);
   const body = await readJson(request);
   const identifier = typeof body.identifier === 'string' ? body.identifier.trim().toLowerCase() : '';
   const password = typeof body.password === 'string' ? body.password : '';
