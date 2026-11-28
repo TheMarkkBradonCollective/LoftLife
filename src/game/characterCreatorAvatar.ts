@@ -78,9 +78,9 @@ function applyBodyConfig(root: THREE.Object3D, config: AvatarConfig) {
     bipolar(mesh, 'weight', weight);
     bipolar(mesh, 'muscle', muscle);
     bipolar(mesh, 'proportions', proportions);
-    bipolar(mesh, 'jaw_width', config.faceShape === 'square' ? 0.5 : config.faceShape === 'heart' ? -0.45 : 0);
-    bipolar(mesh, 'eye_size', config.eyeShape === 'round' ? 0.35 : config.eyeShape === 'hooded' ? -0.2 : 0);
-    bipolar(mesh, 'eye_tilt', config.eyeShape === 'upturned' ? 0.45 : 0);
+    bipolar(mesh, 'face_jaw_width', config.faceShape === 'square' ? 0.5 : config.faceShape === 'heart' ? -0.45 : 0);
+    bipolar(mesh, 'face_eye_size', config.eyeShape === 'round' ? 0.35 : config.eyeShape === 'hooded' ? -0.2 : 0);
+    bipolar(mesh, 'face_eye_tilt', config.eyeShape === 'upturned' ? 0.45 : 0);
   });
 }
 
