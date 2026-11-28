@@ -51,7 +51,7 @@ npx wrangler deploy
 
 Wrangler builds and pushes the Docker image with the Worker. The first container may take several minutes to provision. Check its health at the deployed Worker URL plus `/health`.
 
-The Worker uses a six-hour inactivity timeout and a five-minute scheduled health request to keep the Gateway process available. Cloudflare can still stop active containers for host maintenance or other platform events; the bot must reconnect when the container restarts. Cloudflare does not guarantee uninterrupted container uptime.
+The Worker uses a six-hour inactivity timeout and a five-minute scheduled health request to keep the Gateway process available. The container starts as `basic` (1 GiB memory) to give the Node.js Discord client and audio processing more headroom. The Durable Object scheduling policy does not support `max_instances`; concurrency is controlled by the single named Durable Object instance in this design. Cloudflare can still stop active containers for host maintenance or other platform events; the bot must reconnect when the container restarts. Cloudflare does not guarantee uninterrupted container uptime.
 
 ### Connect the existing interaction Worker
 
