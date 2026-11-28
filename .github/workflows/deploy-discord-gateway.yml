@@ -1,0 +1,55 @@
+name: Deploy LoftLife Discord Gateway
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type deploy to publish the Discord Gateway Worker"
+        required: true
+        type: choice
+        options:
+          - deploy
+
+permissions:
+  contents: read
+
+concurrency:
+  group: loftlife-discord-gateway-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: inputs.confirm == 'deploy'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the approved feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/loftlife-discord-all-in-one
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Deploy the Gateway Worker and container image
+        working-directory: discord-bot
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: "92d9592953c4d46474ae07993913f710"
+        run: npx --yes wrangler@4 deploy --config wrangler.jsonc
+
+      - name: Create and connect a private control secret
+        working-directory: discord-bot
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: "92d9592953c4d46474ae07993913f710"
+        shell: bash
+        run: |
+          set -euo pipefail
+          CONTROL_SECRET="$(openssl rand -hex 32)"
+          echo "::add-mask::$CONTROL_SECRET"
+          printf '%s' "$CONTROL_SECRET" | npx --yes wrangler@4 secret put CONTROL_SECRET --name loftlife-discord-gateway --config wrangler.jsonc
+          printf '%s' "$CONTROL_SECRET" | npx --yes wrangler@4 secret put BOT_CONTROL_SECRET --name loftlife-discord
+          printf '%s' "https://loftlife-discord-gateway.themarkkbrandoncollective.workers.dev" | npx --yes wrangler@4 secret put BOT_CONTROL_URL --name loftlife-discord
+          echo "Gateway deployed and existing interaction Worker connected."
