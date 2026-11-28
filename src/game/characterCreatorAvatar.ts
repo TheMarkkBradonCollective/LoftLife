@@ -216,7 +216,17 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
     target.traverse((object) => {
       if (object.userData.characterCreatorWearable) previous.push(object);
     });
-    for (const object of previous) object.parent?.remove(object);
+    for (const object of previous) {
+      object.traverse((part) => {
+        const mesh = part as THREE.Mesh & { isSkinnedMesh?: boolean };
+        if (!mesh.isMesh) return;
+        // Only skinned geometry was cloned for safe bone-index remapping.
+        if (mesh.isSkinnedMesh) mesh.geometry.dispose();
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const material of materials) material.dispose();
+      });
+      object.parent?.remove(object);
+    }
 
     const files = [...clothingFor(next), hairFor(next.hairStyle)];
     const loaded = await Promise.all(files.map(async (id) => {
