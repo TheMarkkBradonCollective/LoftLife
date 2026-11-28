@@ -17,7 +17,7 @@ The game Worker named `loftlife` is separate and must not be overwritten.
 - Join-to-Create: joining `➕ Create a Room` in `voice-lounges` creates a temporary voice room and moves the member into it.
 - Empty temporary rooms are deleted.
 - Basic rapid-message anti-spam deletes the triggering message, applies a short timeout and logs the action.
-- Music playback joins the voice channel of the member who runs `/music play`; users no longer have to select a channel.
+- Music playback joins the voice channel of the member who runs `/music play`; users no longer have to select a channel. The image includes `opusscript` for Opus encoding and `ffmpeg-static` for audio transcoding.
 - Music controls: `/music play`, `pause`, `resume`, `skip`, and `stop`. Tracks queue while one is playing.
 - `/voice rename` lets the temporary room owner rename their room.
 
