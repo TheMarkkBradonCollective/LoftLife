@@ -11,7 +11,8 @@
       "scheduling_policy": "durable_object",
       "images": {
         "base": {
-          "dockerfile": "./Dockerfile"
+          "dockerfile": "./Dockerfile",
+          "build_context": "."
         }
       },
     }
