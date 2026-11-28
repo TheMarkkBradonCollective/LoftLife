@@ -132,6 +132,8 @@ interface SessionValue {
   suite: SuiteState | null;
   authError: string | null;
   authBusy: boolean;
+  mustChangePassword: boolean;
+  changePassword: (password: string) => Promise<void>;
   /** True right after a brand-new account was created, so the local character can be adopted. */
   justRegistered: boolean;
   /** 'local' while offline, then saving/synced/error for the account mirror. */
@@ -276,6 +278,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [suite, setSuite] = useState<SuiteState | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [justRegistered, setJustRegistered] = useState(false);
   const [syncState, setSyncState] = useState<SyncState>('local');
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -795,6 +798,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const result = await api.login({ identifier, password });
       writeGuestSession(null, null); setGuestToken(null); setGuestName(null);
       setToken(result.token);
+      setMustChangePassword(Boolean(result.mustChangePassword));
       await loadSession();
       setStatus('online');
     } catch (error) {
@@ -802,6 +806,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     } finally {
       setAuthBusy(false);
     }
+  }, [loadSession]);
+
+  const changePassword = useCallback(async (password: string) => {
+    setAuthBusy(true); setAuthError(null);
+    try {
+      const result = await api.changePassword(password);
+      setToken(result.token);
+      setMustChangePassword(false);
+      await loadSession();
+    } catch (error) { setAuthError(messageOf(error)); throw error; }
+    finally { setAuthBusy(false); }
   }, [loadSession]);
 
   const register = useCallback<SessionValue['register']>(
@@ -1227,6 +1242,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       suite,
       authError,
       authBusy,
+      mustChangePassword,
+      changePassword,
       justRegistered,
       syncState,
       syncError,
@@ -1313,6 +1330,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       suite,
       authError,
       authBusy,
+      mustChangePassword,
+      changePassword,
       justRegistered,
       syncState,
       syncError,
