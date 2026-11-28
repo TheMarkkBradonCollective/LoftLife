@@ -40,7 +40,7 @@ export class DiscordGatewayContainer extends DurableObject<Env> {
     if (!container.running) {
       container.start({
         image: container.images.base,
-        instance: "lite",
+        instance: "basic",
         enableInternet: true,
         env: {
           DISCORD_BOT_TOKEN: this.env.DISCORD_BOT_TOKEN,
