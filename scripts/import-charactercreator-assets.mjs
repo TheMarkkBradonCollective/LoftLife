@@ -115,7 +115,10 @@ const manifest = {
   licenseEvidence: ['LICENSE-NOTES.md', 'asset_licenses.json'],
   compatibility: {
     format: 'glTF 2.0 binary (.glb)',
-    characterRig: 'MakeHuman game_engine rig, 53 bones',\n    animatedBody: 'base_body_anim.glb',\n    skeletonSidecar: 'base_body.joints.json',\n    colliderSidecar: 'body_colliders.json',
+    characterRig: 'MakeHuman game_engine rig, 53 bones',
+    animatedBody: 'base_body_anim.glb',
+    skeletonSidecar: 'base_body.joints.json',
+    colliderSidecar: 'body_colliders.json',
     morphTargets: 92,
     note: 'Clothing and hair are skinned to the included base_body.glb rig. LoftLife runtime integration requires a compatible avatar rig adapter.',
   },
