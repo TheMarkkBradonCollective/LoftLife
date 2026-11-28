@@ -6,7 +6,7 @@ LoftLife imports exported **data assets only** from [kblood/CharacterCreator](ht
 
 The import includes:
 
-- The rigged `base_body.glb` character.
+- The rigged `base_body.glb` character and its animated counterpart `base_body_anim.glb`.\n- The MakeHuman joint/skeleton sidecar (`base_body.joints.json`) and body collider metadata (`body_colliders.json`).
 - Visible clothing: T-shirt, long-sleeve shirt, hoodie, jacket, trench coat, dress, jeans, shorts, skirt, shoes and boots.
 - Eight hair meshes.
 - The source clothing/hair catalogs and asset-license evidence.
@@ -39,4 +39,4 @@ The public asset base URL remains the existing `VITE_ASSET_BASE_URL` ending in `
 
 These GLBs are not drop-in clothing for LoftLife's current avatar. CharacterCreator garments and hair are skinned to its included MakeHuman `game_engine` skeleton (53 bones) and share 92 body morph targets. LoftLife's current `src/game/avatar.ts` builds a procedural avatar from Three.js groups and primitive meshes rather than that skeleton.
 
-Therefore this import stage deliberately stores the real assets and their catalog metadata without falsely marking them as wearable in the live closet. The next integration stage must introduce a compatible GLTF avatar rig (or a tested retarget/skin-weight adapter), preserve LoftLife's current animation and avatar configuration contracts, and validate every garment against the configured body presets before enabling purchase/equip. Keep the existing procedural avatar as a fallback until that work passes mobile and desktop checks.
+Therefore this import stage deliberately stores the real assets and their catalog metadata without falsely marking them as wearable in the live closet. The next integration stage must load `base_body_anim.glb` through Three.js GLTFLoader, bind its animation clips to LoftLife's emote/movement states, expose the 92 morph targets through the character studio, and attach the catalog garments/hair to the same compatible skeleton. Preserve LoftLife's current avatar configuration contracts and validate each garment against body presets before enabling purchase/equip. Keep the existing procedural avatar as a fallback until that work passes mobile and desktop checks.
