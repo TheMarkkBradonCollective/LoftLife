@@ -1,0 +1,49 @@
+{
+  "name": "loftlife-discord-gateway",
+  "main": "cloudflare/worker.ts",
+  "compatibility_date": "2026-11-27",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "containers": [
+    {
+      "class_name": "DiscordGatewayContainer",
+      "scheduling_policy": "durable_object",
+      "images": {
+        "base": {
+          "dockerfile": "./Dockerfile",
+          "build_context": "."
+        }
+      },
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DISCORD_GATEWAY",
+        "class_name": "DiscordGatewayContainer"
+      }
+    ]
+  },
+  "exports": {
+    "DiscordGatewayContainer": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
+  },
+  "vars": {
+    "GUILD_ID": "1576000759856635966",
+    "PORT": "8788"
+  },
+  "observability": {
+    "enabled": true,
+    "traces": {
+      "enabled": true
+    }
+  }
+}
