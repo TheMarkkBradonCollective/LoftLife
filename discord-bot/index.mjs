@@ -1,6 +1,6 @@
 import express from 'express';
 import { Client, GatewayIntentBits, ChannelType, PermissionsBitField } from 'discord.js';
-import { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, NoSubscriberBehavior, entersState, VoiceConnectionStatus, getVoiceConnection } from '@discordjs/voice';
+import { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, NoSubscriberBehavior, entersState, VoiceConnectionStatus, getVoiceConnection, StreamType } from '@discordjs/voice';
 import ffmpegPath from 'ffmpeg-static';
 
 if (ffmpegPath) process.env.FFMPEG_PATH = ffmpegPath;
@@ -68,7 +68,7 @@ client.on('voiceStateUpdate', async (before, after) => {
         name: (after.member.displayName + "'s room").slice(0, 95),
         type: ChannelType.GuildVoice,
         parent: category.id,
-        permissionOverwrites: [{ id: after.member.id, allow: [PermissionsBitField.Flags.ManageChannels, PermissionsBitField.Flags.MoveMembers, PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.Speak] }],
+        permissionOverwrites: [\n          { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.Connect] },\n          { id: after.member.id, allow: [PermissionsBitField.Flags.ManageChannels, PermissionsBitField.Flags.MoveMembers, PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.Speak] }\n        ],
         reason: 'LoftLife Join-to-Create'
       });
       roomsByOwner.set(room.id, after.member.id);
@@ -123,7 +123,7 @@ app.post('/control/music/:action', async (req, res) => {
         queues.set(guildId, queue);
         return res.json({ ok: true, queued: queue.length });
       }
-      player.play(createAudioResource(body.url));
+      const audioResponse = await fetch(body.url);\n      if (!audioResponse.ok || !audioResponse.body) return res.status(502).json({ error: 'Audio stream could not be opened' });\n      player.play(createAudioResource(audioResponse.body, { inputType: StreamType.Arbitrary }));
       connection.subscribe(player);
       return res.json({ ok: true, playing: true });
     }
