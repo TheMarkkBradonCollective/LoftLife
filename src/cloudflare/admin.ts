@@ -74,7 +74,7 @@ export async function handleAdminRoute(request: Request, sql: Sql, user: User | 
   if (!user) return fail('Founder accounts are ready. Sign in with the temporary password.', 401, 'unauthorized');
   const actor = await staffFor(sql, user.id);
   if (!actor) {
-    if (!bootstrap.configured) return fail('Founder setup is required. Configure exactly two account handles in LOFTLIFE_FOUNDER_HANDLES.', 503, 'founder_setup_required');
+    if (!bootstrap.configured) return fail('Founder setup is required. Configure exactly two email addresses in LOFTLIFE_FOUNDER_EMAILS.', 503, 'founder_setup_required');
     return fail('LoftLife staff access required.', 403, 'forbidden');
   }
 
