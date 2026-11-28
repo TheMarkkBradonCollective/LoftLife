@@ -15,6 +15,20 @@ The official LoftLife Discord bot is intended to replace separate utility bots w
 - Authenticated control API for music play/pause/resume/skip/stop and temporary-room rename.
 - Music accepts HTTPS direct audio-stream URLs only. It does not download or rip copyrighted tracks from video platforms. Use licensed streams or audio you have permission to play.
 
+## Railway deployment path
+
+The Gateway can be deployed as a persistent Railway service from this feature branch:
+
+1. In Railway, create a project and choose **Deploy from GitHub Repo**.
+2. Select `TheMarkkBradonCollective/LoftLife` and branch `feature/loftlife-discord-all-in-one`.
+3. Set the service Root Directory to `/discord-bot`. Railway will detect the Dockerfile in that directory.
+4. Add the required variables in Railway's Variables tab: `DISCORD_BOT_TOKEN`, `GUILD_ID`, and `CONTROL_SECRET`. Use the existing bot token only in Railway's secret field; never paste it into chat or commit it. Generate a separate long random value for `CONTROL_SECRET`.
+5. Deploy the service and wait for the deployment to become healthy. Check `/health` on its generated Railway domain.
+6. Copy the service's HTTPS domain into the Cloudflare Worker variable `BOT_CONTROL_URL`, and set `BOT_CONTROL_SECRET` to the same value as the Gateway's `CONTROL_SECRET`. Keep both values private.
+7. Test Join-to-Create and music in a private test voice channel before announcing them.
+
+**Voice-network check:** Railway supports persistent services and Dockerfile deployments, but successful Discord voice playback also depends on outbound UDP connectivity to Discord's voice servers. The first deployment must be tested for a complete voice connection; a healthy HTTP `/health` response alone does not prove voice works. If UDP voice setup fails, stop and reassess the host rather than claiming music is operational.
+
 ## Deployment requirements
 Run this service on an always-on Node.js host that supports outbound WebSocket connections. It is not deployed as a Cloudflare Worker. Configure variables from `discord-bot/.env.example`; set `CONTROL_SECRET` to a long random value and keep it private. Enable the Server Members, Guild Voice States and Message Content intents in the Discord Developer Portal. Grant only required permissions: View Channels, Manage Channels, Move Members, Connect, Speak, Send Messages, Manage Messages and Moderate Members.
 
