@@ -5,9 +5,8 @@ import {
   roomRangeLabel,
   roomsOnFloor,
 } from '../../shared/hotel-layout.mjs';
-import { createAvatarRig, type AvatarRig } from './avatar';
 
-import type { ActiveResident, EmoteType } from './types';
+import type { ActiveResident } from './types';
 
 export interface HotelSeat {
   id: string;
@@ -1013,91 +1012,8 @@ export function buildHotelLobby(maxAnisotropy: number): HotelLobbyHandles {
   clock.add(pendulum);
   lobbyGroup.add(clock);
 
-  // ── NPCs ─────────────────────────────────────────────────────────────────
-  const conciergeRig = createAvatarRig({
-    name: 'Morgan',
-    skinTone: '#d3976d',
-    hairStyle: 'sidepart',
-    hairColor: '#2d2320',
-    topStyle: 'blazer',
-    topColor: '#32363f',
-    bottomColor: '#26282e',
-    shoeColor: '#26282e',
-    accessory: 'glasses',
-  });
-  conciergeRig.root.position.set(-14.0, 0, -7.6);
-  conciergeRig.root.rotation.y = Math.PI / 2;
-  conciergeRig.root.userData.hotelNpcId = 'npc_concierge';
-  lobbyGroup.add(conciergeRig.root);
-
-  const agentRig = createAvatarRig({
-    name: 'Priya',
-    skinTone: '#a86a4a',
-    hairStyle: 'buns',
-    hairColor: '#241b18',
-    topStyle: 'blazer',
-    topColor: '#4a2f3c',
-    bottomColor: '#22252b',
-    shoeColor: '#1a1c20',
-    accessory: 'none',
-    jewelry: 'earrings',
-  });
-  agentRig.root.position.set(-13.7, 0, -1.2);
-  agentRig.root.rotation.y = Math.PI / 2;
-  agentRig.root.userData.hotelNpcId = 'npc_front_desk';
-  lobbyGroup.add(agentRig.root);
-
-  const bellhopRig = createAvatarRig({
-    name: 'Theo',
-    skinTone: '#c88f64',
-    hairStyle: 'undercut',
-    hairColor: '#2a211d',
-    topStyle: 'jacket',
-    topColor: '#7a262c',
-    bottomColor: '#23252b',
-    shoeColor: '#15171a',
-    accessory: 'cap',
-  });
-  bellhopRig.root.position.set(-1.2, 0, 9.4);
-  bellhopRig.root.rotation.y = Math.PI;
-  bellhopRig.root.userData.hotelNpcId = 'npc_bellhop';
-  lobbyGroup.add(bellhopRig.root);
-
-  const npcs: HotelNpc[] = [
-    {
-      id: 'npc_concierge',
-      name: 'Morgan (Concierge)',
-      greeting:
-        'Welcome to The LoftLife Grand Hotel. Reception can print a keycard, and the brass elevator bank behind me reaches all seven floors — your suite is on Floor 4.',
-      rig: conciergeRig,
-      x: -14.0,
-      z: -7.6,
-      yaw: Math.PI / 2,
-      greetTimer: 0,
-    },
-    {
-      id: 'npc_front_desk',
-      name: 'Priya (Front Desk)',
-      greeting:
-        'Checking in? Your suite is already allocated. Take the centre elevator to your floor, then follow the hallway to your door.',
-      rig: agentRig,
-      x: -13.7,
-      z: -1.2,
-      yaw: Math.PI / 2,
-      greetTimer: 0,
-    },
-    {
-      id: 'npc_bellhop',
-      name: 'Theo (Bellhop)',
-      greeting:
-        'I can take your bags up. The Loft Café is on the east side, and The Copper Room opens for dinner at six.',
-      rig: bellhopRig,
-      x: -1.2,
-      z: 9.4,
-      yaw: Math.PI,
-      greetTimer: 0,
-    },
-  ];
+  // No simulated hotel staff or NPCs; hotel services are handled through the UI.
+  const npcs: HotelNpc[] = [];
 
   const elevatorPos = { x: 0, z: -10.35 };
   const streetDoorPos = { x: 0, z: 11.25 };
@@ -1167,14 +1083,6 @@ export function buildHotelLobby(maxAnisotropy: number): HotelLobbyHandles {
       dk
     );
 
-    for (const npc of npcs) {
-      let emote: EmoteType = 'idle';
-      if (npc.greetTimer > 0) {
-        npc.greetTimer -= delta;
-        emote = 'wave';
-      }
-      npc.rig.updateAnimation(emote, false, elapsed, delta, 0);
-    }
   }
 
   function isWalkable(x: number, z: number, radius = 0.28): boolean {
