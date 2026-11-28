@@ -542,6 +542,7 @@ export const api = {
       inventory: InventoryEntry[];
       outfits: SavedOutfit[];
       suite: SuiteState;
+      mustChangePassword?: boolean;
     }>('/auth/me'),
 
   getControls: () => request<ControlsPreferences>('/preferences/controls'),
