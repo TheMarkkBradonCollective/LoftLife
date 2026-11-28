@@ -114,11 +114,12 @@ function bodyMorphWeights(config: AvatarConfig): Record<string, number> {
 
 function applyJointOffsets(root: THREE.Object3D, sidecar: JointSidecar | null, weights: Record<string, number>) {
   if (!sidecar?.morphs) return;
-  let skeleton: THREE.Skeleton | null = null;
+  const foundSkeletons: THREE.Skeleton[] = [];
   root.traverse((object) => {
     const mesh = object as THREE.SkinnedMesh;
-    if (!skeleton && mesh.isSkinnedMesh) skeleton = mesh.skeleton;
+    if (mesh.isSkinnedMesh && !foundSkeletons.includes(mesh.skeleton)) foundSkeletons.push(mesh.skeleton);
   });
+  const skeleton = foundSkeletons[0];
   if (!skeleton) return;
 
   let rest = restBonePositions.get(skeleton);
@@ -145,14 +146,19 @@ function applyJointOffsets(root: THREE.Object3D, sidecar: JointSidecar | null, w
   }
 
   const rootOrigin = root.localToWorld(new THREE.Vector3(0, 0, 0));
+  const localDeltas = new Map<string, THREE.Vector3>();
   for (const bone of skeleton.bones) {
     const offset = offsets.get(bone.name);
-    const base = rest.get(bone.name);
-    if (!offset || !base || !bone.parent) continue;
+    if (!offset || !bone.parent) continue;
     const worldPoint = root.localToWorld(offset.clone());
     const parentOrigin = bone.parent.worldToLocal(rootOrigin.clone());
     const parentPoint = bone.parent.worldToLocal(worldPoint);
-    bone.position.copy(base).add(parentPoint.sub(parentOrigin));
+    localDeltas.set(bone.name, parentPoint.sub(parentOrigin));
+  }
+  for (const bone of skeleton.bones) {
+    const base = rest.get(bone.name);
+    const delta = localDeltas.get(bone.name);
+    if (base && delta) bone.position.copy(base).add(delta);
   }
   skeleton.update();
 }
