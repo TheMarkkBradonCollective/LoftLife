@@ -65,14 +65,20 @@ client.on('voiceStateUpdate', async (before, after) => {
     try {
       const category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name === VOICE_CATEGORY_NAME);
       if (!category) return log(guild, 'Join-to-Create skipped: category "' + VOICE_CATEGORY_NAME + '" was not found.');
+      const memberRole = guild.roles.cache.find(r => r.name === MEMBER_ROLE_NAME);
+      const permissionOverwrites = [
+        { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.Connect] },
+        { id: after.member.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.ManageChannels, PermissionsBitField.Flags.MoveMembers, PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.Speak] }
+      ];
+      if (memberRole) permissionOverwrites.push({
+        id: memberRole.id,
+        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.Speak]
+      });
       const room = await guild.channels.create({
         name: (after.member.displayName + "'s room").slice(0, 95),
         type: ChannelType.GuildVoice,
         parent: category.id,
-        permissionOverwrites: [
-          { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.Connect] },
-          { id: after.member.id, allow: [PermissionsBitField.Flags.ManageChannels, PermissionsBitField.Flags.MoveMembers, PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.Speak] }
-        ],
+        permissionOverwrites,
         reason: 'LoftLife Join-to-Create'
       });
       roomsByOwner.set(room.id, after.member.id);
