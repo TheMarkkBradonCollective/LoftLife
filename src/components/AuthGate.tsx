@@ -109,9 +109,11 @@ export const AuthGate: React.FC<{ onClose?: () => void; showOfflineOption?: bool
               onChange={(event) => setHandle(event.target.value)}
               placeholder={tab === 'login' ? 'yourhandle' : 'e.g. citybuilder'}
               autoComplete="username"
+              autoCapitalize="none"
+              spellCheck={false}
               required
               minLength={3}
-              maxLength={20}
+              maxLength={tab === 'login' ? 254 : 20}
             />
           </label>
 
