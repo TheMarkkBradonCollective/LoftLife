@@ -63,7 +63,7 @@ After the Gateway Worker deploys:
 4. Register the updated slash commands by running the existing `/update` command as a server administrator.
 5. Test Join-to-Create and permitted audio playback in a private test voice channel.
 
-The Gateway container needs outbound internet access for Discord Gateway WebSockets and voice UDP. A successful `/health` response only proves the HTTP process is ready; it does not prove Discord voice networking works. Complete an actual voice-channel test before treating music as live.
+The Gateway container needs outbound internet access for Discord Gateway WebSockets and voice UDP. A successful `/health` response confirms the Discord client is ready and the configured guild/channels were fetched; it does not prove Discord voice networking works. Complete an actual voice-channel test before treating music as live.
 
 ## Discord permissions and intents
 
