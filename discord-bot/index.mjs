@@ -1,4 +1,5 @@
 import express from 'express';
+import { Readable } from 'node:stream';
 import { Client, GatewayIntentBits, ChannelType, PermissionsBitField } from 'discord.js';
 import { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, NoSubscriberBehavior, entersState, VoiceConnectionStatus, getVoiceConnection, StreamType } from '@discordjs/voice';
 import ffmpegPath from 'ffmpeg-static';
@@ -123,7 +124,7 @@ app.post('/control/music/:action', async (req, res) => {
         queues.set(guildId, queue);
         return res.json({ ok: true, queued: queue.length });
       }
-      const audioResponse = await fetch(body.url);\n      if (!audioResponse.ok || !audioResponse.body) return res.status(502).json({ error: 'Audio stream could not be opened' });\n      player.play(createAudioResource(audioResponse.body, { inputType: StreamType.Arbitrary }));
+      const audioResponse = await fetch(body.url);\n      if (!audioResponse.ok || !audioResponse.body) return res.status(502).json({ error: 'Audio stream could not be opened' });\n      const audioType = audioResponse.headers.get('content-type') || '';\n      if (!audioType.startsWith('audio/') && !audioType.includes('ogg')) return res.status(415).json({ error: 'URL must return a direct audio stream' });\n      player.play(createAudioResource(Readable.fromWeb(audioResponse.body), { inputType: StreamType.Arbitrary }));
       connection.subscribe(player);
       return res.json({ ok: true, playing: true });
     }
