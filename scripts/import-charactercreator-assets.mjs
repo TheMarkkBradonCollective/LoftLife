@@ -120,7 +120,7 @@ const manifest = {
     skeletonSidecar: 'base_body.joints.json',
     colliderSidecar: 'body_colliders.json',
     morphTargets: 92,
-    note: 'Clothing and hair are skinned to the included base_body.glb rig. LoftLife runtime integration requires a compatible avatar rig adapter.',
+    note: 'Clothing and hair are skinned to the included MakeHuman game_engine rig. LoftLife adapts this rig at runtime in src/game/characterCreatorAvatar.ts.',
   },
   assets: assets.map((asset) => {
     const result = downloaded.find((entry) => entry.file === asset.file);
