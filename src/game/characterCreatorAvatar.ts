@@ -111,7 +111,7 @@ function hairFor(style: AvatarConfig['hairStyle']): string {
 }
 
 function sanitizeBoneName(name: string): string {
-  return String(name).replace(/\\s/g, '_').replace(/[\\[\\]\\.:/]/g, '');
+  return String(name).replace(/\s/g, '_').replace(/[\[\]\.:/]/g, '');
 }
 
 /**
