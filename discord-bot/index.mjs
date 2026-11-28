@@ -146,6 +146,7 @@ app.post('/control/voice/rename', async (req, res) => {
     const guild = await guildFor(req.body?.guildId || GUILD_ID);
     const channel = await guild.channels.fetch(req.body?.channelId);
     if (!channel?.isVoiceBased() || !roomsByOwner.has(channel.id)) return res.status(404).json({ error: 'LoftLife temporary room not found' });
+    if (roomsByOwner.get(channel.id) !== req.body?.ownerUserId) return res.status(403).json({ error: 'Only the room owner can rename this room' });
     await channel.setName(String(req.body?.name || '').slice(0, 95));
     return res.json({ ok: true, name: channel.name });
   } catch (error) { return res.status(500).json({ error: error.message }); }
