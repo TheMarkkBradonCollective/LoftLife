@@ -758,7 +758,7 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
       wallet: wallets[0] ?? {yuanzi:0,tongbao:0,cubits:0,cash:0},
       inventory: inventory.map(row=>({kind:row.kind,catalogId:row.catalog_id,qty:Number(row.qty),acquiredAt:Number(row.acquired_at)})),
       outfits: outfits.map(row=>({id:row.id,name:row.name,config:parseJsonField(row.config_json,{}),createdAt:Number(row.created_at)})),
-      suite: suiteView(suites[0]),
+      suite: suiteView(suites[0]), mustChangePassword: Boolean(account.must_change_password),
     });
   }
   if (path === '/api/profile' && request.method === 'GET' && sql && account) {
