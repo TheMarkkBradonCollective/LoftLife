@@ -35,8 +35,8 @@ The import writes to `public/models/charactercreator/`. The existing R2 uploader
 
 The public asset base URL remains the existing `VITE_ASSET_BASE_URL` ending in `/catalog/v1`.
 
-## Runtime compatibility — integration gate
+## Runtime integration
 
-These GLBs are not drop-in clothing for LoftLife's current avatar. CharacterCreator garments and hair are skinned to its included MakeHuman `game_engine` skeleton (53 bones) and share 92 body morph targets. LoftLife's current `src/game/avatar.ts` builds a procedural avatar from Three.js groups and primitive meshes rather than that skeleton.
+LoftLife now uses a runtime adapter in `src/game/characterCreatorAvatar.ts`. It loads the animated CC0 base body, applies supported body/face morphs, plays the embedded idle/walk/run clips, and loads the visible clothing and hair GLBs as skinned wearables. Garment bone indices are remapped by bone name onto the loaded body skeleton. The existing procedural avatar remains only as a load-failure fallback.
 
-Therefore this import stage deliberately stores the real assets and their catalog metadata without falsely marking them as wearable in the live closet. The next integration stage must load `base_body_anim.glb` through Three.js GLTFLoader, bind its animation clips to LoftLife's emote/movement states, expose the 92 morph targets through the character studio, and attach the catalog garments/hair to the same compatible skeleton. Preserve LoftLife's current avatar configuration contracts and validate each garment against body presets before enabling purchase/equip. Keep the existing procedural avatar as a fallback until that work passes mobile and desktop checks.
+The adapter resolves models from `/models/charactercreator/` (or the configured R2 asset base) first, then falls back to the pinned public source revision. Run the import workflow to mirror the models to R2 for production. Current LoftLife appearance settings map onto the available CharacterCreator sliders and eight hair meshes; settings for which the source pack has no matching feature retain their existing UI state but are not represented as new morphs.
