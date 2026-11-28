@@ -1,46 +1,83 @@
 # LoftLife Discord — One-Bot Architecture
 
-The official LoftLife Discord bot is intended to replace separate utility bots with one integrated system. The Cloudflare Worker remains the signed Discord interactions endpoint and performs Discord REST operations. A companion Node.js Gateway service is required for persistent Discord Gateway events and voice connections; Cloudflare Workers cannot maintain a Discord voice session.
+The official LoftLife Discord bot combines community automation, temporary voice rooms, moderation foundations and music playback under one Discord application.
 
 ## Components
-- **Cloudflare Worker (`loftlife-discord`)**: slash-command interactions, role/channel provisioning and Discord REST operations.
-- **Gateway service (`discord-bot/`)**: member join events, voice-state events, temporary voice channels, anti-spam events and Discord voice playback.
-- **Shared bot application**: both components use the same Discord application/bot identity. The bot token is stored only as a deployment secret and must never be committed.
 
-## Gateway foundation in this branch
+- **Existing Cloudflare Worker (`loftlife-discord`)**: signed Discord interactions, slash commands, role/channel provisioning and Discord REST operations.
+- **Cloudflare Container Worker (`loftlife-discord-gateway`)**: persistent Node.js Discord Gateway connection, Join-to-Create events, temporary-room cleanup, moderation events and voice playback.
+- **Container image (`discord-bot/`)**: the Node.js process packaged as a Docker image and run by Cloudflare Containers.
+- **Secrets**: `DISCORD_BOT_TOKEN` and `CONTROL_SECRET` are Cloudflare Worker secrets. They are passed into the container at startup and never committed.
+
+The game Worker named `loftlife` is separate and must not be overwritten.
+
+## Features implemented in this branch
+
 - Automatically grants `LoftLife Member` when a new member joins (when that role exists).
 - Join-to-Create: joining `➕ Create a Room` in `voice-lounges` creates a temporary voice room and moves the member into it.
 - Empty temporary rooms are deleted.
 - Basic rapid-message anti-spam deletes the triggering message, applies a short timeout and logs the action.
-- Authenticated control API for music play/pause/resume/skip/stop and temporary-room rename.
-- Music accepts HTTPS direct audio-stream URLs only. It does not download or rip copyrighted tracks from video platforms. Use licensed streams or audio you have permission to play.
+- Music playback joins the voice channel of the member who runs `/music play`; users no longer have to select a channel.
+- Music controls: `/music play`, `pause`, `resume`, `skip`, and `stop`. Tracks queue while one is playing.
+- `/voice rename` lets the temporary room owner rename their room.
 
-## Railway deployment path
+## Music source and playback boundary
 
-The Gateway can be deployed as a persistent Railway service from this feature branch:
+`/music play` currently accepts a direct HTTPS audio-stream URL that responds with an audio content type. The bot does not extract or rip audio from video/music platform pages, and a normal webpage or track-page URL will not play. Use an audio stream you own or are authorized to play. Search-by-song-name and commercial streaming-service integrations are not implemented in this version.
 
-1. In Railway, create a project and choose **Deploy from GitHub Repo**.
-2. Select `TheMarkkBradonCollective/LoftLife` and branch `feature/loftlife-discord-all-in-one`.
-3. Set the service Root Directory to `/discord-bot`. Railway will detect the Dockerfile in that directory.
-4. Add the required variables in Railway's Variables tab: `DISCORD_BOT_TOKEN`, `GUILD_ID`, and `CONTROL_SECRET`. Use the existing bot token only in Railway's secret field; never paste it into chat or commit it. Generate a separate long random value for `CONTROL_SECRET`.
-5. Deploy the service and wait for the deployment to become healthy. Check `/health` on its generated Railway domain.
-6. Copy the service's HTTPS domain into the Cloudflare Worker variable `BOT_CONTROL_URL`, and set `BOT_CONTROL_SECRET` to the same value as the Gateway's `CONTROL_SECRET`. Keep both values private.
-7. Test Join-to-Create and music in a private test voice channel before announcing them.
+## Cloudflare Containers deployment
 
-**Voice-network check:** Railway supports persistent services and Dockerfile deployments, but successful Discord voice playback also depends on outbound UDP connectivity to Discord's voice servers. The first deployment must be tested for a complete voice connection; a healthy HTTP `/health` response alone does not prove voice works. If UDP voice setup fails, stop and reassess the host rather than claiming music is operational.
+Cloudflare Containers runs the Gateway's existing Docker image. The separate Worker in `discord-bot/cloudflare/worker.ts` routes authenticated control requests to one Durable Object-backed container.
 
-## Deployment requirements
-Run this service on an always-on Node.js host that supports outbound WebSocket connections. It is not deployed as a Cloudflare Worker. Configure variables from `discord-bot/.env.example`; set `CONTROL_SECRET` to a long random value and keep it private. Enable the Server Members, Guild Voice States and Message Content intents in the Discord Developer Portal. Grant only required permissions: View Channels, Manage Channels, Move Members, Connect, Speak, Send Messages, Manage Messages and Moderate Members.
+### Configure secrets
 
-The Cloudflare Worker needs `BOT_CONTROL_URL` and `BOT_CONTROL_SECRET` before its interaction handlers can call this service. Never expose either value in client code or Discord messages.
+From the `discord-bot` directory, set the two secrets on the new Worker (never commit or paste them into chat):
+
+```sh
+npx wrangler secret put DISCORD_BOT_TOKEN
+npx wrangler secret put CONTROL_SECRET
+```
+
+Use the existing Discord bot token only in the secret prompt. Generate a separate long random value for `CONTROL_SECRET`. The `GUILD_ID` is already configured in `wrangler.jsonc`.
+
+### Deploy
+
+Prerequisites: Docker must be running locally and Wrangler must be available.
+
+```sh
+cd discord-bot
+npx wrangler deploy
+```
+
+Wrangler builds and pushes the Docker image with the Worker. The first container may take several minutes to provision. Check its health at the deployed Worker URL plus `/health`.
+
+The Worker uses a six-hour inactivity timeout and a five-minute scheduled health request to keep the Gateway process available. Cloudflare can still stop active containers for host maintenance or other platform events; the bot must reconnect when the container restarts. Cloudflare does not guarantee uninterrupted container uptime.
+
+### Connect the existing interaction Worker
+
+After the Gateway Worker deploys:
+
+1. Set `BOT_CONTROL_URL` on the existing `loftlife-discord` Worker to the new Gateway Worker URL.
+2. Set `BOT_CONTROL_SECRET` on `loftlife-discord` to exactly the same private value used for the Gateway Worker's `CONTROL_SECRET`.
+3. Keep both values in Cloudflare secret/variable storage; never put them in frontend code or Discord messages.
+4. Register the updated slash commands by running the existing `/update` command as a server administrator.
+5. Test Join-to-Create and permitted audio playback in a private test voice channel.
+
+The Gateway container needs outbound internet access for Discord Gateway WebSockets and voice UDP. A successful `/health` response only proves the HTTP process is ready; it does not prove Discord voice networking works. Complete an actual voice-channel test before treating music as live.
+
+## Discord permissions and intents
+
+Enable Server Members, Guild Voice States and Message Content privileged intents in the Discord Developer Portal. Grant the bot only the permissions required for the enabled features: View Channels, Manage Channels, Move Members, Connect, Speak, Send Messages, Manage Messages and Moderate Members.
+
+## Current boundaries
+
+This is source code on a feature branch, not a live deployment. The Gateway Container has not been deployed or connected to the live interaction Worker. Do not advertise Join-to-Create or music as live until deployment, secret configuration, command registration and live voice testing are complete.
 
 ## Planned modules
+
 1. Moderation: warning history, configurable AutoMod rules, timeouts, bans, message cleanup, audit log and appeals.
 2. Community onboarding: welcome messages, verified/member roles, self-assignable interest roles, account linking and onboarding checks.
 3. Support: private tickets, report intake, staff assignment, close/reopen and transcript retention controls.
-4. Voice: Join-to-Create, owner controls, temporary room cleanup, voice activity and music lounges.
-5. Music: queue, pause/resume/skip/stop, now-playing state and permitted audio sources.
+4. Voice: Join-to-Create, owner controls, temporary room cleanup and music lounges.
+5. Music: queue, pause/resume/skip/stop and permitted audio sources.
 6. LoftLife integration: account linking, player/city membership synchronization, per-city Discord categories and event/status announcements.
-
-## Current boundaries
-This is source code on a feature branch, not a live deployment. The Gateway service is not yet connected to the live Worker. Do not advertise music playback, automatic join roles or Join-to-Create as live until the service is deployed, secrets are configured, intents are enabled and the features are tested. Existing Worker role-button onboarding and `/update` remain separate and active.
