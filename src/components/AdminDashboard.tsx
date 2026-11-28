@@ -24,6 +24,10 @@ export const AdminDashboard: React.FC<{ onClose: () => void }> = ({ onClose }) =
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [staffHandle, setStaffHandle] = useState('');
+  const [newEmail,setNewEmail] = useState('');
+  const [newHandle,setNewHandle] = useState('');
+  const [newName,setNewName] = useState('');
+  const [newRole,setNewRole] = useState<LoftStaffRole | 'player'>('player');
   const [staffRole, setStaffRole] = useState<Exclude<LoftStaffRole, 'founder'>>('support');
   const [departments, setDepartments] = useState<string[]>(['player-support']);
   const [notice, setNotice] = useState('');
@@ -107,6 +111,14 @@ export const AdminDashboard: React.FC<{ onClose: () => void }> = ({ onClose }) =
 
               {tab === 'staff' && <div className="space-y-5">
                 <div><h2 className="text-xl font-bold">Staff & roles</h2><p className="mt-1 text-sm text-slate-400">Appoint staff, assign departments and manage active appointments.</p></div>
+                {data.actor.role === 'founder' && <form className="grid gap-3 rounded-xl border border-[#39ff14]/20 bg-[#39ff14]/[.04] p-4 sm:grid-cols-2" onSubmit={async (event) => { event.preventDefault(); await run(() => api.createAdminAccount({email:newEmail,handle:newHandle,displayName:newName || newHandle,role:newRole,departments}), 'Account created. Share the temporary sign-in password securely.'); setNewEmail('');setNewHandle('');setNewName(''); }}>
+                  <div className="sm:col-span-2"><h3 className="font-semibold text-[#baffad]">Create account</h3><p className="mt-1 text-xs text-slate-400">Creates a player or staff account. All new accounts must replace the temporary password at first sign-in.</p></div>
+                  <label className="text-xs text-slate-400">Email<input type="email" required value={newEmail} onChange={e=>setNewEmail(e.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-[#090d11] px-3 py-2.5 text-sm text-white"/></label>
+                  <label className="text-xs text-slate-400">Username<input required minLength={3} maxLength={20} pattern="[a-zA-Z0-9_]+" value={newHandle} onChange={e=>setNewHandle(e.target.value.toLowerCase())} className="mt-1 w-full rounded-lg border border-white/10 bg-[#090d11] px-3 py-2.5 text-sm text-white"/></label>
+                  <label className="text-xs text-slate-400">Display name<input value={newName} onChange={e=>setNewName(e.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-[#090d11] px-3 py-2.5 text-sm text-white"/></label>
+                  <label className="text-xs text-slate-400">Account role<select value={newRole} onChange={e=>setNewRole(e.target.value as LoftStaffRole | 'player')} className="mt-1 w-full rounded-lg border border-white/10 bg-[#090d11] px-3 py-2.5 text-sm text-white"><option value="player">Regular player</option>{ROLE_OPTIONS.map(role=><option key={role} value={role}>{ROLE_LABEL[role]}</option>)}</select></label>
+                  <button disabled={busy} className="rounded-lg bg-[#39ff14] px-4 py-2.5 text-sm font-bold text-black disabled:opacity-40 sm:col-span-2">{busy?'Creating…':'Create account with temporary password'}</button>
+                </form>}
                 {canAssign && <form className="grid gap-3 rounded-xl border border-white/10 bg-white/[.03] p-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); void run(() => api.assignStaff({ handle: staffHandle, role: staffRole, departments }), 'Staff appointment saved.'); setStaffHandle(''); }}>
                   <label className="text-xs text-slate-400">Player username<input value={staffHandle} onChange={(event) => setStaffHandle(event.target.value)} placeholder="username" className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#090d11] px-3 py-2.5 text-sm text-white outline-none focus:border-[#39ff14]/60"/></label>
                   <label className="text-xs text-slate-400">Staff role<select value={staffRole} onChange={(event) => setStaffRole(event.target.value as typeof staffRole)} className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#090d11] px-3 py-2.5 text-sm text-white">{ROLE_OPTIONS.filter((role) => data.actor.role === 'founder' || (data.actor.role === 'director' ? role !== 'director' : ['moderator','support'].includes(role))).map((role) => <option key={role} value={role}>{ROLE_LABEL[role]}</option>)}</select></label>
