@@ -8,7 +8,12 @@
   "containers": [
     {
       "class_name": "DiscordGatewayContainer",
-      "image": "./Dockerfile",
+      "scheduling_policy": "durable_object",
+      "images": {
+        "base": {
+          "dockerfile": "./Dockerfile"
+        }
+      },
       "max_instances": 1
     }
   ],
