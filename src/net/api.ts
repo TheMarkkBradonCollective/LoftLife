@@ -506,6 +506,7 @@ export interface AuthResult {
   user: SessionUser;
   token: string;
   expiresAt: number;
+  mustChangePassword?: boolean;
 }
 
 export const api = {
@@ -527,6 +528,9 @@ export const api = {
   login: (body: { identifier: string; password: string }) =>
     request<AuthResult>('/auth/login', { method: 'POST', body, auth: false }),
 
+  changePassword: (password: string) => request<{ ok: boolean; token: string; expiresAt: number; mustChangePassword: false }>('/auth/change-password', { method: 'POST', body: { password } }),
+  createAdminAccount: (body: { email: string; handle: string; displayName: string; role: LoftStaffRole | 'player'; departments: string[] }) => request<{ ok: boolean; account: { id: string; handle: string; email: string; role: string }; temporaryPassword: string }>('/admin/console/accounts', { method: 'POST', body }),
+
   logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 
   me: () =>
@@ -538,6 +542,7 @@ export const api = {
       inventory: InventoryEntry[];
       outfits: SavedOutfit[];
       suite: SuiteState;
+      mustChangePassword?: boolean;
     }>('/auth/me'),
 
   getControls: () => request<ControlsPreferences>('/preferences/controls'),

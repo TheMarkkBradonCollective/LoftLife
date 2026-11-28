@@ -66,7 +66,7 @@ export interface CloudflareEnv {
   DATABASE_URL?: string;
   LOFTLIFE_SESSION_SECRET?: string;
   /** Comma-separated exact account handles for the two founders (Markk and Alijah). */
-  LOFTLIFE_FOUNDER_HANDLES?: string;
+  LOFTLIFE_FOUNDER_EMAILS?: string;
   GAME_ORIGIN?: string;
   REALTIME?: { idFromName(name: string): unknown; get(id: unknown): { fetch(request: Request): Promise<Response> } };
   ASSETS?: WorkerFetcher;
@@ -81,6 +81,7 @@ interface AccountRow {
   created_at: number;
   display_name: string;
   suspended_until?: number;
+  must_change_password?: boolean;
 }
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
@@ -221,6 +222,7 @@ const SCHEMA_STATEMENTS = [
    )`,
   `ALTER TABLE ll_accounts ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT ''`,
   `ALTER TABLE ll_accounts ADD COLUMN IF NOT EXISTS suspended_until BIGINT NOT NULL DEFAULT 0`,
+  `ALTER TABLE ll_accounts ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE`,
   `CREATE TABLE IF NOT EXISTS ll_sessions (
      jti_hash TEXT PRIMARY KEY,
      account_id TEXT NOT NULL REFERENCES ll_accounts(id) ON DELETE CASCADE,
@@ -519,7 +521,7 @@ async function handleLogin(request: Request, env: CloudflareEnv): Promise<Respon
   if (!identifier || !password) return fail('Handle/email and password are required.', 400, 'invalid_input');
 
   const rows = (await sql.query(
-    'SELECT id, handle, email, password_hash, role, created_at, display_name, suspended_until FROM ll_accounts WHERE handle = $1 OR email = $1 LIMIT 1',
+    'SELECT id, handle, email, password_hash, role, created_at, display_name, suspended_until, must_change_password FROM ll_accounts WHERE handle = $1 OR email = $1 LIMIT 1',
     [identifier]
   )) as AccountRow[];
   const account = rows[0];
@@ -530,7 +532,22 @@ async function handleLogin(request: Request, env: CloudflareEnv): Promise<Respon
 
   await provisionGameAccount(sql, account);
   const session = await issueSession(sql, account, secret);
-  return authResponse(account, session);
+  const response = authResponse(account, session);
+  const payload = await response.json() as Record<string, unknown>;
+  return json({ ...payload, mustChangePassword: Boolean(account.must_change_password) }, 200, { 'set-cookie': sessionCookie(session.token, SESSION_TTL_SECONDS) });
+}
+
+async function handleChangePassword(request: Request, env: CloudflareEnv): Promise<Response> {
+  const auth = await currentAccount(request, env);
+  if (!auth) return fail('Sign in to continue.', 401, 'unauthorized');
+  const body = await readJson(request);
+  const password = validatePassword(body.password);
+  if (!password || password === '1234567890') return fail('Choose a new password of at least 10 characters that is not the temporary password.', 400, 'invalid_password');
+  const passwordHash = await hashPassword(password);
+  await auth.sql.query('UPDATE ll_accounts SET password_hash=$2,must_change_password=FALSE WHERE id=$1',[auth.account.id,passwordHash]);
+  await auth.sql.query('DELETE FROM ll_sessions WHERE account_id=$1',[auth.account.id]);
+  const session = await issueSession(auth.sql,{...auth.account,password_hash:passwordHash,must_change_password:false},secretFor(env)!);
+  return json({ok:true,token:session.token,expiresAt:session.expiresAt,mustChangePassword:false},200,{'set-cookie':sessionCookie(session.token,SESSION_TTL_SECONDS)});
 }
 
 async function handleLogout(request: Request, env: CloudflareEnv): Promise<Response> {
@@ -610,7 +627,7 @@ async function currentAccount(request: Request, env: CloudflareEnv) {
   const sql = await database(env);
   if (!sql) return null;
   const rows = await sql.query(
-    'SELECT a.id,a.handle,a.email,a.password_hash,a.role,a.created_at,a.display_name FROM ll_sessions s JOIN ll_accounts a ON a.id=s.account_id WHERE s.jti_hash=$1 AND s.account_id=$2 AND s.expires_at>$3 AND COALESCE(a.suspended_until,0)<=$4 LIMIT 1',
+    'SELECT a.id,a.handle,a.email,a.password_hash,a.role,a.created_at,a.display_name,a.must_change_password FROM ll_sessions s JOIN ll_accounts a ON a.id=s.account_id WHERE s.jti_hash=$1 AND s.account_id=$2 AND s.expires_at>$3 AND COALESCE(a.suspended_until,0)<=$4 LIMIT 1',
     [await sha256Hex(payload.sid), payload.sub, Date.now(), Date.now()]
   ) as AccountRow[];
   return rows[0] ? { sql, account: rows[0] } : null;
@@ -741,7 +758,7 @@ async function handleGameRead(request: Request, env: CloudflareEnv, url: URL): P
       wallet: wallets[0] ?? {yuanzi:0,tongbao:0,cubits:0,cash:0},
       inventory: inventory.map(row=>({kind:row.kind,catalogId:row.catalog_id,qty:Number(row.qty),acquiredAt:Number(row.acquired_at)})),
       outfits: outfits.map(row=>({id:row.id,name:row.name,config:parseJsonField(row.config_json,{}),createdAt:Number(row.created_at)})),
-      suite: suiteView(suites[0]),
+      suite: suiteView(suites[0]), mustChangePassword: Boolean(account.must_change_password),
     });
   }
   if (path === '/api/profile' && request.method === 'GET' && sql && account) {
@@ -966,7 +983,7 @@ export default {
         return await handleGuestSession(request, env);
       }
 
-      const isAuthRoute = ['/api/auth/register', '/api/auth/login', '/api/auth/logout'].includes(
+      const isAuthRoute = ['/api/auth/register', '/api/auth/login', '/api/auth/logout', '/api/auth/change-password'].includes(
         url.pathname
       );
       if (isAuthRoute) {
@@ -975,6 +992,7 @@ export default {
         if (rateLimited(request)) return fail('Too many attempts. Try again shortly.', 429, 'rate_limited');
         if (url.pathname === '/api/auth/register') return await handleRegister(request, env);
         if (url.pathname === '/api/auth/login') return await handleLogin(request, env);
+        if (url.pathname === '/api/auth/change-password') return await handleChangePassword(request, env);
         return await handleLogout(request, env);
       }
 
@@ -1003,7 +1021,7 @@ export default {
         const auth = await currentAccount(request, env);
         const sql = auth?.sql ?? await database(env);
         if (!sql) return fail('DATABASE_URL is not configured.', 503, 'unconfigured');
-        const adminResponse = await handleAdminRoute(request, sql, auth?.account ?? null, env.LOFTLIFE_FOUNDER_HANDLES);
+        const adminResponse = await handleAdminRoute(request, sql, auth?.account ?? null, env.LOFTLIFE_FOUNDER_EMAILS);
         if (adminResponse) return adminResponse;
       }
 

@@ -55,7 +55,7 @@ All optional; sensible defaults are used.
 | `LOFTLIFE_AUTH_RATE_MAX` | `12` | Auth attempts per minute per IP |
 | `LOFTLIFE_API_URL` | `http://127.0.0.1:8787` | Dev proxy target for `/api` and `/ws` |
 | `LOFTLIFE_SESSION_SECRET` | unset | Optional. HMAC key (≥ 32 chars) for tokens minted by the Cloudflare edge; must match the Worker's secret |
-| `LOFTLIFE_FOUNDER_HANDLES` | unset | Required for platform administration. Comma-separated exact account handles for the two founders (Markk and Alijah); configure as a Cloudflare Worker secret/variable, never in source control |
+| `LOFTLIFE_FOUNDER_EMAILS` | unset | Required for platform administration. Comma-separated email addresses for Markk and Alijah; the Worker provisions both Founder accounts on the first admin bootstrap request using the shared temporary password and forces a password change at first login |
 | `DATABASE_URL` | unset | Optional. Neon pooled connection string — read by the Cloudflare Worker, never by the game server |
 | `GAME_ORIGIN` | `http://127.0.0.1:8787` | Optional. Where the Worker proxies `/api/*` and `/ws` |
 | `VITE_ASSET_BASE_URL` | unset | Optional. Absolute R2/CDN root ending in `/catalog/v1`. Set for a production build to serve models and previews from R2 and keep them out of `dist/`; unset serves them from `public/` in dev and bundles them in `dist/` |

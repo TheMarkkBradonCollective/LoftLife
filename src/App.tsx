@@ -18,6 +18,7 @@ import { WorldStudio } from './components/WorldStudio';
 import { GameInterface } from './hud/GameInterface';
 import { GameMenu } from './hud/GameMenu';
 import { AdminDashboard } from './components/AdminDashboard';
+import { FirstLoginPassword } from './components/FirstLoginPassword';
 import { SocialPanel } from './hud/SocialPanel';
 import type { BuildController, SocialIntent } from './hud/types';
 import { PlatformNotice } from './components/PlatformNotice';
@@ -2383,6 +2384,7 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
 
       {/* Sign in / create the account that turns the local character online */}
       {authOpen && <AuthGate onClose={() => setAuthOpen(false)} />}
+      {session.mustChangePassword && <FirstLoginPassword />}
 
       {/* Room Settings: Walk / Edit live in its Controls section */}
       <RoomSettingsModal

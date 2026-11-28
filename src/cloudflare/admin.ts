@@ -20,12 +20,22 @@ async function audit(sql: Sql, actorId: string, targetId: string | null, action:
     [crypto.randomUUID(), actorId, targetId, action, JSON.stringify(detail), Date.now()]
   );
 }
-async function founderBootstrap(sql: Sql, rawHandles?: string) {
-  const handles = (rawHandles ?? '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean);
-  if (handles.length !== 2 || handles[0] === handles[1]) return { configured: false, count: 0 };
+async function founderBootstrap(sql: Sql, rawEmails?: string) {
+  const emails = (rawEmails ?? '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean);
+  if (emails.length !== 2 || emails[0] === emails[1] || emails.some((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return { configured: false, count: 0 };
+  const { hashPassword } = await import('../../shared/auth-core.mjs');
   let count = 0;
-  for (const handle of handles) {
-    const rows = await sql.query('SELECT id FROM ll_accounts WHERE lower(handle)=$1 LIMIT 1', [handle]) as Array<{id:string}>;
+  for (const email of emails) {
+    let rows = await sql.query('SELECT id,handle FROM ll_accounts WHERE lower(email)=$1 LIMIT 1',[email]) as Array<{id:string;handle:string}>;
+    if (!rows[0]) {
+      const base = email.split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g,'').slice(0,20);
+      const handle = base.length >= 3 ? base : `founder${count+1}`;
+      const hash = await hashPassword('1234567890');
+      const id = 'usr_' + crypto.randomUUID();
+      const now = Date.now();
+      await sql.query('INSERT INTO ll_accounts(id,handle,email,password_hash,role,created_at,display_name,must_change_password) VALUES($1,$2,$3,$4,\'player\',$5,$6,TRUE) ON CONFLICT DO NOTHING',[id,handle,email,hash,now,handle]);
+      rows = await sql.query('SELECT id,handle FROM ll_accounts WHERE lower(email)=$1 LIMIT 1',[email]) as Array<{id:string;handle:string}>;
+    }
     if (!rows[0]) continue;
     await sql.query(
       `INSERT INTO ll_staff_assignments(user_id,role,departments_json,active,appointed_at,updated_at)
@@ -57,15 +67,38 @@ function canManageRole(actor: StaffRole, target: StaffRole) {
 function canModerate(role: StaffRole) { return ['founder','director','management','administrator','moderator'].includes(role); }
 
 /** Founder-led platform administration. Founder identities are bootstrapped only from the two exact handles in LOFTLIFE_FOUNDER_HANDLES. */
-export async function handleAdminRoute(request: Request, sql: Sql, user: User | null, founderHandles?: string): Promise<Response | null> {
+export async function handleAdminRoute(request: Request, sql: Sql, user: User | null, founderEmails?: string): Promise<Response | null> {
   const url = new URL(request.url);
   if (!url.pathname.startsWith('/api/admin/console')) return null;
-  if (!user) return fail('Sign in to continue.', 401, 'unauthorized');
-  const bootstrap = await founderBootstrap(sql, founderHandles);
+  const bootstrap = await founderBootstrap(sql, founderEmails);
+  if (!user) return fail('Founder accounts are ready. Sign in with the temporary password.', 401, 'unauthorized');
   const actor = await staffFor(sql, user.id);
   if (!actor) {
     if (!bootstrap.configured) return fail('Founder setup is required. Configure exactly two account handles in LOFTLIFE_FOUNDER_HANDLES.', 503, 'founder_setup_required');
     return fail('LoftLife staff access required.', 403, 'forbidden');
+  }
+
+  if (url.pathname === '/api/admin/console/accounts' && request.method === 'POST') {
+    if (actor.role !== 'founder') return fail('Only Founders can create accounts.',403,'forbidden');
+    const body = safeDetail(await request.json().catch(() => ({})));
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+    const rawHandle = typeof body.handle === 'string' ? body.handle.trim().toLowerCase() : '';
+    const displayName = typeof body.displayName === 'string' ? body.displayName.trim().slice(0,32) : rawHandle;
+    const role = body.role === 'player' ? 'player' : body.role as StaffRole;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^[a-z0-9_]{3,20}$/.test(rawHandle) || !displayName || (role !== 'player' && !ROLES.includes(role))) return fail('Provide a valid email, 3–20 character handle, display name and role.',400,'invalid_input');
+    const existing = await sql.query('SELECT id FROM ll_accounts WHERE lower(email)=$1 OR lower(handle)=$2 LIMIT 1',[email,rawHandle]) as Array<{id:string}>;
+    if (existing.length) return fail('That email or handle is already registered.',409,'conflict');
+    const { hashPassword } = await import('../../shared/auth-core.mjs');
+    const id = 'usr_' + crypto.randomUUID();
+    const now = Date.now();
+    const hash = await hashPassword('1234567890');
+    await sql.query('INSERT INTO ll_accounts(id,handle,email,password_hash,role,created_at,display_name,must_change_password) VALUES($1,$2,$3,$4,$5,$6,$7,TRUE)',[id,rawHandle,email,hash,'player',now,displayName]);
+    if (role !== 'player') {
+      const departments = parseList(body.departments).map((d) => d.toLowerCase()).filter((d) => /^[a-z0-9-]{2,32}$/.test(d));
+      await sql.query("INSERT INTO ll_staff_assignments(user_id,role,departments_json,active,appointed_by,appointed_at,updated_at) VALUES($1,$2,$3,TRUE,$4,$5,$5)",[id,role,JSON.stringify(departments),user.id,now]);
+    }
+    await audit(sql,user.id,id,'account.created',{email,handle:rawHandle,role});
+    return json({ok:true,account:{id,handle:rawHandle,email,role},temporaryPassword:'1234567890'});
   }
 
   if (url.pathname === '/api/admin/console/access' && request.method === 'GET') {
