@@ -763,7 +763,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     residentNpcRig.root.position.set(RESIDENT_NPC_POS.x, 0, RESIDENT_NPC_POS.z);
     residentNpcRig.root.userData.isResidentNpc = true;
     residentNpcRig.root.visible = false;
-    roomContainer.add(residentNpcRig.root);
+    // Resident rooms do not spawn a computer-controlled occupant.
 
     const boxEdges = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 0.08, 1));
     const selectionBox = new THREE.LineSegments(
@@ -1459,32 +1459,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
             execute: () => propsRef.current.onWalkHint?.('Full-length mirror · Outfits are changed at your home closet'),
           };
         }
-        const stylist = clothingStoreHandles.stylist;
-        if (Math.hypot(av.x - stylist.x, av.z - stylist.z) < 2.3) {
-          return {
-            label: actionLabel(`Talk to ${stylist.name}`),
-            execute: () => {
-              av.yaw = Math.atan2(stylist.x - av.x, stylist.z - av.z);
-              propsRef.current.onEmoteChange('wave');
-              propsRef.current.onNpcChat?.(stylist.name, stylist.greeting);
-              sfx.playEmote();
-            },
-          };
-        }
-        if (Math.hypot(av.x, av.z - 6.4) < 2.2) {
-          return {
-            label: actionLabel('Exit to City · LoftLife Threads'),
-            execute: () => {
-              sfx.playToggle(true);
-              citySpawnTargetRef.current = {
-                x: CITY_LAYOUT.clothingStoreDoorPos.x,
-                z: CITY_LAYOUT.clothingStoreDoorPos.z + 3.4,
-              };
-              cityArrivalViewRef.current = 'store';
-              propsRef.current.onChangeLocation('world');
-            },
-          };
-        }
+
         return null;
       }
 
