@@ -521,7 +521,7 @@ async function handleLogin(request: Request, env: CloudflareEnv): Promise<Respon
   if (!identifier || !password) return fail('Handle/email and password are required.', 400, 'invalid_input');
 
   const rows = (await sql.query(
-    'SELECT id, handle, email, password_hash, role, created_at, display_name, suspended_until FROM ll_accounts WHERE handle = $1 OR email = $1 LIMIT 1',
+    'SELECT id, handle, email, password_hash, role, created_at, display_name, suspended_until, must_change_password FROM ll_accounts WHERE handle = $1 OR email = $1 LIMIT 1',
     [identifier]
   )) as AccountRow[];
   const account = rows[0];
