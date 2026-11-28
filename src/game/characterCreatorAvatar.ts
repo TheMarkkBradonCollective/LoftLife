@@ -38,6 +38,16 @@ function tintMaterial(material: THREE.Material, hex: string) {
   if (gain > 0 && gain !== 1) m.color.multiplyScalar(gain);
 }
 
+function makeMaterialsUnique(root: THREE.Object3D) {
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.material = Array.isArray(mesh.material)
+      ? mesh.material.map((material) => material.clone())
+      : mesh.material.clone();
+  });
+}
+
 function tintTree(root: THREE.Object3D, config: AvatarConfig) {
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
@@ -182,14 +192,6 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
     for (const child of [...target.children]) {
       if (child.userData.characterCreatorWearable) {
         target.remove(child);
-        child.traverse((o) => {
-          const mesh = o as THREE.Mesh;
-          if (mesh.isMesh) {
-            mesh.geometry?.dispose();
-            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-            mats.forEach((m) => m.dispose());
-          }
-        });
       }
     }
     const files = [...clothingFor(next), hairFor(next.hairStyle)];
@@ -200,6 +202,7 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
     if (disposed || modelRoot !== target) return;
     for (const { file, gltf } of loaded) {
       const wearable = cloneSkeleton(gltf.scene) as THREE.Group;
+      makeMaterialsUnique(wearable);
       wearable.userData.characterCreatorWearable = true;
       wearable.name = `LoftLife_${file.replace('.glb', '')}`;
       wearable.traverse((o) => {
@@ -215,6 +218,7 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
   void loadGltf('base_body_anim.glb').then((gltf) => {
     if (disposed) return;
     const character = cloneSkeleton(gltf.scene) as THREE.Group;
+    makeMaterialsUnique(character);
     character.name = 'LoftLife_CharacterCreator_Body';
     const bounds = new THREE.Box3().setFromObject(character);
     const size = bounds.getSize(new THREE.Vector3());
