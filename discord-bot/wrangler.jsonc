@@ -1,9 +1,10 @@
 {
-  "$schema": "../node_modules/wrangler/config-schema.json",
   "name": "loftlife-discord-gateway",
   "main": "cloudflare/worker.ts",
   "compatibility_date": "2026-11-27",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "containers": [
     {
       "class_name": "DiscordGatewayContainer",
@@ -26,7 +27,9 @@
     }
   },
   "triggers": {
-    "crons": ["*/5 * * * *"]
+    "crons": [
+      "*/5 * * * *"
+    ]
   },
   "vars": {
     "GUILD_ID": "1576000759856635966",
