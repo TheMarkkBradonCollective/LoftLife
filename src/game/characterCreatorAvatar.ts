@@ -240,7 +240,6 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
       // own runtime. Static accessory meshes stay in their original scene group.
       for (const mesh of skinned) {
         mesh.removeFromParent();
-        mesh.geometry = mesh.geometry.clone();
         mesh.userData.characterCreatorWearable = true;
         rebindToBody(mesh, bodyMesh);
         bodyMesh.parent?.add(mesh);
