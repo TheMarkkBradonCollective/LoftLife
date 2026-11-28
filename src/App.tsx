@@ -2383,8 +2383,8 @@ export default function App({ entry, onExitPlatform }: AppProps = {}) {
       )}
 
       {/* Sign in / create the account that turns the local character online */}
-      {authOpen && <AuthGate onClose={() => setAuthOpen(false)} />
-      {session.mustChangePassword && <FirstLoginPassword />}}
+      {authOpen && <AuthGate onClose={() => setAuthOpen(false)} />}
+      {session.mustChangePassword && <FirstLoginPassword />}
 
       {/* Room Settings: Walk / Edit live in its Controls section */}
       <RoomSettingsModal
