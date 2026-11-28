@@ -20,7 +20,7 @@ async function audit(sql: Sql, actorId: string, targetId: string | null, action:
     [crypto.randomUUID(), actorId, targetId, action, JSON.stringify(detail), Date.now()]
   );
 }
-async function founderBootstrap(sql: Sql, rawEmails?: string) {
+export async function founderBootstrap(sql: Sql, rawEmails?: string) {
   const emails = (rawEmails ?? '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean);
   if (emails.length !== 2 || emails[0] === emails[1] || emails.some((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return { configured: false, count: 0 };
   const { hashPassword } = await import('../../shared/auth-core.mjs');
