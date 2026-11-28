@@ -263,11 +263,12 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
   };
 
   async function loadWearables(target: THREE.Group, next: AvatarConfig) {
-    const bodyMesh = (() => {
-      let found: THREE.SkinnedMesh | null = null;
-      target.traverse((o) => { if (!found && (o as THREE.SkinnedMesh).isSkinnedMesh) found = o as THREE.SkinnedMesh; });
-      return found;
-    })();
+    const bodyMeshes: THREE.SkinnedMesh[] = [];
+    target.traverse((o) => {
+      const mesh = o as THREE.SkinnedMesh;
+      if (mesh.isSkinnedMesh) bodyMeshes.push(mesh);
+    });
+    const bodyMesh = bodyMeshes[0];
     if (!bodyMesh) return;
     for (const child of [...target.children]) {
       if (child.userData.characterCreatorWearable) {
@@ -287,7 +288,7 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
       wearable.name = `LoftLife_${file.replace('.glb', '')}`;
       wearable.traverse((o) => {
         const mesh = o as THREE.SkinnedMesh;
-        if (mesh.isSkinnedMesh) rebindToBody(mesh, bodyMesh!.skeleton);
+        if (mesh.isSkinnedMesh) rebindToBody(mesh, bodyMesh.skeleton);
       });
       tintTree(wearable, next);
       target.add(wearable);
