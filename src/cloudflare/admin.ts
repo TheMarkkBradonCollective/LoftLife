@@ -68,6 +68,29 @@ export async function handleAdminRoute(request: Request, sql: Sql, user: User | 
     return fail('LoftLife staff access required.', 403, 'forbidden');
   }
 
+  if (url.pathname === '/api/admin/console/accounts' && request.method === 'POST') {
+    if (actor.role !== 'founder') return fail('Only Founders can create accounts.',403,'forbidden');
+    const body = safeDetail(await request.json().catch(() => ({})));
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+    const rawHandle = typeof body.handle === 'string' ? body.handle.trim().toLowerCase() : '';
+    const displayName = typeof body.displayName === 'string' ? body.displayName.trim().slice(0,32) : rawHandle;
+    const role = body.role === 'player' ? 'player' : body.role as StaffRole;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^[a-z0-9_]{3,20}$/.test(rawHandle) || !displayName || (role !== 'player' && !ROLES.includes(role))) return fail('Provide a valid email, 3–20 character handle, display name and role.',400,'invalid_input');
+    const existing = await sql.query('SELECT id FROM ll_accounts WHERE lower(email)=$1 OR lower(handle)=$2 LIMIT 1',[email,rawHandle]) as Array<{id:string}>;
+    if (existing.length) return fail('That email or handle is already registered.',409,'conflict');
+    const { hashPassword } = await import('../../shared/auth-core.mjs');
+    const id = 'usr_' + crypto.randomUUID();
+    const now = Date.now();
+    const hash = await hashPassword('1234567890');
+    await sql.query('INSERT INTO ll_accounts(id,handle,email,password_hash,role,created_at,display_name,must_change_password) VALUES($1,$2,$3,$4,$5,$6,$7,TRUE)',[id,rawHandle,email,hash,'player',now,displayName]);
+    if (role !== 'player') {
+      const departments = parseList(body.departments).map((d) => d.toLowerCase()).filter((d) => /^[a-z0-9-]{2,32}$/.test(d));
+      await sql.query("INSERT INTO ll_staff_assignments(user_id,role,departments_json,active,appointed_by,appointed_at,updated_at) VALUES($1,$2,$3,TRUE,$4,$5,$5)",[id,role,JSON.stringify(departments),user.id,now]);
+    }
+    await audit(sql,user.id,id,'account.created',{email,handle:rawHandle,role});
+    return json({ok:true,account:{id,handle:rawHandle,email,role},temporaryPassword:'1234567890'});
+  }
+
   if (url.pathname === '/api/admin/console/access' && request.method === 'GET') {
     return json({ actor: { userId: user.id, handle: user.handle, role: actor.role, departments: actor.departments } });
   }
