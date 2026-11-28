@@ -48,6 +48,16 @@ const assets = [
     sourceUrl: `${OUTPUT}/base_body.glb`,
     bytes: null,
   },
+  {
+    id: 'charactercreator-animated-body',
+    name: 'CharacterCreator Animated Base Character',
+    type: 'character-body-animated',
+    file: 'base_body_anim.glb',
+    license: 'CC0-1.0',
+    source: 'CharacterCreator / MakeHuman system assets',
+    sourceUrl: `${OUTPUT}/base_body_anim.glb`,
+    bytes: null,
+  },
   ...visibleClothing.map((item) => ({
     id: `cc-${item.id}`,
     name: item.label?.en ?? item.id,
@@ -86,7 +96,7 @@ const downloaded = [];
 for (const asset of assets) downloaded.push(await download(asset.file));
 
 // Keep source catalogs and license evidence beside the GLBs for provenance.
-for (const file of ['clothing.json', 'hair.json', 'asset_licenses.json']) {
+for (const file of ['clothing.json', 'hair.json', 'asset_licenses.json', 'base_body.joints.json', 'body_colliders.json']) {
   const response = await fetch(`${OUTPUT}/${file}`);
   if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${file}`);
   await fs.writeFile(path.join(OUT, file), Buffer.from(await response.arrayBuffer()));
@@ -106,8 +116,11 @@ const manifest = {
   compatibility: {
     format: 'glTF 2.0 binary (.glb)',
     characterRig: 'MakeHuman game_engine rig, 53 bones',
+    animatedBody: 'base_body_anim.glb',
+    skeletonSidecar: 'base_body.joints.json',
+    colliderSidecar: 'body_colliders.json',
     morphTargets: 92,
-    note: 'Clothing and hair are skinned to the included base_body.glb rig. LoftLife runtime integration requires a compatible avatar rig adapter.',
+    note: 'Clothing and hair are skinned to the included MakeHuman game_engine rig. LoftLife adapts this rig at runtime in src/game/characterCreatorAvatar.ts.',
   },
   assets: assets.map((asset) => {
     const result = downloaded.find((entry) => entry.file === asset.file);

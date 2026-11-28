@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { CITY_LAYOUT } from './cityLayout';
 import { CITY_VENUES } from './venues';
-import { createAvatarRig, type AvatarRig } from './avatar';
+import { createCharacterCreatorAvatar as createAvatarRig } from './characterCreatorAvatar';
+import type { AvatarRig } from './avatar';
 import { createContactShadowTexture } from './textures';
 import {
   assignCrowdDetail,
