@@ -66,7 +66,7 @@ export interface CloudflareEnv {
   DATABASE_URL?: string;
   LOFTLIFE_SESSION_SECRET?: string;
   /** Comma-separated exact account handles for the two founders (Markk and Alijah). */
-  LOFTLIFE_FOUNDER_HANDLES?: string;
+  LOFTLIFE_FOUNDER_EMAILS?: string;
   GAME_ORIGIN?: string;
   REALTIME?: { idFromName(name: string): unknown; get(id: unknown): { fetch(request: Request): Promise<Response> } };
   ASSETS?: WorkerFetcher;
@@ -1020,7 +1020,7 @@ export default {
         const auth = await currentAccount(request, env);
         const sql = auth?.sql ?? await database(env);
         if (!sql) return fail('DATABASE_URL is not configured.', 503, 'unconfigured');
-        const adminResponse = await handleAdminRoute(request, sql, auth?.account ?? null, env.LOFTLIFE_FOUNDER_HANDLES);
+        const adminResponse = await handleAdminRoute(request, sql, auth?.account ?? null, env.LOFTLIFE_FOUNDER_EMAILS);
         if (adminResponse) return adminResponse;
       }
 
