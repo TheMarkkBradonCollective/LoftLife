@@ -6,7 +6,8 @@ LoftLife imports exported **data assets only** from [kblood/CharacterCreator](ht
 
 The import includes:
 
-- The rigged `base_body.glb` character and its animated counterpart `base_body_anim.glb`.\n- The MakeHuman joint/skeleton sidecar (`base_body.joints.json`) and body collider metadata (`body_colliders.json`).
+- The rigged `base_body.glb` character and its animated counterpart `base_body_anim.glb`.
+- The MakeHuman joint/skeleton sidecar (`base_body.joints.json`) and body collider metadata (`body_colliders.json`).
 - Visible clothing: T-shirt, long-sleeve shirt, hoodie, jacket, trench coat, dress, jeans, shorts, skirt, shoes and boots.
 - Eight hair meshes.
 - The source clothing/hair catalogs and asset-license evidence.
