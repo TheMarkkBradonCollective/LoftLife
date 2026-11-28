@@ -247,7 +247,7 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
 
       let hasStaticMesh = false;
       wearable.traverse((object) => {
-        const mesh = object as THREE.Mesh;
+        const mesh = object as THREE.Mesh & { isSkinnedMesh?: boolean };
         if (mesh.isMesh && !mesh.isSkinnedMesh) hasStaticMesh = true;
       });
       if (hasStaticMesh) {
