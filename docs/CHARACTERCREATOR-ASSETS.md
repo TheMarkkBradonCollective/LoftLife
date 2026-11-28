@@ -27,6 +27,8 @@ npm run assets:charactercreator
 npm run assets:upload -- --dry-run
 ```
 
+A manual GitHub Actions workflow named **Import CharacterCreator wardrobe assets** can run the import and publish the files to R2. It requires repository variable `CATALOG_R2_BUCKET` and secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+
 The import writes to `public/models/charactercreator/`. The existing R2 uploader publishes this directory to:
 
 `catalog/v1/models/charactercreator/`
