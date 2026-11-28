@@ -529,6 +529,7 @@ export const api = {
     request<AuthResult>('/auth/login', { method: 'POST', body, auth: false }),
 
   changePassword: (password: string) => request<{ ok: boolean; token: string; expiresAt: number; mustChangePassword: false }>('/auth/change-password', { method: 'POST', body: { password } }),
+  createAdminAccount: (body: { email: string; handle: string; displayName: string; role: LoftStaffRole | 'player'; departments: string[] }) => request<{ ok: boolean; account: { id: string; handle: string; email: string; role: string }; temporaryPassword: string }>('/admin/console/accounts', { method: 'POST', body }),
 
   logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 
