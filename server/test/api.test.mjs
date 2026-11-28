@@ -870,7 +870,7 @@ test('realtime: boarding a LoftLine bus assigns a server-owned seat', async () =
     routes.json.lines.some((entry) => entry.kind === 'rail' && entry.stops.length >= 4),
     'light rail exposes a multi-stop line'
   );
-  assert.ok(routes.json.taxis.length >= 3, 'autonomous taxis expose valid destinations');
+  assert.deepEqual(routes.json.taxis, [], 'the city does not publish autonomous taxi services');
   assert.ok(routes.json.hubs.some((hub) => hub.id === 'central-station'));
   const line = routes.json.lines.find((entry) => entry.kind === 'bus');
   assert.ok(line.stops.length >= 3, 'the 15th Street line has several stops');
