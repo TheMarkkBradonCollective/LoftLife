@@ -368,7 +368,7 @@ export function buildClothingStore(maxAnisotropy: number): StoreHandles {
   stylistRig.root.position.set(3.9, 0, 0.4);
   stylistRig.root.rotation.y = -0.7;
   stylistRig.root.userData.storeStylist = true;
-  storeGroup.add(stylistRig.root);
+  // No simulated store staff avatars; shopping is handled through the UI.
 
   const blockers = [
     { x: -5.2, z: -6.1, hw: 2.5, hd: 0.5 },
