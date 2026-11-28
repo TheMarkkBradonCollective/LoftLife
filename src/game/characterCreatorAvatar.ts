@@ -71,27 +71,100 @@ function setMorph(mesh: THREE.SkinnedMesh, name: string, value: number) {
   const index = mesh.morphTargetDictionary?.[name];
   if (index !== undefined && mesh.morphTargetInfluences) mesh.morphTargetInfluences[index] = value;
 }
-function bipolar(mesh: THREE.SkinnedMesh, stem: string, value: number) {
-  const v = THREE.MathUtils.clamp(value, -1, 1);
-  setMorph(mesh, `${stem}_decr`, Math.max(0, -v));
-  setMorph(mesh, `${stem}_incr`, Math.max(0, v));
-}
-function applyBodyConfig(root: THREE.Object3D, config: AvatarConfig) {
+
+type JointSidecar = {
+  morphs?: Record<string, Record<string, [number, number, number]>>;
+};
+const restBonePositions = new WeakMap<THREE.Skeleton, Map<string, THREE.Vector3>>();
+
+function bodyMorphWeights(config: AvatarConfig): Record<string, number> {
+  const out: Record<string, number> = {};
+  const pair = (negative: string, positive: string, value: number) => {
+    const v = THREE.MathUtils.clamp(value, -1, 1);
+    out[negative] = Math.max(0, -v);
+    out[positive] = Math.max(0, v);
+  };
   const height = config.height === 'petite' ? -0.45 : config.height === 'tall' ? 0.45 : 0;
   const weight = config.build === 'slim' ? -0.45 : config.build === 'curvy' ? 0.45 : 0;
   const muscle = config.build === 'athletic' ? 0.5 : 0;
   const proportions = config.bodyPreset === 'broad' ? 0.45 : config.bodyPreset === 'soft' ? -0.2 : 0;
+  pair('height_short', 'height_tall', height);
+  pair('weight_min', 'weight_max', weight);
+  pair('muscle_min', 'muscle_max', muscle);
+  pair('proportions_uncommon', 'proportions_ideal', proportions);
+  pair('face_jaw_width_decr', 'face_jaw_width_incr',
+    config.faceShape === 'square' ? 0.5 : config.faceShape === 'heart' ? -0.45 : 0);
+  pair('face_eye_size_decr', 'face_eye_size_incr',
+    config.eyeShape === 'round' ? 0.35 : config.eyeShape === 'hooded' ? -0.2 : 0);
+  pair('face_eye_tilt_decr', 'face_eye_tilt_incr', config.eyeShape === 'upturned' ? 0.45 : 0);
+
+  const axes = [
+    ['weight_min', 'weight_max', 'muscle_min', 'muscle_max'],
+    ['gender_female', 'gender_male', 'weight_min', 'weight_max'],
+    ['gender_female', 'gender_male', 'muscle_min', 'muscle_max'],
+    ['gender_female', 'gender_male', 'age_child', 'age_old'],
+  ];
+  for (const [aNeg, aPos, bNeg, bPos] of axes) {
+    for (const a of [aNeg, aPos]) for (const b of [bNeg, bPos]) {
+      out[`corr_${a}__${b}`] = (out[a] ?? 0) * (out[b] ?? 0);
+    }
+  }
+  return out;
+}
+
+function applyJointOffsets(root: THREE.Object3D, sidecar: JointSidecar | null, weights: Record<string, number>) {
+  if (!sidecar?.morphs) return;
+  let skeleton: THREE.Skeleton | null = null;
+  root.traverse((object) => {
+    const mesh = object as THREE.SkinnedMesh;
+    if (!skeleton && mesh.isSkinnedMesh) skeleton = mesh.skeleton;
+  });
+  if (!skeleton) return;
+
+  let rest = restBonePositions.get(skeleton);
+  if (!rest) {
+    rest = new Map(skeleton.bones.map((bone) => [bone.name, bone.position.clone()]));
+    restBonePositions.set(skeleton, rest);
+  }
+  for (const bone of skeleton.bones) {
+    const base = rest.get(bone.name);
+    if (base) bone.position.copy(base);
+  }
+  root.updateMatrixWorld(true);
+
+  const offsets = new Map<string, THREE.Vector3>();
+  for (const [morph, influence] of Object.entries(weights)) {
+    if (!influence) continue;
+    const boneOffsets = sidecar.morphs[morph];
+    if (!boneOffsets) continue;
+    for (const [boneName, tuple] of Object.entries(boneOffsets)) {
+      const current = offsets.get(boneName) ?? new THREE.Vector3();
+      current.add(new THREE.Vector3(tuple[0], tuple[1], tuple[2]).multiplyScalar(influence));
+      offsets.set(boneName, current);
+    }
+  }
+
+  const rootOrigin = root.localToWorld(new THREE.Vector3(0, 0, 0));
+  for (const bone of skeleton.bones) {
+    const offset = offsets.get(bone.name);
+    const base = rest.get(bone.name);
+    if (!offset || !base || !bone.parent) continue;
+    const worldPoint = root.localToWorld(offset.clone());
+    const parentOrigin = bone.parent.worldToLocal(rootOrigin.clone());
+    const parentPoint = bone.parent.worldToLocal(worldPoint);
+    bone.position.copy(base).add(parentPoint.sub(parentOrigin));
+  }
+  skeleton.update();
+}
+
+function applyBodyConfig(root: THREE.Object3D, config: AvatarConfig, sidecar: JointSidecar | null = null) {
+  const weights = bodyMorphWeights(config);
   root.traverse((object) => {
     const mesh = object as THREE.SkinnedMesh;
     if (!mesh.isSkinnedMesh || !mesh.morphTargetInfluences || !mesh.morphTargetDictionary) return;
-    bipolar(mesh, 'height', height);
-    bipolar(mesh, 'weight', weight);
-    bipolar(mesh, 'muscle', muscle);
-    bipolar(mesh, 'proportions', proportions);
-    bipolar(mesh, 'face_jaw_width', config.faceShape === 'square' ? 0.5 : config.faceShape === 'heart' ? -0.45 : 0);
-    bipolar(mesh, 'face_eye_size', config.eyeShape === 'round' ? 0.35 : config.eyeShape === 'hooded' ? -0.2 : 0);
-    bipolar(mesh, 'face_eye_tilt', config.eyeShape === 'upturned' ? 0.45 : 0);
+    for (const [name, value] of Object.entries(weights)) setMorph(mesh, name, value);
   });
+  applyJointOffsets(root, sidecar, weights);
 }
 
 function clothingFor(config: AvatarConfig): string[] {
@@ -149,6 +222,7 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
   let mixer: THREE.AnimationMixer | null = null;
   let currentAction: THREE.AnimationAction | null = null;
   let clips: THREE.AnimationClip[] = [];
+  let jointSidecar: JointSidecar | null = null;
   let modelRoot: THREE.Group | null = null;
   let currentConfig = config;
   const shadow = fallback.shadowPlane;
@@ -178,7 +252,7 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
     fallback.rebuildAppearance(next);
     if (!modelRoot) return;
     tintTree(modelRoot, next);
-    applyBodyConfig(modelRoot, next);
+    applyBodyConfig(modelRoot, next, jointSidecar);
     void loadWearables(modelRoot, next).catch((error) => console.warn('[LoftLife] CharacterCreator wardrobe load failed:', error));
   };
 
@@ -212,10 +286,19 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
       tintTree(wearable, next);
       target.add(wearable);
     }
-    applyBodyConfig(target, next);
+    applyBodyConfig(target, next, jointSidecar);
   }
 
-  void loadGltf('base_body_anim.glb').then((gltf) => {
+  const sidecarPromise = (async () => {
+    const local = assetUrl('models/charactercreator/base_body.joints.json');
+    for (const url of [local, `${RAW}/base_body.joints.json`]) {
+      try { const response = await fetch(url); if (response.ok) return await response.json() as JointSidecar; } catch { /* try pinned source */ }
+    }
+    return null;
+  })();
+
+  void Promise.all([loadGltf('base_body_anim.glb'), sidecarPromise]).then(([gltf, sidecar]) => {
+    jointSidecar = sidecar;
     if (disposed) return;
     const character = cloneSkeleton(gltf.scene) as THREE.Group;
     makeMaterialsUnique(character);
@@ -235,7 +318,7 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
     clips = gltf.animations ?? [];
     mixer = new THREE.AnimationMixer(character);
     tintTree(character, currentConfig);
-    applyBodyConfig(character, currentConfig);
+    applyBodyConfig(character, currentConfig, jointSidecar);
     playFor('idle', false);
     void loadWearables(character, currentConfig).catch((error) => console.warn('[LoftLife] CharacterCreator wearables unavailable:', error));
   }).catch((error) => {
