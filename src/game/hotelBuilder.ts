@@ -7,6 +7,7 @@ import {
 } from '../../shared/hotel-layout.mjs';
 
 import type { ActiveResident } from './types';
+import type { AvatarRig } from './avatar';
 
 export interface HotelSeat {
   id: string;
