@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { RotateCcw, ZoomIn, ZoomOut } from 'lucide-react';
-import { createAvatarRig, type AvatarRig } from '../game/avatar';
+import { createCharacterCreatorAvatar as createAvatarRig } from '../game/characterCreatorAvatar';
+import type { AvatarRig } from '../game/avatar';
 import type { AvatarConfig } from '../game/types';
 
 const ANGLES = [
