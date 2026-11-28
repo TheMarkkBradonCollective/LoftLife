@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createCharacterCreatorAvatar as createAvatarRig } from '../game/characterCreatorAvatar';
-import type { AvatarRig } from '../game/avatar';
+import { createAvatarRig as createLightweightAvatarRig, type AvatarRig } from '../game/avatar';
 import { sfx } from '../game/audio';
 import {
   DEFAULT_AVATAR,
@@ -759,7 +759,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
     const furnitureRoot = new THREE.Group();
     roomContainer.add(furnitureRoot);
 
-    const residentNpcRig = createAvatarRig(HOTEL_RESIDENTS[0].avatar);
+    const residentNpcRig = createLightweightAvatarRig(HOTEL_RESIDENTS[0].avatar);
     residentNpcRig.root.position.set(RESIDENT_NPC_POS.x, 0, RESIDENT_NPC_POS.z);
     residentNpcRig.root.userData.isResidentNpc = true;
     residentNpcRig.root.visible = false;
@@ -4019,7 +4019,7 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       const signature = JSON.stringify(player.avatar ?? null);
       let entry = h.remoteRigs.get(connId);
       if (!entry) {
-        const rig = createAvatarRig(player.avatar ?? DEFAULT_AVATAR);
+        const rig = createLightweightAvatarRig(player.avatar ?? DEFAULT_AVATAR);
         rig.root.add(createNameTag(player.name || player.handle));
         rig.root.position.set(player.x, player.y, player.z);
         h.scene.add(rig.root);
