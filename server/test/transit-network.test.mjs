@@ -53,34 +53,14 @@ test('route navigation wraps every stop without leaving the city', () => {
   }
 });
 
-test('the ambient fleet moves server-side without any riders', () => {
-  resetTransit();
-  const instanceId = 'test-city';
+test('the ambient fleet contains scheduled transit only and no autonomous cars', () => {
+  const instanceId = `no-taxi-${Date.now()}`;
   const fleet = ensureFleet(instanceId);
-  assert.ok(fleet.size >= 5, 'buses, light rail and taxis are all ambient');
-  const taxis = [...fleet.values()].filter((vehicle) => vehicle.kind === 'taxi');
-  assert.equal(taxis.length, 3);
-  assert.ok(taxis.every((taxi) => taxi.riders.size === 0), 'taxis have no driver NPC');
-
-  const before = new Map(taxis.map((taxi) => [taxi.id, { x: taxi.x, z: taxi.z }]));
-  const start = Date.now();
-  let previous = start;
-  for (let i = 0; i < 600; i++) {
-    const now = start + i * 100;
-    stepTransit(now, previous, () => []);
-    previous = now;
-  }
-  const elapsed = Date.now() - start;
-  const moved = taxis.filter((taxi) => {
-    const origin = before.get(taxi.id);
-    return Math.hypot(taxi.x - origin.x, taxi.z - origin.z) > 1;
-  });
-  assert.equal(moved.length, 3, 'all autonomous taxis cruise the road loop');
-  assert.ok(elapsed < 2_000, `600 fleet ticks took ${elapsed} ms`);
-
-  const views = vehiclesFor(instanceId, start + 60_000);
+  assert.ok(fleet.size >= 2, 'scheduled buses and light rail remain available');
+  assert.ok([...fleet.values()].every((vehicle) => vehicle.kind === 'bus' || vehicle.kind === 'rail'));
+  assert.equal([...fleet.values()].filter((vehicle) => vehicle.kind === 'taxi').length, 0);
+  const views = vehiclesFor(instanceId);
   assert.ok(views.some((vehicle) => vehicle.kind === 'bus'));
   assert.ok(views.some((vehicle) => vehicle.kind === 'rail'));
-  assert.ok(views.some((vehicle) => vehicle.kind === 'taxi'));
-  resetTransit();
+  assert.ok(views.every((vehicle) => vehicle.kind !== 'taxi'));
 });
