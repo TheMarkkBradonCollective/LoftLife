@@ -110,21 +110,49 @@ function hairFor(style: AvatarConfig['hairStyle']): string {
   return map[style] ?? 'hair_short02.glb';
 }
 
-function rebindToBody(mesh: THREE.SkinnedMesh, bodySkeleton: THREE.Skeleton) {
+function sanitizeBoneName(name: string): string {
+  return String(name).replace(/\s/g, '_').replace(/[\[\]\.:/]/g, '');
+}
+
+/**
+ * CharacterCreator garments are exported as independent glTF scenes. Match the
+ * source viewer's binding contract: copy the body mesh transform, remap joint
+ * indices by sanitized bone name, and bind with the body's bind matrix.
+ *
+ * Geometry must be cloned before remapping: GLTFLoader caches the source GLB,
+ * and mutating its shared skinIndex buffer would corrupt every later outfit.
+ */
+function rebindToBody(mesh: THREE.SkinnedMesh, bodyMesh: THREE.SkinnedMesh) {
   const sourceBones = mesh.skeleton?.bones ?? [];
-  const byName = new Map(bodySkeleton.bones.map((bone, index) => [bone.name, index]));
-  const remap = sourceBones.map((bone) => byName.get(bone.name));
+  const bodySkeleton = bodyMesh.skeleton;
+  const byName = new Map<string, number>();
+  bodySkeleton.bones.forEach((bone, index) => {
+    byName.set(bone.name, index);
+    byName.set(sanitizeBoneName(bone.name), index);
+  });
+  const remap = sourceBones.map((bone) =>
+    byName.get(bone.name) ?? byName.get(sanitizeBoneName(bone.name))
+  );
   if (remap.some((index) => index === undefined)) {
-    throw new Error(`CharacterCreator garment ${mesh.name} has a bone that is missing from the body rig`);
+    const missing = sourceBones.filter((_bone, index) => remap[index] === undefined).map((bone) => bone.name);
+    throw new Error(`CharacterCreator garment ${mesh.name} has bones missing from the body rig: ${missing.join(', ')}`);
   }
+
+  mesh.geometry = mesh.geometry.clone();
   const skinIndex = mesh.geometry.getAttribute('skinIndex') as THREE.BufferAttribute;
+  if (!skinIndex) throw new Error(`CharacterCreator garment ${mesh.name} has no skinIndex attribute`);
   for (let i = 0; i < skinIndex.count; i++) {
     for (let c = 0; c < skinIndex.itemSize; c++) {
-      skinIndex.setComponent(i, c, remap[skinIndex.getComponent(i, c)]!);
+      const sourceIndex = skinIndex.getComponent(i, c);
+      skinIndex.setComponent(i, c, remap[sourceIndex]!);
     }
   }
   skinIndex.needsUpdate = true;
-  mesh.bind(bodySkeleton, mesh.bindMatrix);
+
+  mesh.position.copy(bodyMesh.position);
+  mesh.quaternion.copy(bodyMesh.quaternion);
+  mesh.scale.copy(bodyMesh.scale);
+  mesh.bind(bodySkeleton, bodyMesh.bindMatrix);
 }
 
 export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
@@ -136,22 +164,29 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
   let clips: THREE.AnimationClip[] = [];
   let modelRoot: THREE.Group | null = null;
   let currentConfig = config;
+  let wardrobeRevision = 0;
   const shadow = fallback.shadowPlane;
 
-  const playFor = (emote: EmoteType, moving: boolean) => {
+  const playFor = (emote: EmoteType, moving: boolean, speed = 0) => {
     if (!mixer || !clips.length) return;
-    const wanted = moving ? (emote === 'run' ? 'run' : 'walk') : emote;
+    const wanted = moving ? (emote === 'run' || speed >= 2.7 ? 'run' : 'walk') : emote;
     const aliases: Record<string, string[]> = {
       idle: ['idle'], stand: ['idle'], walk: ['walk'], run: ['run'],
-      sit: ['sit'], wave: ['wave'], dance: ['dance'], cheer: ['jump', 'cheer'],
+      sit: ['idle'], wave: ['idle'], dance: ['idle'], cheer: ['jump', 'idle'],
       talk: ['idle'], gesture: ['idle'], jump: ['jump'],
-      enter_vehicle: ['sit'], exit_vehicle: ['idle'],
+      enter_vehicle: ['idle'], exit_vehicle: ['idle'],
     };
     const terms = aliases[wanted] ?? [wanted];
-    const clip = clips.find((item) => terms.some((term) => item.name.toLowerCase().includes(term)))
+    const clip = clips.find((item) => terms.some((term) => item.name.toLowerCase() === term))
+      ?? clips.find((item) => terms.some((term) => item.name.toLowerCase().includes(term)))
       ?? clips.find((item) => item.name.toLowerCase().includes('idle'));
     if (!clip) return;
+
     const action = mixer.clipAction(clip);
+    const referenceSpeed = wanted === 'run' ? 2.91 : wanted === 'walk' ? 1.3 : 1;
+    action.timeScale = moving
+      ? THREE.MathUtils.clamp((speed || referenceSpeed) / referenceSpeed, 0.7, 2.2)
+      : 1;
     if (action === currentAction) return;
     action.reset().fadeIn(0.18).play();
     currentAction?.fadeOut(0.18);
@@ -168,6 +203,7 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
   };
 
   async function loadWearables(target: THREE.Group, next: AvatarConfig) {
+    const revision = ++wardrobeRevision;
     const bodyMeshes: THREE.SkinnedMesh[] = [];
     target.traverse((o) => {
       const mesh = o as THREE.SkinnedMesh;
@@ -175,28 +211,62 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
     });
     const bodyMesh = bodyMeshes[0];
     if (!bodyMesh) return;
-    for (const child of [...target.children]) {
-      if (child.userData.characterCreatorWearable) {
-        target.remove(child);
-      }
-    }
+
     const files = [...clothingFor(next), hairFor(next.hairStyle)];
     const loaded = await Promise.all(files.map(async (id) => {
       const file = id.endsWith('.glb') ? id : `clothing_${id}.glb`;
       return { file, gltf: await loadGltf(file) };
     }));
-    if (disposed || modelRoot !== target) return;
+    if (disposed || modelRoot !== target || revision !== wardrobeRevision) return;
+
+    const previous: THREE.Object3D[] = [];
+    target.traverse((object) => {
+      if (object.userData.characterCreatorWearable) previous.push(object);
+    });
+    for (const object of previous) {
+      object.traverse((part) => {
+        const mesh = part as THREE.Mesh & { isSkinnedMesh?: boolean };
+        if (!mesh.isMesh) return;
+        // Only skinned geometry was cloned for safe bone-index remapping.
+        if (mesh.isSkinnedMesh) mesh.geometry.dispose();
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const material of materials) material.dispose();
+      });
+      object.parent?.remove(object);
+    }
+
     for (const { file, gltf } of loaded) {
       const wearable = cloneSkeleton(gltf.scene) as THREE.Group;
       makeMaterialsUnique(wearable);
-      wearable.userData.characterCreatorWearable = true;
       wearable.name = `LoftLife_${file.replace('.glb', '')}`;
-      wearable.traverse((o) => {
-        const mesh = o as THREE.SkinnedMesh;
-        if (mesh.isSkinnedMesh) rebindToBody(mesh, bodyMesh.skeleton);
+
+      const skinned: THREE.SkinnedMesh[] = [];
+      wearable.traverse((object) => {
+        const mesh = object as THREE.SkinnedMesh;
+        if (mesh.isSkinnedMesh) skinned.push(mesh);
       });
+
+      // Skinned parts are siblings of the body mesh, matching CharacterCreator's
+      // own runtime. Static accessory meshes stay in their original scene group.
+      for (const mesh of skinned) {
+        mesh.removeFromParent();
+        mesh.userData.characterCreatorWearable = true;
+        rebindToBody(mesh, bodyMesh);
+        bodyMesh.parent?.add(mesh);
+      }
+
+      let hasStaticMesh = false;
+      wearable.traverse((object) => {
+        const mesh = object as THREE.Mesh & { isSkinnedMesh?: boolean };
+        if (mesh.isMesh && !mesh.isSkinnedMesh) hasStaticMesh = true;
+      });
+      if (hasStaticMesh) {
+        wearable.userData.characterCreatorWearable = true;
+        target.add(wearable);
+      }
+
       tintTree(wearable, next);
-      target.add(wearable);
+      for (const mesh of skinned) tintTree(mesh, next);
     }
     applyBodyConfig(target, next);
   }
@@ -233,7 +303,7 @@ export function createCharacterCreatorAvatar(config: AvatarConfig): AvatarRig {
     rebuildAppearance,
     updateAnimation(emote, moving, elapsed, delta, jumpOffset, motion) {
       if (mixer) {
-        playFor(emote, moving);
+        playFor(emote, moving, motion?.speed ?? 0);
         mixer.update(Math.max(0, Math.min(0.05, delta)));
       } else {
         fallback.updateAnimation(emote, moving, elapsed, delta, jumpOffset, motion);

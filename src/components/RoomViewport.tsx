@@ -3444,13 +3444,18 @@ export const RoomViewport: React.FC<RoomViewportProps> = ({
       avatarRig.shadowPlane.visible = !av.seatedUid;
 
       const effectiveEmote: EmoteType = isMoving
-        ? 'walk'
+        ? sprinting ? 'run' : 'walk'
         : av.seatedUid
         ? 'sit'
         : propsRef.current.activeEmote;
 
       const animElapsed = isMoving && sprinting ? elapsed * 1.35 : elapsed;
-      avatarRig.updateAnimation(effectiveEmote, isMoving, animElapsed, delta, av.jumpY);
+      const actualMoveSpeed = isMoving
+        ? Math.hypot(av.x - prevAvX, av.z - prevAvZ) / Math.max(delta, 1e-4)
+        : 0;
+      avatarRig.updateAnimation(effectiveEmote, isMoving, animElapsed, delta, av.jumpY, {
+        speed: actualMoveSpeed,
+      });
 
       // Remote players: interpolate toward their last server position.
       for (const entry of handles.remoteRigs.values()) {
