@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { createAvatarRig, type AvatarRig } from '../game/avatar';
+import { createCharacterCreatorAvatar as createAvatarRig } from '../game/characterCreatorAvatar';
+import type { AvatarRig } from '../game/avatar';
 import { sfx } from '../game/audio';
 import {
   DEFAULT_AVATAR,
