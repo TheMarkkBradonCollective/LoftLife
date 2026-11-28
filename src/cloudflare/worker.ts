@@ -81,6 +81,7 @@ interface AccountRow {
   created_at: number;
   display_name: string;
   suspended_until?: number;
+  must_change_password?: boolean;
 }
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
@@ -221,6 +222,7 @@ const SCHEMA_STATEMENTS = [
    )`,
   `ALTER TABLE ll_accounts ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT ''`,
   `ALTER TABLE ll_accounts ADD COLUMN IF NOT EXISTS suspended_until BIGINT NOT NULL DEFAULT 0`,
+  `ALTER TABLE ll_accounts ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE`,
   `CREATE TABLE IF NOT EXISTS ll_sessions (
      jti_hash TEXT PRIMARY KEY,
      account_id TEXT NOT NULL REFERENCES ll_accounts(id) ON DELETE CASCADE,
@@ -530,7 +532,21 @@ async function handleLogin(request: Request, env: CloudflareEnv): Promise<Respon
 
   await provisionGameAccount(sql, account);
   const session = await issueSession(sql, account, secret);
-  return authResponse(account, session);
+  const response = authResponse(account, session);
+  const payload = await response.json() as Record<string, unknown>;
+  return json({ ...payload, mustChangePassword: Boolean(account.must_change_password) }, 200, { 'set-cookie': sessionCookie(session.token, SESSION_TTL_SECONDS) });
+}
+
+async function handleChangePassword(request: Request, env: CloudflareEnv): Promise<Response> {
+  const auth = await currentAccount(request, env);
+  if (!auth) return fail('Sign in to continue.', 401, 'unauthorized');
+  const body = await readJson(request);
+  const password = validatePassword(body.password);
+  if (!password || password === '1234567890') return fail('Choose a new password of at least 10 characters that is not the temporary password.', 400, 'invalid_password');
+  await auth.sql.query('UPDATE ll_accounts SET password_hash=$2,must_change_password=FALSE WHERE id=$1',[auth.account.id,await hashPassword(password)]);
+  await auth.sql.query('DELETE FROM ll_sessions WHERE account_id=$1',[auth.account.id]);
+  const session = await issueSession(auth.sql,{...auth.account,password_hash:await hashPassword(password),must_change_password:false},secretFor(env)!);
+  return json({ok:true,token:session.token,expiresAt:session.expiresAt,mustChangePassword:false},200,{'set-cookie':sessionCookie(session.token,SESSION_TTL_SECONDS)});
 }
 
 async function handleLogout(request: Request, env: CloudflareEnv): Promise<Response> {
@@ -966,7 +982,7 @@ export default {
         return await handleGuestSession(request, env);
       }
 
-      const isAuthRoute = ['/api/auth/register', '/api/auth/login', '/api/auth/logout'].includes(
+      const isAuthRoute = ['/api/auth/register', '/api/auth/login', '/api/auth/logout', '/api/auth/change-password'].includes(
         url.pathname
       );
       if (isAuthRoute) {
@@ -975,6 +991,7 @@ export default {
         if (rateLimited(request)) return fail('Too many attempts. Try again shortly.', 429, 'rate_limited');
         if (url.pathname === '/api/auth/register') return await handleRegister(request, env);
         if (url.pathname === '/api/auth/login') return await handleLogin(request, env);
+        if (url.pathname === '/api/auth/change-password') return await handleChangePassword(request, env);
         return await handleLogout(request, env);
       }
 
