@@ -806,7 +806,8 @@ export function buildAirportTerminal(maxAnisotropy: number): AirportHandles {
     facingYaw: SEAT_FACING[anchor.facing] ?? 0,
   }));
 
-  const npcs = buildAirportNpcs(airportGroup);
+  // Airport services are presented through the UI; no simulated staff NPCs.
+  const npcs: AirportNpc[] = [];
 
   // ── Animated luggage on carousel 1 ───────────────────────────────────────
   const bagColors = [0x9e5440, 0x2f5d3f, 0x39465c, 0xc7b08e, 0x785874, 0x3f6b7a];
