@@ -39,7 +39,7 @@ function audioPlayer(guildId) {
     player.on(AudioPlayerStatus.Idle, () => {
       const q = queues.get(guildId) || [];
       const next = q.shift();
-      if (next) player.play(createAudioResource(next.url));
+      if (next) fetch(next.url).then(r => { if (r.ok && r.body) player.play(createAudioResource(Readable.fromWeb(r.body), { inputType: StreamType.Arbitrary })); }).catch(e => console.error('Queued audio error:', e.message));
       else queues.set(guildId, []);
     });
     player.on('error', error => console.error('Audio player error:', error.message));
@@ -69,7 +69,10 @@ client.on('voiceStateUpdate', async (before, after) => {
         name: (after.member.displayName + "'s room").slice(0, 95),
         type: ChannelType.GuildVoice,
         parent: category.id,
-        permissionOverwrites: [\n          { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.Connect] },\n          { id: after.member.id, allow: [PermissionsBitField.Flags.ManageChannels, PermissionsBitField.Flags.MoveMembers, PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.Speak] }\n        ],
+        permissionOverwrites: [
+          { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.Connect] },
+          { id: after.member.id, allow: [PermissionsBitField.Flags.ManageChannels, PermissionsBitField.Flags.MoveMembers, PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.Speak] }
+        ],
         reason: 'LoftLife Join-to-Create'
       });
       roomsByOwner.set(room.id, after.member.id);
@@ -124,7 +127,11 @@ app.post('/control/music/:action', async (req, res) => {
         queues.set(guildId, queue);
         return res.json({ ok: true, queued: queue.length });
       }
-      const audioResponse = await fetch(body.url);\n      if (!audioResponse.ok || !audioResponse.body) return res.status(502).json({ error: 'Audio stream could not be opened' });\n      const audioType = audioResponse.headers.get('content-type') || '';\n      if (!audioType.startsWith('audio/') && !audioType.includes('ogg')) return res.status(415).json({ error: 'URL must return a direct audio stream' });\n      player.play(createAudioResource(Readable.fromWeb(audioResponse.body), { inputType: StreamType.Arbitrary }));
+      const audioResponse = await fetch(body.url);
+      if (!audioResponse.ok || !audioResponse.body) return res.status(502).json({ error: 'Audio stream could not be opened' });
+      const audioType = audioResponse.headers.get('content-type') || '';
+      if (!audioType.startsWith('audio/') && !audioType.includes('ogg')) return res.status(415).json({ error: 'URL must return a direct audio stream' });
+      player.play(createAudioResource(Readable.fromWeb(audioResponse.body), { inputType: StreamType.Arbitrary }));
       connection.subscribe(player);
       return res.json({ ok: true, playing: true });
     }
